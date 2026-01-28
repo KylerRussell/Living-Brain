@@ -108,8 +108,12 @@ def main():
     data_path = 'ndcd/data/input.txt'
     
     if not os.path.exists(data_path):
-        print("Data not found!")
-        return
+        print("Data not found locally. Downloading...")
+        os.makedirs(os.path.dirname(data_path), exist_ok=True)
+        import urllib.request
+        url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
+        urllib.request.urlretrieve(url, data_path)
+        print("Data downloaded.")
         
     total_data_size = os.path.getsize(data_path)
     
