@@ -10,7 +10,7 @@ from ndcd.sensory import ByteSensoryInterface
 
 @ray.remote(num_cpus=1)
 class DragonWorker:
-    def __init__(self, num_nodes, seed, data_offset, data_len, data_path):
+    def __init__(self, num_nodes, seed, data_offset, data_len_chunk, full_data_bytes):
         """
         Worker actor that holds a copy of the Dragon and processes a shard of data.
         """
@@ -27,10 +27,8 @@ class DragonWorker:
         self.engine = DragonEngineTorch(self.graph, dt=0.01, device=self.device)
         self.io = ByteSensoryInterface(device=self.device)
         
-        # Load Dataset and seek to offset
-        with open(data_path, 'rb') as f:
-            f.seek(data_offset)
-            self.data_bytes = f.read(data_len)
+        # Slice the data from the shared memory object (or copy passed)
+        self.data_bytes = full_data_bytes[data_offset : data_offset + data_len_chunk]
             
         self.data_len = len(self.data_bytes)
         self.current_idx = 0
@@ -103,7 +101,7 @@ def main():
     # Init Ray - will connect to local cluster or start one
     ray.init(ignore_reinit_error=True)
     
-    num_nodes = 1000 # Smaller for distribution test speed
+    num_nodes = 2000 # Smaller for distribution test speed
     seed = 42
     data_path = 'ndcd/data/input.txt'
     
@@ -116,9 +114,16 @@ def main():
         print("Data downloaded.")
         
     total_data_size = os.path.getsize(data_path)
+
+    # Read all data into memory on driver
+    with open(data_path, 'rb') as f:
+        all_data_bytes = f.read()
+
+    # Put data into Plasma Object Store
+    data_ref = ray.put(all_data_bytes)
     
     # Create Workers
-    num_workers = 2 # Simulation of using 2 nodes/CPUs
+    num_workers = 48 # Safe margin below 54 threads (allowing for Head + System overhead)
     print(f"Spawning {num_workers} Workers...")
     
     workers = []
@@ -126,7 +131,8 @@ def main():
     
     for i in range(num_workers):
         offset = i * chunk_size
-        worker = DragonWorker.remote(num_nodes, seed, offset, chunk_size, data_path)
+        # Pass the object reference `data_ref`. Ray resolves this to the actual bytes in the worker.
+        worker = DragonWorker.remote(num_nodes, seed, offset, chunk_size, data_ref)
         workers.append(worker)
     
     # Master Weights source (initialized locally first)
@@ -144,7 +150,7 @@ def main():
     ray.get([w.set_weights.remote(w_ref, b_ref) for w in workers])
     
     # Training Loop
-    iterations = 5 
+    iterations = 10 
     print(f"Starting {iterations} sync iterations...")
     
     start_time = time.time()
@@ -152,7 +158,7 @@ def main():
     for i in range(iterations):
         # 1. Trigger training on all workers
         # They run for N steps (e.g., 50 bytes)
-        futures = [w.train_step.remote(steps=50) for w in workers]
+        futures = [w.train_step.remote(steps=500) for w in workers]
         
         # 2. Collect results (Barrier)
         results = ray.get(futures)
@@ -176,7 +182,61 @@ def main():
         print(f"Iter {i} Complete. Total Loss (Batch): {total_loss}")
         
     print(f"Distributed Training Done. Time: {time.time() - start_time:.2f}s")
+
+    # --- Generation Phase ---
+    print("\n=== Generating Text from Global Weights ===")
+    
+    # Instantiate local engine on driver
+    # Note: In a real large-scale setting, we'd use a dedicated inference actor or service.
+    local_graph = DynamicGraph(num_nodes=num_nodes, m_edges=5, p_triad=0.1, seed=seed)
+    local_engine = DragonEngineTorch(local_graph, dt=0.01, device='cpu')
+    local_engine.weights = torch.tensor(global_weights, dtype=torch.float32)
+    local_engine.biases = torch.tensor(global_biases, dtype=torch.float32)
+    local_io = ByteSensoryInterface(device='cpu')
+
+    generated_text = generate_text(local_engine, local_io, length=200, start_text="The")
+    print(f"\nGenerated Output:\n{generated_text}\n")
+    print("===========================================")
+
     ray.shutdown()
+
+def generate_text(engine, io_interface, length=100, start_text="A"):
+    """
+    Generates text using the trained engine "free dreaming".
+    """
+    current_text = start_text
+    # Seed the state with start_text
+    # For simplicity, we just run the last char to set state, 
+    # but ideally we'd sequence them all.
+    
+    last_char = start_text[-1]
+    input_vec = io_interface.encode(ord(last_char), engine.num_nodes)
+    
+    # Prime the engine
+    engine.settle(input_vec, duration_steps=20)
+    
+    print(f"Prompt: '{start_text}'")
+    
+    for _ in range(length):
+        # 1. Predict next state (Free phase only)
+        # Input is the PREVIOUS output (Autoregressive)
+        # We re-encode the last char effectively
+        
+        # Settle to find next attractor
+        engine.settle(input_vec, duration_steps=20)
+        state = engine.state.clone()
+        
+        # 2. Decode
+        next_byte_val = io_interface.decode(state)
+        next_char = chr(next_byte_val) if 0 <= next_byte_val < 128 else '?'
+        
+        current_text += next_char
+        
+        # 3. Feedback loop
+        # The new input is what we just hallucinated
+        input_vec = io_interface.encode(next_byte_val, engine.num_nodes)
+        
+    return current_text
 
 if __name__ == "__main__":
     main()
