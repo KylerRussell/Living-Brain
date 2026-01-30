@@ -25,7 +25,8 @@ class DragonWorker:
             self.device = 'cuda'
 
         self.engine = DragonEngineTorch(self.graph, dt=0.01, device=self.device)
-        self.io = ByteSensoryInterface(device=self.device)
+        self.engine = DragonEngineTorch(self.graph, dt=0.01, device=self.device)
+        self.io = ByteSensoryInterface(input_offset=0, output_offset=256, device=self.device)
         
         # Slice the data from the shared memory object (or copy passed)
         self.data_bytes = full_data_bytes[data_offset : data_offset + data_len_chunk]
@@ -87,7 +88,7 @@ class DragonWorker:
             state_nudged = self.engine.state.clone()
             
             # Update
-            self.engine.update_weights_eq_prop(state_free, state_nudged, beta=0.5, learning_rate=0.01)
+            self.engine.update_weights_eq_prop(state_free, state_nudged, beta=0.1, learning_rate=0.005)
 
         # Compute Delta
         delta_w = (self.engine.weights - start_weights).cpu().numpy()
@@ -150,7 +151,7 @@ def main():
     ray.get([w.set_weights.remote(w_ref, b_ref) for w in workers])
     
     # Training Loop
-    iterations = 10 
+    iterations = 50 
     print(f"Starting {iterations} sync iterations...")
     
     start_time = time.time()
@@ -158,7 +159,7 @@ def main():
     for i in range(iterations):
         # 1. Trigger training on all workers
         # They run for N steps (e.g., 50 bytes)
-        futures = [w.train_step.remote(steps=500) for w in workers]
+        futures = [w.train_step.remote(steps=100) for w in workers]
         
         # 2. Collect results (Barrier)
         results = ray.get(futures)
@@ -192,9 +193,10 @@ def main():
     local_engine = DragonEngineTorch(local_graph, dt=0.01, device='cpu')
     local_engine.weights = torch.tensor(global_weights, dtype=torch.float32)
     local_engine.biases = torch.tensor(global_biases, dtype=torch.float32)
-    local_io = ByteSensoryInterface(device='cpu')
+    local_engine.biases = torch.tensor(global_biases, dtype=torch.float32)
+    local_io = ByteSensoryInterface(input_offset=0, output_offset=256, device='cpu')
 
-    generated_text = generate_text(local_engine, local_io, length=200, start_text="The")
+    generated_text = generate_text(local_engine, local_io, length=200, start_text="ROMEO:")
     print(f"\nGenerated Output:\n{generated_text}\n")
     print("===========================================")
 
