@@ -15,7 +15,7 @@ class DragonWorker:
         Worker actor that holds a copy of the Dragon and processes a shard of data.
         """
         # Re-initialize graph with same seed to ensure identical topology
-        self.graph = DynamicGraph(num_nodes=num_nodes, m_edges=5, p_triad=0.1, seed=seed)
+        self.graph = DynamicGraph(num_nodes=num_nodes, m_edges=10, p_triad=0.1, seed=seed)
         
         # Determine device - in a real cluster, we might check for CUDA
         self.device = 'cpu' # Default to CPU for distribution test unless GPUs explicitly requested
@@ -25,7 +25,9 @@ class DragonWorker:
             self.device = 'cuda'
 
         self.engine = DragonEngineTorch(self.graph, dt=0.01, device=self.device)
-        self.engine = DragonEngineTorch(self.graph, dt=0.01, device=self.device)
+        # Optimization: Delete graph to free memory (approx 100MB for 5k nodes)
+        del self.graph
+        
         self.io = ByteSensoryInterface(input_offset=0, output_offset=256, device=self.device)
         
         # Slice the data from the shared memory object (or copy passed)
@@ -102,7 +104,23 @@ def main():
     # Init Ray - will connect to local cluster or start one
     ray.init(ignore_reinit_error=True)
     
-    num_nodes = 2000 # Smaller for distribution test speed
+    # Configuration
+    num_nodes = 5000 
+    m_edges = 10
+    p_triad = 0.1
+    iterations = 500
+    steps_per_iter = 200
+    num_workers = 48
+    
+    print("=== Configuration ===")
+    print(f"Nodes: {num_nodes}")
+    print(f"Edges/Node (m): {m_edges}")
+    print(f"Triad Prob: {p_triad}")
+    print(f"Workers: {num_workers}")
+    print(f"Iterations: {iterations}")
+    print(f"Steps/Iter: {steps_per_iter}")
+    print("=====================")
+
     seed = 42
     data_path = 'ndcd/data/input.txt'
     
@@ -124,7 +142,6 @@ def main():
     data_ref = ray.put(all_data_bytes)
     
     # Create Workers
-    num_workers = 48 # Safe margin below 54 threads (allowing for Head + System overhead)
     print(f"Spawning {num_workers} Workers...")
     
     workers = []
@@ -138,7 +155,9 @@ def main():
     
     # Master Weights source (initialized locally first)
     # We create a dummy graph just to get initial weights
-    tmp_graph = DynamicGraph(num_nodes=num_nodes, m_edges=5, p_triad=0.1, seed=seed)
+    # Master Weights source (initialized locally first)
+    # We create a dummy graph just to get initial weights
+    tmp_graph = DynamicGraph(num_nodes=num_nodes, m_edges=m_edges, p_triad=p_triad, seed=seed)
     global_weights = tmp_graph.weights
     global_biases = tmp_graph.biases
     
@@ -151,15 +170,16 @@ def main():
     ray.get([w.set_weights.remote(w_ref, b_ref) for w in workers])
     
     # Training Loop
-    iterations = 50 
     print(f"Starting {iterations} sync iterations...")
+    
+    start_time = time.time()
     
     start_time = time.time()
     
     for i in range(iterations):
         # 1. Trigger training on all workers
         # They run for N steps (e.g., 50 bytes)
-        futures = [w.train_step.remote(steps=100) for w in workers]
+        futures = [w.train_step.remote(steps=steps_per_iter) for w in workers]
         
         # 2. Collect results (Barrier)
         results = ray.get(futures)
@@ -189,7 +209,9 @@ def main():
     
     # Instantiate local engine on driver
     # Note: In a real large-scale setting, we'd use a dedicated inference actor or service.
-    local_graph = DynamicGraph(num_nodes=num_nodes, m_edges=5, p_triad=0.1, seed=seed)
+    # Instantiate local engine on driver
+    # Note: In a real large-scale setting, we'd use a dedicated inference actor or service.
+    local_graph = DynamicGraph(num_nodes=num_nodes, m_edges=m_edges, p_triad=p_triad, seed=seed)
     local_engine = DragonEngineTorch(local_graph, dt=0.01, device='cpu')
     local_engine.weights = torch.tensor(global_weights, dtype=torch.float32)
     local_engine.biases = torch.tensor(global_biases, dtype=torch.float32)

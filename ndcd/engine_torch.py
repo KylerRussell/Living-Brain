@@ -24,7 +24,7 @@ class DragonEngineTorch:
         self.state = torch.tensor(graph.states, dtype=torch.float32, device=device)
         
         # Eligibility Traces (for RL)
-        self.traces = torch.zeros((self.num_nodes, self.num_nodes), dtype=torch.float32, device=device)
+        # self.traces = torch.zeros((self.num_nodes, self.num_nodes), dtype=torch.float32, device=device)
         
     def activation_function(self, s):
         return torch.tanh(s)
