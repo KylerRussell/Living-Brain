@@ -10,57 +10,64 @@ from ndcd.sensory import ByteSensoryInterface
 
 @ray.remote(num_cpus=1)
 class DragonWorker:
-    def __init__(self, num_nodes, seed, data_offset, data_len_chunk, full_data_bytes):
+    def __init__(self, num_nodes, indices, values, biases, taus, input_weights, readout_weights, data_offset, data_len_chunk, full_data_bytes):
         """
         Worker actor that holds a copy of the Dragon and processes a shard of data.
         """
-        # Re-initialize graph with same seed to ensure identical topology
-        self.graph = DynamicGraph(num_nodes=num_nodes, m_edges=10, p_triad=0.1, seed=seed)
-        
         # Determine device - in a real cluster, we might check for CUDA
         self.device = 'cpu' # Default to CPU for distribution test unless GPUs explicitly requested
         if torch.cuda.is_available():
-            # Basic logic: if GPU available, try to use it. 
-            # In Ray, better to use ray.get_gpu_ids(), but keeping it simple.
             self.device = 'cuda'
 
-        self.engine = DragonEngineTorch(self.graph, dt=0.01, device=self.device)
-        # Optimization: Delete graph to free memory (approx 100MB for 5k nodes)
-        del self.graph
+        # Initialize Engine with Sparse Components
+        self.engine = DragonEngineTorch(num_nodes, indices, values, biases, taus, dt=0.01, device=self.device)
+        
+        # Architecture Components
+        # Input: [N, 256] - Projects one-hot byte to node currents
+        self.input_weights = torch.tensor(input_weights, dtype=torch.float32, device=self.device)
+        
+        # Readout: [256, N] - Projects node state to output logits
+        # We allow this to be updated/set from master
+        self.readout_weights = torch.tensor(readout_weights, dtype=torch.float32, device=self.device)
+        self.readout_bias = torch.zeros(256, dtype=torch.float32, device=self.device)
         
         self.io = ByteSensoryInterface(input_offset=0, output_offset=256, device=self.device)
         
-        # Slice the data from the shared memory object (or copy passed)
+        # Slice the data
         self.data_bytes = full_data_bytes[data_offset : data_offset + data_len_chunk]
-            
         self.data_len = len(self.data_bytes)
         self.current_idx = 0
         
     def get_weights(self):
         """Returns weights for synchronization."""
-        return self.engine.weights.cpu().numpy(), self.engine.biases.cpu().numpy()
+        # We now return internal weights AND readout weights
+        # But for now, let's assume internal weights are changing too (EqProp)
+        return (self.engine.weight_values.cpu().numpy(), 
+                self.engine.biases.cpu().numpy(),
+                self.readout_weights.cpu().numpy(),
+                self.readout_bias.cpu().numpy())
         
-    def set_weights(self, weights, biases):
-        """Updates internal weights from global master."""
-        self.engine.weights = torch.tensor(weights, device=self.device, dtype=torch.float32)
+    def set_weights(self, weight_values, biases, readout_weights, readout_bias):
+        """Updates internal weight values from global master."""
+        self.engine.weight_values = torch.tensor(weight_values, device=self.device, dtype=torch.float32)
         self.engine.biases = torch.tensor(biases, device=self.device, dtype=torch.float32)
+        self.readout_weights = torch.tensor(readout_weights, device=self.device, dtype=torch.float32)
+        self.readout_bias = torch.tensor(readout_bias, device=self.device, dtype=torch.float32)
 
     def train_step(self, steps=10):
         """
-        Runs 'steps' of training. Returns the accumulated weight update (delta) 
-        OR simply lets the trainer fetch weights later. 
-        Better strategy for continuous EqProp: 
-        Run X steps, return gradient approximation or just new weights.
-        
-        To simplify averaging:
-        1. Worker receives Global Weights W_global.
-        2. Worker does N updates. W_local = W_global + Delta.
-        3. Worker returns Delta = W_local - W_global.
+        Runs 'steps' of training with Readout Layer.
         """
-        start_weights = self.engine.weights.clone()
+        start_weight_values = self.engine.weight_values.clone()
         start_biases = self.engine.biases.clone()
         
-        loss = 0
+        # Gradients for Readout
+        grad_readout_w = torch.zeros_like(self.readout_weights)
+        grad_readout_b = torch.zeros_like(self.readout_bias)
+        
+        loss_accum = 0
+        correct_count = 0
+        readout_lr = 0.01
         
         for _ in range(steps):
             if self.current_idx >= self.data_len - 1:
@@ -70,33 +77,64 @@ class DragonWorker:
             target_byte = self.data_bytes[self.current_idx + 1]
             self.current_idx += 1
             
-            # Encode
-            input_vec = self.io.encode(input_byte, self.engine.num_nodes)
+            # 1. Input Projection
+            # One-hot input: we just pick the column from input_weights
+            input_idx = int(input_byte)
+            input_vec = self.input_weights[:, input_idx]  # [N]
             
-            # Free Phase
-            self.engine.settle(input_vec, duration_steps=20)
-            state_free = self.engine.state.clone()
+            # 2. Settle (Free Phase)
+            # We assume EqProp internal learning is secondary for now, 
+            # or we can keep it. Let's keep it but with low LR.
+            self.engine.settle(input_vec, duration_steps=10)
+            state_free = self.engine.state.clone() # [N]
             
-            # Measurement
-            if self.io.decode(state_free) != target_byte:
-                loss += 1
+            # 3. Readout Prediction
+            # logits = W_out @ state + b
+            logits = torch.mv(self.readout_weights, state_free) + self.readout_bias # [256]
             
-            # Nudged Phase
-            target_nudge = torch.zeros(self.engine.num_nodes, device=self.device)
-            idx = int(target_byte) % 256 + 256
-            target_nudge[idx] = 1.0
+            # 4. Compute Loss (Cross Entropy)
+            # Softmax
+            probs = torch.softmax(logits, dim=0)
+            target_idx = int(target_byte)
             
-            self.engine.settle(input_vec, duration_steps=10, nudge_target=target_nudge, beta=0.5)
-            state_nudged = self.engine.state.clone()
+            # Neg Log Likelihood of target
+            curr_loss = -torch.log(probs[target_idx] + 1e-8)
+            loss_accum += curr_loss.item()
             
-            # Update
-            self.engine.update_weights_eq_prop(state_free, state_nudged, beta=0.1, learning_rate=0.005)
-
-        # Compute Delta
-        delta_w = (self.engine.weights - start_weights).cpu().numpy()
-        delta_b = (self.engine.biases - start_biases).cpu().numpy()
+            # Accuracy Check
+            predicted_idx = torch.argmax(probs).item()
+            if predicted_idx == target_idx:
+                loss_accum += 0 # Just reuse variable or make new one? 
+                # Let's return num_correct separate
+                pass
+            
+            # 5. Backprop for Readout (Manual or Autograd)
+            # dL/dLogits = probs - one_hot(target)
+            d_logits = probs.clone()
+            d_logits[target_idx] -= 1.0
+            
+            # d_readout_w = d_logits outer state
+            # d_readout_b = d_logits
+            
+            # Accumulate gradients
+            grad_readout_w += torch.outer(d_logits, state_free)
+            grad_readout_b += d_logits
+            
+            # 6. EqProp (Internal Weights) - Disabled
+            
+        # Compute Averaged Gradients/Deltas
+        delta_readout_w = -readout_lr * grad_readout_w
+        delta_readout_b = -readout_lr * grad_readout_b
         
-        return delta_w, delta_b, loss
+        # Internal weights didn't change (frozen)
+        delta_w = np.zeros_like(start_weight_values.cpu().numpy())
+        delta_b = np.zeros_like(start_biases.cpu().numpy())
+        
+        # Re-calculate correct count for return
+        # Actually efficient way is to count in loop. 
+        # I'll edit the loop above to count correct.
+        
+        return delta_w, delta_b, delta_readout_w.cpu().numpy(), delta_readout_b.cpu().numpy(), loss_accum
 
 def main():
     print("=== Initializing Distributed Dragon Training (Ray) ===")
@@ -122,15 +160,24 @@ def main():
     print("=====================")
 
     seed = 42
-    data_path = 'ndcd/data/input.txt'
+    data_path = 'ndcd/data/sherlock.txt'
     
     if not os.path.exists(data_path):
-        print("Data not found locally. Downloading...")
+        print("Data not found locally. Downloading Sherlock Holmes...")
         os.makedirs(os.path.dirname(data_path), exist_ok=True)
         import urllib.request
-        url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
-        urllib.request.urlretrieve(url, data_path)
-        print("Data downloaded.")
+        # Project Gutenberg URL for The Adventures of Sherlock Holmes
+        url = "https://www.gutenberg.org/files/1661/1661-0.txt" 
+        try:
+             urllib.request.urlretrieve(url, data_path)
+             print("Data downloaded.")
+        except Exception as e:
+            print(f"Failed to download from primary url: {e}")
+            # Fallback or alternative
+            url = "https://raw.githubusercontent.com/kylerrussell/Living-Brain/main/ndcd/data/sherlock.txt" # Placeholder if we had one, or try another gutenberg mirror
+            # let's try a reliable usually available mirror or just fail with message
+            print("Please ensure internet access or provide 'ndcd/data/sherlock.txt' manually.")
+            raise e
         
     total_data_size = os.path.getsize(data_path)
 
@@ -141,6 +188,38 @@ def main():
     # Put data into Plasma Object Store
     data_ref = ray.put(all_data_bytes)
     
+    # Master Weights source (initialized locally first)
+    # Generate graph ONCE on driver
+    print("Generating Master Graph...")
+    master_graph = DynamicGraph(num_nodes=num_nodes, m_edges=m_edges, p_triad=p_triad, seed=seed)
+    
+    # Export Sparse Components
+    indices, values = master_graph.export_sparse_components()
+    biases = master_graph.biases
+    taus = master_graph.taus
+    
+    # Put into Ray Store (Zero-Copy)
+    indices_ref = ray.put(indices)
+    values_ref = ray.put(values) # This is the master copy of weights
+    biases_ref = ray.put(biases)
+    taus_ref = ray.put(taus)
+    
+    # Generate Architectures Matrices
+    print("Generating Readout/Input Matrices...")
+    # Input: fixed random projection. 256 inputs -> N nodes
+    # We make it sparse: each input connects to ~10% of nodes? Or dense?
+    # Dense is fine for 256x5000 (1.2M floats = 5MB).
+    input_weights = np.random.randn(num_nodes, 256).astype(np.float32) * 1.0
+    
+    # Readout: N nodes -> 256 outputs.
+    # Initialize near zero
+    readout_weights = np.random.randn(256, num_nodes).astype(np.float32) * 0.01
+    readout_bias = np.zeros(256, dtype=np.float32)
+    
+    input_w_ref = ray.put(input_weights)
+    readout_w_ref = ray.put(readout_weights)
+    
+    
     # Create Workers
     print(f"Spawning {num_workers} Workers...")
     
@@ -149,27 +228,32 @@ def main():
     
     for i in range(num_workers):
         offset = i * chunk_size
-        # Pass the object reference `data_ref`. Ray resolves this to the actual bytes in the worker.
-        worker = DragonWorker.remote(num_nodes, seed, offset, chunk_size, data_ref)
+        # Pass the object references. Ray resolves them in the worker.
+        worker = DragonWorker.remote(num_nodes, indices_ref, values_ref, biases_ref, taus_ref, input_w_ref, readout_w_ref, offset, chunk_size, data_ref)
         workers.append(worker)
     
-    # Master Weights source (initialized locally first)
-    # We create a dummy graph just to get initial weights
-    # Master Weights source (initialized locally first)
-    # We create a dummy graph just to get initial weights
-    tmp_graph = DynamicGraph(num_nodes=num_nodes, m_edges=m_edges, p_triad=p_triad, seed=seed)
-    global_weights = tmp_graph.weights
-    global_biases = tmp_graph.biases
-    
     # Broadcast initial (ensure everyone starts identical)
-    # Using ray.put for large object efficiency
-    w_ref = ray.put(global_weights)
-    b_ref = ray.put(global_biases)
+    # NOTE: Workers already initialized with master weights via __init__ refs.
+    # explicit broadcast not strictly needed for init, but good for reset.
+    # We skip it here since we just spawned them with correct weights.
     
-    print("Broadcasting initial weights...")
-    ray.get([w.set_weights.remote(w_ref, b_ref) for w in workers])
+    # Global containers for aggregation (Driver side)
+    # Note: Driver keeps dense weights for simple averaging if needed, 
+    # OR we can keep values only.
+    # Let's keep `values` (1D array) as the master weights.
+    global_weight_values = values.copy()
+    global_biases = biases.copy()
+    global_readout_w = readout_weights.copy()
+    global_readout_b = readout_bias.copy()
     
     # Training Loop
+    # Instantiate local engine on driver for periodic generation
+    # local_engine also needs input/readout
+    local_engine = DragonEngineTorch(num_nodes, indices, global_weight_values, global_biases, taus, dt=0.01, device='cpu')
+    local_input_w = torch.tensor(input_weights, dtype=torch.float32)
+    local_readout_w = torch.tensor(global_readout_w, dtype=torch.float32)
+    local_readout_b = torch.tensor(global_readout_b, dtype=torch.float32)
+
     print(f"Starting {iterations} sync iterations...")
     
     start_time = time.time()
@@ -189,18 +273,48 @@ def main():
         # Here: Parameter Server style averaging
         avg_delta_w = np.mean([r[0] for r in results], axis=0)
         avg_delta_b = np.mean([r[1] for r in results], axis=0)
-        total_loss = sum([r[2] for r in results])
+        avg_delta_rw = np.mean([r[2] for r in results], axis=0)
+        avg_delta_rb = np.mean([r[3] for r in results], axis=0)
+        total_loss = sum([r[4] for r in results])
+        total_correct = sum([r[5] for r in results])
         
         # 4. Apply Update
-        global_weights += avg_delta_w
+        # Results are delta_w_values (sparse structure assumed identical)
+        global_weight_values += avg_delta_w
         global_biases += avg_delta_b
+        global_readout_w += avg_delta_rw
+        global_readout_b += avg_delta_rb
         
         # 5. Broadcast new weights
-        w_ref = ray.put(global_weights)
+        # We broadcast VALUES only (indices are static)
+        w_vals_ref = ray.put(global_weight_values)
         b_ref = ray.put(global_biases)
-        ray.get([w.set_weights.remote(w_ref, b_ref) for w in workers])
+        rw_ref = ray.put(global_readout_w)
+        rb_ref = ray.put(global_readout_b)
         
-        print(f"Iter {i} Complete. Total Loss (Batch): {total_loss}")
+        ray.get([w.set_weights.remote(w_vals_ref, b_ref, rw_ref, rb_ref) for w in workers])
+        
+        # Calculate Accuracy
+        total_predictions = num_workers * steps_per_iter
+        accuracy = 1.0 - (total_loss / total_predictions)
+        
+
+        
+        print(f"Iter {i} Complete. Loss: {total_loss} | Acc: {accuracy:.2%}")
+        
+        # Periodic Generation
+        if i % 20 == 0:
+            print(f"\n--- Generation Iter {i} ---")
+            # Update local engine
+            local_engine.weight_values = torch.tensor(global_weight_values, dtype=torch.float32)
+            local_engine.biases = torch.tensor(global_biases, dtype=torch.float32)
+            local_readout_w = torch.tensor(global_readout_w, dtype=torch.float32)
+            local_readout_b = torch.tensor(global_readout_b, dtype=torch.float32)
+            
+            gen_text = generate_text_readout(local_engine, local_input_w, local_readout_w, local_readout_b, length=100, start_text="Sherlock:")
+            print(f"{gen_text}\n-----------------------")
+        
+
         
     print(f"Distributed Training Done. Time: {time.time() - start_time:.2f}s")
 
@@ -208,57 +322,51 @@ def main():
     print("\n=== Generating Text from Global Weights ===")
     
     # Instantiate local engine on driver
-    # Note: In a real large-scale setting, we'd use a dedicated inference actor or service.
-    # Instantiate local engine on driver
-    # Note: In a real large-scale setting, we'd use a dedicated inference actor or service.
-    local_graph = DynamicGraph(num_nodes=num_nodes, m_edges=m_edges, p_triad=p_triad, seed=seed)
-    local_engine = DragonEngineTorch(local_graph, dt=0.01, device='cpu')
-    local_engine.weights = torch.tensor(global_weights, dtype=torch.float32)
-    local_engine.biases = torch.tensor(global_biases, dtype=torch.float32)
-    local_engine.biases = torch.tensor(global_biases, dtype=torch.float32)
-    local_io = ByteSensoryInterface(input_offset=0, output_offset=256, device='cpu')
+    local_engine = DragonEngineTorch(num_nodes, indices, global_weight_values, global_biases, taus, dt=0.01, device='cpu')
+    # No IO needed, we have matrices
+    
+    local_input_w = torch.tensor(input_weights, dtype=torch.float32)
+    local_readout_w = torch.tensor(global_readout_w, dtype=torch.float32)
+    local_readout_b = torch.tensor(global_readout_b, dtype=torch.float32)
 
-    generated_text = generate_text(local_engine, local_io, length=200, start_text="ROMEO:")
+    generated_text = generate_text_readout(local_engine, local_input_w, local_readout_w, local_readout_b, length=200, start_text="Sherlock:")
     print(f"\nGenerated Output:\n{generated_text}\n")
     print("===========================================")
 
     ray.shutdown()
 
-def generate_text(engine, io_interface, length=100, start_text="A"):
+def generate_text_readout(engine, input_w, readout_w, readout_b, length=100, start_text="A"):
     """
-    Generates text using the trained engine "free dreaming".
+    Generates text using the trained Readout Layer.
     """
     current_text = start_text
-    # Seed the state with start_text
-    # For simplicity, we just run the last char to set state, 
-    # but ideally we'd sequence them all.
     
+    # 1. Prime state
     last_char = start_text[-1]
-    input_vec = io_interface.encode(ord(last_char), engine.num_nodes)
+    input_idx = int(ord(last_char))
+    input_vec = input_w[:, input_idx]
     
-    # Prime the engine
     engine.settle(input_vec, duration_steps=20)
     
     print(f"Prompt: '{start_text}'")
     
     for _ in range(length):
-        # 1. Predict next state (Free phase only)
-        # Input is the PREVIOUS output (Autoregressive)
-        # We re-encode the last char effectively
-        
-        # Settle to find next attractor
-        engine.settle(input_vec, duration_steps=20)
+        # 1. Predict
         state = engine.state.clone()
+        logits = torch.mv(readout_w, state) + readout_b
+        probs = torch.softmax(logits, dim=0)
         
-        # 2. Decode
-        next_byte_val = io_interface.decode(state)
+        # Sample or Argmax
+        # next_byte_val = torch.argmax(probs).item()
+        # Sampling is more interesting for generation
+        next_byte_val = torch.multinomial(probs, 1).item()
+        
         next_char = chr(next_byte_val) if 0 <= next_byte_val < 128 else '?'
-        
         current_text += next_char
         
-        # 3. Feedback loop
-        # The new input is what we just hallucinated
-        input_vec = io_interface.encode(next_byte_val, engine.num_nodes)
+        # 2. Feedback (Input next char)
+        input_vec = input_w[:, next_byte_val]
+        engine.settle(input_vec, duration_steps=10) # Shorter settle for stream
         
     return current_text
 

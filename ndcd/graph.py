@@ -47,3 +47,16 @@ class DynamicGraph:
         # State Vectors
         self.states = np.zeros(num_nodes) # Internal potential s
         self.biases = np.zeros(num_nodes)
+        
+    def export_sparse_components(self):
+        """
+        Exports the graph weights as sparse components (indices, values).
+        Returns:
+            indices (np.ndarray): 2xE array of edge indices.
+            values (np.ndarray): 1xE array of edge weights.
+        """
+        # Get indices of non-zero weights
+        rows, cols = np.nonzero(self.weights)
+        values = self.weights[rows, cols]
+        indices = np.stack([rows, cols])
+        return indices, values
