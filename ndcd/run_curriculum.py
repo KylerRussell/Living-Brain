@@ -282,7 +282,7 @@ def main():
     ray.init(ignore_reinit_error=True)
     
     # 1. Init Graph & Weights
-    num_nodes = 5000
+    num_nodes = 10000
     master_graph = DynamicGraph(num_nodes=num_nodes, m_edges=10, p_triad=0.1, seed=42)
     indices, values = master_graph.export_sparse_components()
     biases = master_graph.biases
@@ -318,18 +318,18 @@ def main():
     global_weights = [values, biases, readout_weights, readout_bias]
     
     # 2. Run Phases
-    # Phase 1: Chars
-    global_weights = run_phase("Chars", "ndcd/data/level1_chars.txt", 48, 100, 50, master_refs, arch_refs, global_weights)
+    # Phase 1: Advanced Chars (2x iters: 100)
+    global_weights = run_phase("Chars", "ndcd/data/level1_chars.txt", 48, 100, 100, master_refs, arch_refs, global_weights)
     
-    # Phase 2: Words
-    global_weights = run_phase("Words", "ndcd/data/level2_words.txt", 48, 100, 50, master_refs, arch_refs, global_weights)
+    # Phase 2: Words (4x iters: 200)
+    global_weights = run_phase("Words", "ndcd/data/level2_words.txt", 48, 100, 200, master_refs, arch_refs, global_weights)
     
-    # Phase 3: Complex Quotes
-    global_weights = run_phase("Quotes", "ndcd/data/level3_quotes.txt", 48, 100, 100, master_refs, arch_refs, global_weights)
+    # Phase 3: Complex Quotes (4x iters: 400)
+    global_weights = run_phase("Quotes", "ndcd/data/level3_quotes.txt", 48, 100, 400, master_refs, arch_refs, global_weights)
     
-    # Phase 4: Sherlock
+    # Phase 4: Sherlock (Scaled to 400)
     if os.path.exists("ndcd/data/sherlock.txt"):
-        global_weights = run_phase("Literature", "ndcd/data/sherlock.txt", 48, 200, 200, master_refs, arch_refs, global_weights)
+        global_weights = run_phase("Literature", "ndcd/data/sherlock.txt", 48, 200, 400, master_refs, arch_refs, global_weights)
         
     ray.shutdown()
 
