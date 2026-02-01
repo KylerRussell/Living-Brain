@@ -3,7 +3,10 @@ import ray
 import torch
 import numpy as np
 import os
+import os
 import time
+import scipy.sparse as sp
+from scipy.sparse.linalg import eigs
 from ndcd.graph import DynamicGraph
 from ndcd.engine_torch import DragonEngineTorch
 from ndcd.sensory import ByteSensoryInterface
@@ -104,9 +107,7 @@ class DragonWorker:
             # Accuracy Check
             predicted_idx = torch.argmax(probs).item()
             if predicted_idx == target_idx:
-                loss_accum += 0 # Just reuse variable or make new one? 
-                # Let's return num_correct separate
-                pass
+                correct_count += 1
             
             # 5. Backprop for Readout (Manual or Autograd)
             # dL/dLogits = probs - one_hot(target)
@@ -134,7 +135,7 @@ class DragonWorker:
         # Actually efficient way is to count in loop. 
         # I'll edit the loop above to count correct.
         
-        return delta_w, delta_b, delta_readout_w.cpu().numpy(), delta_readout_b.cpu().numpy(), loss_accum
+        return delta_w, delta_b, delta_readout_w.cpu().numpy(), delta_readout_b.cpu().numpy(), loss_accum, correct_count
 
 def main():
     print("=== Initializing Distributed Dragon Training (Ray) ===")
@@ -197,12 +198,62 @@ def main():
     indices, values = master_graph.export_sparse_components()
     biases = master_graph.biases
     taus = master_graph.taus
+    # --- Architectural Refinement: Spectral Radius Tuning ---
+    print("Tuning Spectral Radius (Criticality)...")
+    # 1. Construct sparse matrix for eigenvalue calculation
+    num_edges = len(values)
+    # COO format
+    sparse_weights = sp.coo_matrix((values, (indices[0], indices[1])), shape=(num_nodes, num_nodes))
+    
+    # 2. Calculate largest magnitude eigenvalue
+    # k=1, which='LM' (Largest Magnitude)
+    # This can be slow, but for 5000 nodes it's okay (seconds).
+    try:
+        # Use simple 'LR' (Largest Real) part if complex (assuming recurrent, it is asymmetric usually, but here we made it symmetric? 
+        # graph.py makes it symmetric. So eigenvalues are real.
+        eigvals = eigs(sparse_weights, k=1, which='LM', return_eigenvectors=False)
+        max_eig = np.abs(eigvals[0])
+        print(f"Current Spectral Radius: {max_eig:.4f}")
+        
+        # 3. Scale to target
+        target_radius = 1.1 # Edge of Chaos
+        scale_factor = target_radius / (max_eig + 1e-8)
+        values = values * scale_factor
+        
+        print(f"Scaled Spectral Radius to: {target_radius}")
+    except Exception as e:
+        print(f"Spectral Radius tuning failed: {e}. Using default weights.")
+
+    # --- Architectural Refinement: Hierarchical Taus ---
+    print("Setting Hierarchical Time Constants...")
+    # Hierarchy: Fast (Sensory), Medium (Word), Slow (Context)
+    # dt = 0.01
+    # Fast: tau=0.02 (decay ~ 2 steps) - 10%
+    # Medium: tau=0.2 (decay ~ 20 steps) - 80%
+    # Slow: tau=2.0 (decay ~ 200 steps) - 10%
+    
+    taus = np.ones(num_nodes, dtype=np.float32)
+    
+    # Indices
+    n_fast = int(0.1 * num_nodes)
+    n_slow = int(0.1 * num_nodes)
+    n_med = num_nodes - n_fast - n_slow
+    
+    perm = np.random.permutation(num_nodes)
+    idx_fast = perm[:n_fast]
+    idx_slow = perm[n_fast:n_fast+n_slow]
+    idx_med = perm[n_fast+n_slow:]
+    
+    taus[idx_fast] = 0.02
+    taus[idx_med] = 0.2
+    taus[idx_slow] = 2.0
     
     # Put into Ray Store (Zero-Copy)
     indices_ref = ray.put(indices)
     values_ref = ray.put(values) # This is the master copy of weights
     biases_ref = ray.put(biases)
     taus_ref = ray.put(taus)
+
     
     # Generate Architectures Matrices
     print("Generating Readout/Input Matrices...")
@@ -296,11 +347,11 @@ def main():
         
         # Calculate Accuracy
         total_predictions = num_workers * steps_per_iter
-        accuracy = 1.0 - (total_loss / total_predictions)
+        accuracy = total_correct / total_predictions
         
 
         
-        print(f"Iter {i} Complete. Loss: {total_loss} | Acc: {accuracy:.2%}")
+        print(f"Iter {i} Complete. Loss: {total_loss:.2f} | Acc: {accuracy:.2%}")
         
         # Periodic Generation
         if i % 20 == 0:
