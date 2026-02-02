@@ -139,27 +139,15 @@ class SequentialTrainer:
             # If we simply pass a nudge_target that has 0s for hidden, and we want hidden to be free...
             # The formula is F = beta * (T - rho). If T=0 and rho!=0, we pull hidden to 0. Bad.
             
-            # WORKAROUND: In this script, we can't easily change engine logic without editing engine_torch.py.
-            # I will modify engine_torch.py to accept a 'nudge_mask' or similar, 
-            # OR I will just "read" the current hidden state, set it as target, 
-            # effectively "clamping" them to stay same? No, Nudged phase must allow hidden to relax.
-            
-            # PROPER FIX: Modify engine_torch.py to allow nudging only specific nodes.
-            # For now, let's assume I will fix engine_torch.py to handle sparse/masked nudging.
-            # Let's say I pass a tuple or use a mask arg.
-            # I'll stick to: modify engine to accept `nudge_mask`.
-            
-            nudge_target = torch.zeros(self.num_nodes, device=self.device)
-            # Default everything to current state? No.
-            # Default to 0? No.
-            # Let's handle this by implementing `nudge_indices` in engine or similar.
-            # Plan: Set target for output nodes 256-511.
-            nudge_target[256 + target_byte] = 1.0 # Pull correct up
-            # We might want to pull incorrect down? 
-            # nudge_target[256:512] = -0.5
-            # nudge_target[256 + target_byte] = 1.0
-            
-            # Assume I add 'nudge_mask' to settle().
+            # Initialize target to slightly negative (suppress incorrect classes)
+            nudge_target = torch.ones(self.num_nodes, device=self.device) * -0.1 
+            # Zero out the non-output nodes so we don't suppress the brain!
+            nudge_target[:256] = 0.0 
+            nudge_target[512:] = 0.0
+
+            # Pull the correct answer UP strongly
+            nudge_target[256 + target_byte] = 1.0
+
             nudge_mask = torch.zeros(self.num_nodes, device=self.device)
             nudge_mask[256:512] = 1.0
             
