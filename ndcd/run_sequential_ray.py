@@ -60,8 +60,36 @@ class RemoteTrainer:
         
         # 2. Initialize Engine
         self.engine = DragonEngineTorch(num_nodes, indices, values, biases, taus, dt=0.01, device=device)
+        self.eye = torch.eye(256, device=device)
+        self.input_indices = list(range(0, 256))
+        self.output_indices = list(range(256, 512))
         
-    def train_phase(self, phase_name, data_path, iterations, steps_per_iter, beta=0.1, lr=0.01):
+    def train_babbling(self, iterations=1000, lr=0.01):
+        print(f"\n=== Starting Phase 0: Hebbian Babbling ===")
+        # Input Mask: Clamp inputs
+        input_mask = torch.zeros(self.num_nodes, device=self.device)
+        input_mask[self.input_indices] = 1.0
+        
+        start_time = time.time()
+        
+        for i in range(iterations):
+            # Random Static Input
+            input_vals = torch.rand(len(self.input_indices), device=self.device)
+            input_vec = torch.zeros(self.num_nodes, device=self.device)
+            input_vec[self.input_indices] = input_vals
+            
+            # Settle (Free logic, but inputs clamped)
+            self.engine.settle(input_vec, input_mask=input_mask)
+            
+            # Hebbian Update
+            self.engine.update_weights_hebbian(learning_rate=lr)
+            
+            if i % 100 == 0:
+                print(f"Babbling Step {i}/{iterations}")
+                
+        print(f"\nBabbling Complete. Time: {time.time()-start_time:.2f}s")
+        
+    def train_phase(self, phase_name, data_path, iterations, steps_per_iter, beta=0.1, lr=0.01, use_rl=False):
         print(f"\n=== Starting Phase: {phase_name} ===")
         ensure_data(data_path, phase_name)
         
@@ -88,38 +116,51 @@ class RemoteTrainer:
             curr_idx += 1
             
             # Input Setup
+            input_mask = torch.zeros(self.num_nodes, device=self.device)
+            input_mask[self.input_indices] = 1.0
+            
             input_vec = torch.zeros(self.num_nodes, device=self.device)
             input_vec[input_byte] = 5.0 
             
-            self.engine.settle(input_vec, duration_steps=30)
+            self.engine.settle(input_vec, input_mask=input_mask)
             state_free = self.engine.state.clone()
             
             # Measure Prediction
             output_activity = state_free[256:512]
             probs = torch.softmax(output_activity, dim=0)
             pred_idx = torch.argmax(probs).item()
+            
+            reward = 0.0
             if pred_idx == target_byte:
                 correct_count += 1
+                reward = 1.0
+            else:
+                reward = -0.1
+                
             loss_accum += -torch.log(probs[target_byte] + 1e-8).item()
             
-            # Nudged Phase (Contrastive)
-            # Initialize target to slightly negative (suppress incorrect classes)
-            nudge_target = torch.ones(self.num_nodes, device=self.device) * -0.1 
-            # Zero out the non-output nodes!
-            nudge_target[:256] = 0.0 
-            nudge_target[512:] = 0.0
-
-            # Pull the correct answer UP strongly
-            nudge_target[256 + target_byte] = 1.0
-
-            nudge_mask = torch.zeros(self.num_nodes, device=self.device)
-            nudge_mask[256:512] = 1.0
-            
-            self.engine.settle(input_vec, duration_steps=30, nudge_target=nudge_target, beta=beta, nudge_mask=nudge_mask)
-            state_nudged = self.engine.state.clone()
-            
-            # Update
-            self.engine.update_weights_eq_prop(state_free, state_nudged, beta, lr)
+            if use_rl:
+                 # RL Update (Dopamine)
+                 self.engine.update_weights_dopamine(reward, lr)
+            else:
+                # Nudged Phase (Contrastive)
+                # Initialize target to slightly negative (suppress incorrect classes)
+                nudge_target = torch.ones(self.num_nodes, device=self.device) * -0.1 
+                # Zero out the non-output nodes!
+                nudge_target[:256] = 0.0 
+                nudge_target[512:] = 0.0
+    
+                # Pull the correct answer UP strongly
+                nudge_target[256 + target_byte] = 1.0
+    
+                nudge_mask = torch.zeros(self.num_nodes, device=self.device)
+                nudge_mask[self.output_indices] = 1.0
+                
+                self.engine.settle(input_vec, nudge_target=nudge_target, beta=beta, nudge_mask=nudge_mask, input_mask=input_mask)
+                state_nudged = self.engine.state.clone()
+                
+                # Update
+                self.engine.update_weights_eq_prop(state_free, state_nudged, beta, lr)
             
             if step % 100 == 0:
                  # Print to Ray logs
@@ -141,6 +182,8 @@ class RemoteTrainer:
             
         for _ in range(length):
             state = self.engine.state
+            input_mask = torch.zeros(self.num_nodes, device=self.device)
+            input_mask[self.input_indices] = 1.0
             out_act = state[256:512]
             probs = torch.softmax(out_act, dim=0)
             
@@ -150,7 +193,7 @@ class RemoteTrainer:
             
             input_vec = torch.zeros(self.num_nodes, device=self.device)
             input_vec[next_byte] = 5.0
-            self.engine.settle(input_vec, duration_steps=15)
+            self.engine.settle(input_vec, input_mask=input_mask)
             
         print(curr_text)
         print("--------------------------------------")
@@ -167,21 +210,24 @@ def main():
     # Run Phases
     print("Starting Sequential Training on Ray...")
     
+    # Phase 0: Babbling
+    ray.get(trainer.train_babbling.remote(iterations=1000))
+
     # Phase 1: Chars
-    ray.get(trainer.train_phase.remote("Chars", "ndcd/data/level1_chars.txt", iterations=100, steps_per_iter=100, beta=0.5, lr=0.1))
+    ray.get(trainer.train_phase.remote("Chars", "ndcd/data/level1_chars.txt", iterations=100, steps_per_iter=100, beta=0.5, lr=0.1, use_rl=False))
     print(ray.get(trainer.generate.remote(start_text="A")))
     
-    '''# Phase 2: Words
-    ray.get(trainer.train_phase.remote("Words", "ndcd/data/level2_words.txt", iterations=200, steps_per_iter=100, beta=0.5, lr=0.05))
+    # Phase 2: Words
+    ray.get(trainer.train_phase.remote("Words", "ndcd/data/level2_words.txt", iterations=200, steps_per_iter=100, beta=0.5, lr=0.05, use_rl=True))
     print(ray.get(trainer.generate.remote()))
     
     # Phase 3: Quotes
-    ray.get(trainer.train_phase.remote("Quotes", "ndcd/data/level3_quotes.txt", iterations=200, steps_per_iter=200, beta=0.5, lr=0.02))
+    ray.get(trainer.train_phase.remote("Quotes", "ndcd/data/level3_quotes.txt", iterations=200, steps_per_iter=200, beta=0.5, lr=0.02, use_rl=True))
     print(ray.get(trainer.generate.remote()))
     
     # Phase 4: Literature
     ray.get(trainer.train_phase.remote("Literature", "ndcd/data/sherlock.txt", iterations=500, steps_per_iter=500, beta=1.0, lr=0.01))
-    print(ray.get(trainer.generate.remote(start_text="Sherlock", length=200)))'''
+    print(ray.get(trainer.generate.remote(start_text="Sherlock", length=200)))
     
     print("Done!")
     ray.shutdown()

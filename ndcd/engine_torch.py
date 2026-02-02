@@ -3,6 +3,7 @@ import torch
 from typing import Optional, Tuple
 
 @torch.jit.script
+@torch.jit.script
 def jit_solve_dynamics(
     initial_state: torch.Tensor,
     initial_traces: torch.Tensor,
@@ -12,10 +13,12 @@ def jit_solve_dynamics(
     taus: torch.Tensor,
     input_vector: torch.Tensor,
     dt: float,
-    duration_steps: int,
+    max_steps: int,
+    tol: float,
     nudge_target: Optional[torch.Tensor],
     nudge_mask: Optional[torch.Tensor],
-    beta: float
+    beta: float,
+    input_mask: Optional[torch.Tensor]
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     JIT-compiled static function for the physics loop.
@@ -26,26 +29,26 @@ def jit_solve_dynamics(
     current_s = initial_state
     
     # Eligibility Trace State (Flattened values matching 'weight_values')
-    # If initial_traces is passed as full matrix, we need to extract values.
-    # But for efficiency, we should maintain 'trace_values' corresponding to 'weight_values'.
-    # Let's assume initial_traces is a 1D tensor of values corresponding to indices.
     current_z = initial_traces
-    tau_z = 5.0 # Slow decay for traces (e.g., 5 seconds or steps scale)
-
+    tau_z = 5.0 # Slow decay for traces
     
     # Construct sparse tensor view for matmul on the fly
-    # Note: In JIT, this construction is efficient if indices/values are tensors
     weights = torch.sparse_coo_tensor(indices, weight_values, (num_nodes, num_nodes))
 
-    for _ in range(duration_steps):
+    step_count = 0
+    diff = 1.0
+    
+    while step_count < max_steps and diff > tol:
+        old_state = current_s
+        
         # 1. Nudge Logic / Input
         current_input = input_vector
         if nudge_target is not None and beta > 0.0:
             rho_s = torch.tanh(current_s)
-            diff = (nudge_target - rho_s)
+            diff_nudge = (nudge_target - rho_s)
             if nudge_mask is not None:
-                diff = diff * nudge_mask
-            nudge_force = beta * diff
+                diff_nudge = diff_nudge * nudge_mask
+            nudge_force = beta * diff_nudge
             current_input = current_input + nudge_force
             
         # 2. RK4 Step
@@ -93,11 +96,13 @@ def jit_solve_dynamics(
         
         current_s = current_s + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
         
+        # --- Hard Clamping ---
+        if input_mask is not None:
+             current_s = current_s * (1 - input_mask) + input_vector * input_mask
+
         # --- Update Eligibility Traces ---
         # dz/dt = -z + rho(i) * rho(j)
-        # We only update trace values for existing edges.
         
-        # Gather activations for edges
         idx_i = indices[0]
         idx_j = indices[1]
         
@@ -105,19 +110,14 @@ def jit_solve_dynamics(
         rho_i = final_rho[idx_i]
         rho_j = final_rho[idx_j]
         
-        # Pre-synaptic * Post-synaptic coincidence
         coincidence = rho_i * rho_j
-        
-        # Euler step for traces
-        # z(t+1) = z(t) + dt * (-z(t) + coincidence) / tau_z (Assuming tau_z timescale)
-        # Note: PDF doesn't specify tau_z explicitly, usually slower than tau_neuron.
-        dz = (-current_z + coincidence) # / tau_z removed for normalized accumulation or dt scaling
-        # Let's use simple decay + accumulation:
-        # z_new = z_old * decay + coincidence
-        # equivalent to dz/dt = -z/tau + coincidence
         
         decay_factor = 1.0 - (dt / tau_z)
         current_z = current_z * decay_factor + (dt * coincidence)
+        
+        # Check Convergence
+        diff = torch.norm(current_s - old_state)
+        step_count += 1
 
     return current_s, current_z
 
@@ -136,14 +136,13 @@ class DragonEngineTorch:
         self.biases = torch.tensor(biases, dtype=torch.float32, device=device)
         
         # State
-        # State
         self.state = torch.zeros(num_nodes, dtype=torch.float32, device=device)
         self.trace_values = torch.zeros_like(self.weight_values) # Store traces as sparse values
         
     def activation_function(self, s):
         return torch.tanh(s)
 
-    def settle(self, input_vector, duration_steps, nudge_target=None, beta=0.0, nudge_mask=None):
+    def settle(self, input_vector, max_steps=5000, tol=1e-4, nudge_target=None, beta=0.0, nudge_mask=None, input_mask=None):
         """
         Runs the settling loop using JIT compiled function.
         """
@@ -164,7 +163,13 @@ class DragonEngineTorch:
              else:
                  nudge_m = nudge_mask
         
-        # Call JIT function
+        input_m = None
+        if input_mask is not None:
+             if not isinstance(input_mask, torch.Tensor):
+                 input_m = torch.tensor(input_mask, dtype=torch.float32, device=self.device)
+             else:
+                 input_m = input_mask
+        
         # Call JIT function
         self.state, self.trace_values = jit_solve_dynamics(
             self.state,
@@ -175,10 +180,12 @@ class DragonEngineTorch:
             self.taus,
             input_vector,
             self.dt,
-            duration_steps,
+            max_steps,
+            tol,
             nudge_t,
             nudge_m,
-            beta
+            beta,
+            input_m
         )
         return self.activation_function(self.state)
 
