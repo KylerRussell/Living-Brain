@@ -39,41 +39,70 @@ def generate_chars(filename="ndcd/data/level1_chars.txt", size=20000):
             repeat = random.randint(5, 10)
             f.write(char * repeat + " ")
             
-def generate_words(filename="ndcd/data/level2_words.txt", source_file="ndcd/data/google-10000-english.txt", size=100000):
+def generate_toddler_words(filename="ndcd/data/level2_words.txt", source_file="ndcd/data/google-10000-english.txt", size=150000):
     """
-    Level 2: Vocabulary Expansion (Top 10,000 Common Words).
+    Level 2: Toddler Vocabulary Expansion (Progressive).
     Source: https://github.com/first20hours/google-10000-english/blob/master/google-10000-english.txt
+    
+    Strategy:
+    1.  Stage 1: Top 50 words (nouns/verbs). Dense repetition.
+    2.  Stage 2: Top 100 words. Simple 2-word pairs.
+    3.  Stage 3: Top 300 words. 3-word pairings.
+    4.  Stage 4: Top 1000 words. Mixed sentences.
     """
     url = "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english.txt"
     download_file(url, source_file)
     
-    print(f"Generating {filename} from {source_file}...")
+    print(f"Generating {filename} from {source_file} (Toddler Mode)...")
     
     vocab = []
     if os.path.exists(source_file):
         with open(source_file, "r") as f:
             vocab = [line.strip() for line in f if line.strip()]
     else:
-        print(f"Warning: {source_file} not found even after download attempt. Using fallback.")
+        print(f"Warning: {source_file} not found. Using fallback.")
         vocab = ["the", "be", "to", "of", "and", "a", "in", "that", "have", "i"] # Fallback
-        
+
     with open(filename, "w") as f:
-        # 1. Write disjoint words
-        for _ in range(size // 10):
-            word = random.choice(vocab)
-            f.write(word + " ")
+        # --- Stage 1: The First 50 Words (Naming) ---
+        # Focus: Nouns, simple verbs. "Ball", "Mom", "Go", "No".
+        # We assume the list is frequency sorted.
+        stage1_vocab = vocab[:50]
+        f.write("---STAGE1--- ")
+        for _ in range(size // 10): # 10% of data
+            # Heavy repetition of single words: "Ball. Ball. Ball."
+            w = random.choice(stage1_vocab)
+            f.write(f"{w} {w} {w} ")
             
-        # 2. Sequential snippets (if ordered) - The 10k list is frequency ordered.
-        # Writing them in order helps learn frequency distribution
-        for _ in range(5):
-             for w in vocab[:1000]: # Top 1000 most frequent repeated
-                 f.write(w + " ")
-        
-        # 3. Simple pairings
-        for _ in range(size // 10):
-            w1 = random.choice(vocab)
-            w2 = random.choice(vocab)
+        # --- Stage 2: Top 100 Words (Attributes) ---
+        # Focus: Adjectives + Noun. "Big Ball", "Good Boy".
+        stage2_vocab = vocab[:100]
+        f.write("---STAGE2--- ")
+        for _ in range(size // 5): # 20% of data
+            w1 = random.choice(stage2_vocab)
+            w2 = random.choice(stage2_vocab)
             f.write(f"{w1} {w2} ")
+            
+        # --- Stage 3: Top 300 Words (Simple Subject-Verb-Object) ---
+        stage3_vocab = vocab[:300]
+        f.write("---STAGE3--- ")
+        for _ in range(size // 3): # 30% of data
+             # "I go home", "You see dog"
+             w1 = random.choice(stage3_vocab)
+             w2 = random.choice(stage3_vocab)
+             w3 = random.choice(stage3_vocab)
+             f.write(f"{w1} {w2} {w3} ")
+
+        # --- Stage 4: Top 1000 Words (Explosion) ---
+        stage4_vocab = vocab[:1000]
+        f.write("---STAGE4--- ")
+        remaining_size = size - (size//10 + size//5 + size//3)
+        # Just generate tokens roughly to fill
+        # It's okay if exact size isn't perfect, just need lots of data.
+        for _ in range(remaining_size // 5): 
+             # Random 5-word "proto-sentences"
+             s = " ".join([random.choice(stage4_vocab) for _ in range(5)])
+             f.write(s + " ")
 
 def generate_quotes(filename="ndcd/data/level3_quotes.txt", source_file="ndcd/data/english.json", size=200000):
     """

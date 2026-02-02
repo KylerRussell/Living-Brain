@@ -9,7 +9,8 @@ from scipy.sparse.linalg import eigs
 from ndcd.graph import DynamicGraph
 from ndcd.engine_torch import DragonEngineTorch
 from ndcd.sensory import ByteSensoryInterface
-from ndcd.curriculum_gen import generate_chars, generate_words, generate_quotes
+from ndcd.sensory import ByteSensoryInterface
+from ndcd.curriculum_gen import generate_chars, generate_toddler_words, generate_quotes
 
 @ray.remote(num_cpus=1)
 class DragonWorker:
@@ -184,7 +185,7 @@ def generate_text_readout(engine, input_w, readout_w, readout_b, length=100, sta
         
     return current_text
 
-def run_phase(phase_name, data_path, num_workers, steps_per_iter, iterations, master_graph_refs, architecture_refs, global_weights):
+def run_phase(phase_name, data_path, num_workers, steps_per_iter, iterations, master_graph_refs, architecture_refs, global_weights, num_nodes):
     print(f"\n=== Starting Phase: {phase_name} ===")
     print(f"Loading data: {data_path}")
     
@@ -193,7 +194,7 @@ def run_phase(phase_name, data_path, num_workers, steps_per_iter, iterations, ma
         print(f"Data {data_path} not found. Generating...")
         os.makedirs(os.path.dirname(data_path), exist_ok=True)
         if "level1" in data_path: generate_chars(data_path)
-        elif "level2" in data_path: generate_words(data_path)
+        elif "level2" in data_path: generate_toddler_words(data_path)
         elif "level3" in data_path: generate_quotes(data_path)
         else:
              print("Unknown data type needed but missing.")
@@ -215,7 +216,7 @@ def run_phase(phase_name, data_path, num_workers, steps_per_iter, iterations, ma
     # We pass initial refs, but immediately update them.
     for i in range(num_workers):
         offset = i * chunk_size
-        worker = DragonWorker.remote(5000, indices_ref, values_ref, biases_ref, taus_ref, input_w_ref, readout_w_ref, offset, chunk_size, data_ref)
+        worker = DragonWorker.remote(num_nodes, indices_ref, values_ref, biases_ref, taus_ref, input_w_ref, readout_w_ref, offset, chunk_size, data_ref)
         workers.append(worker)
         
     # Set current trained weights
@@ -231,7 +232,7 @@ def run_phase(phase_name, data_path, num_workers, steps_per_iter, iterations, ma
     # We need indices locally
     indices = ray.get(indices_ref)
     taus = ray.get(taus_ref)
-    local_engine = DragonEngineTorch(5000, indices, w_vals, b_vals, taus, dt=0.01, device='cpu')
+    local_engine = DragonEngineTorch(num_nodes, indices, w_vals, b_vals, taus, dt=0.01, device='cpu')
     input_weights = ray.get(input_w_ref)
     local_input_w = torch.tensor(input_weights, dtype=torch.float32)
 
@@ -287,6 +288,8 @@ def main():
     indices, values = master_graph.export_sparse_components()
     biases = master_graph.biases
     taus = master_graph.taus
+    del master_graph # Free 400MB+ memory immediately
+    import gc; gc.collect()
     
     # Spectral Radius & Taus (Apply Refinements)
     sparse_weights = sp.coo_matrix((values, (indices[0], indices[1])), shape=(num_nodes, num_nodes))
@@ -319,17 +322,17 @@ def main():
     
     # 2. Run Phases
     # Phase 1: Advanced Chars (2x iters: 100)
-    global_weights = run_phase("Chars", "ndcd/data/level1_chars.txt", 48, 100, 100, master_refs, arch_refs, global_weights)
+    global_weights = run_phase("Chars", "ndcd/data/level1_chars.txt", 96, 100, 50, master_refs, arch_refs, global_weights, num_nodes)
     
     # Phase 2: Words (4x iters: 200)
-    global_weights = run_phase("Words", "ndcd/data/level2_words.txt", 48, 100, 200, master_refs, arch_refs, global_weights)
+    global_weights = run_phase("Words", "ndcd/data/level2_words.txt", 96, 100, 100, master_refs, arch_refs, global_weights, num_nodes)
     
     # Phase 3: Complex Quotes (4x iters: 400)
-    global_weights = run_phase("Quotes", "ndcd/data/level3_quotes.txt", 48, 100, 400, master_refs, arch_refs, global_weights)
+    global_weights = run_phase("Quotes", "ndcd/data/level3_quotes.txt", 96, 100, 100, master_refs, arch_refs, global_weights, num_nodes)
     
     # Phase 4: Sherlock (Scaled to 400)
     if os.path.exists("ndcd/data/sherlock.txt"):
-        global_weights = run_phase("Literature", "ndcd/data/sherlock.txt", 48, 200, 400, master_refs, arch_refs, global_weights)
+        global_weights = run_phase("Literature", "ndcd/data/sherlock.txt", 96, 200, 100, master_refs, arch_refs, global_weights, num_nodes)
         
     ray.shutdown()
 
