@@ -49,7 +49,7 @@ class DragonWorker:
     def train_step(self, steps=10, enable_plasticity=True):
         """
         Runs 'steps' of training.
-        enable_plasticity: If True, internal weights are updated via Equilibrium Propagation (or Hebbian).
+        enable_plasticity: If True, internal weights are updated via Dopamine Learning.
         """
         start_weight_values = self.engine.weight_values.clone()
         start_biases = self.engine.biases.clone()
@@ -75,89 +75,76 @@ class DragonWorker:
             input_idx = int(input_byte)
             input_vec = self.input_weights[:, input_idx]
             
-            # 2. Settle (Free Phase)
+            # 2. Settle (Free Phase) - This accumulates Eligibility Traces z
             self.engine.settle(input_vec, duration_steps=10)
             state_free = self.engine.state.clone()
             
             # 3. Readout Prediction
             logits = torch.mv(self.readout_weights, state_free) + self.readout_bias
             
-            # 4. Compute Loss
+            # 4. Compute Loss & Reward
             probs = torch.softmax(logits, dim=0)
             target_idx = int(target_byte)
             curr_loss = -torch.log(probs[target_idx] + 1e-8)
             loss_accum += curr_loss.item()
             
-            if torch.argmax(probs).item() == target_idx:
+            predicted_idx = torch.argmax(probs).item()
+            is_correct = (predicted_idx == target_idx)
+            if is_correct:
                 correct_count += 1
+                reward = 1.0
+            else:
+                reward = -0.1 # Small punishment or 0
             
-            # 5. Backprop for Readout
+            # 5. Backprop for Readout (Supervised)
             d_logits = probs.clone()
             d_logits[target_idx] -= 1.0
             
             grad_readout_w += torch.outer(d_logits, state_free)
             grad_readout_b += d_logits
             
-            # 6. EqProp / Hebbian (Internal Weights)
+            # 6. Dopamine Learning (Internal Weights)
             if enable_plasticity:
-                # Simple Hebbian: Strengthen connections between active nodes
-                # Delta W = eta * (pre * post)
-                # But we are using sparse W.
-                # Actually, let's use the explicit EqProp nudge if we can, or just Hebbian on state_free?
-                # For stability in this sparse setting, let's use a weak Hebbian-like update restricted to existing connections
-                # We need to map state outer product to sparse values.
-                # This is computationally expensive in Python loop.
-                # Let's skip per-step update here and rely on the fact that `update_weights_eq_prop` isn't fully implemented in this loop cleanly.
-                # Wait, DragonEngineTorch has `update_weights_eq_prop`.
-                # We need a 'nudge'.
-                # Nudge target = state - alpha * backprop_error.
-                # backprop_error at state = W_out.T @ d_logits
-                error_signal = torch.mv(self.readout_weights.T, d_logits) # [N]
-                # Nudge towards better state (minimizing output error)
-                # target_state = state - 0.1 * error_signal
-                # But settle pushes towards energy min. EqProp uses clamped phase.
-                # Let's simplify: Standard Hebbian on the Free phase is "Unsupervised Learning".
-                # To learn the TASK, we need the error signal.
-                # Let's use the error signal to modify the weights.
-                # dL/dW_internal = dL/dS * dS/dW
-                # This is complex. 
-                # Alternative: Just noise injection or "Dreaming".
-                # For now, let's keep Internal Plasticity simple: Hebbian Reinforcement of repeated patterns.
-                # self.engine.update_weights(state_free, lr=internal_lr) <-- Hypothetical function.
-                # Let's stick to Readout training being the primary driver, but maybe the previous failure was just the DATA complexity.
-                # IF we want internal plasticity, we really need the EqProp phases (Free vs Clamped).
-                # Clamped: Input + Output Clamp.
-                # Let's implement Clamped Phase!
-                
-                # Phase 2: Weakly Clamp Output
-                target_vec = torch.zeros(256, device=self.device)
-                target_vec[target_idx] = 1.0
-                # Project target back to nodes?
-                # feedback_current = W_out.T @ (target - prediction) ?
-                # Or just W_in type injection.
-                # Let's simple use "Input + Target" as the clamped state inputs.
-                # But we don't have a backward feedback matrix.
-                # Let's use the Transpose of Readout Weights as Feedback Weights (Feedback Alignment).
-                feedback_input = torch.mv(self.readout_weights.T, target_vec) # [N]
-                
-                # Settle with Input + Feedback
-                # total_input = input_vec + 0.5 * feedback_input
-                # self.engine.settle(total_input, duration_steps=5)
-                # state_clamped = self.engine.state.clone()
-                
-                # EqProp Update: Delta W = (state_clamped * state_clamped.T) - (state_free * state_free.T)
-                # This needs efficient sparse update.
-                pass 
+                # Use the accumulated eligibility traces combined with the global reward
+                # Delta W = eta * reward * z
+                self.engine.update_weights_dopamine(reward, internal_lr)
             
         # Compute Averaged Gradients/Deltas
         delta_readout_w = -readout_lr * grad_readout_w
         delta_readout_b = -readout_lr * grad_readout_b
         
         # Internal weights
-        delta_w = np.zeros_like(start_weight_values.cpu().numpy())
-        delta_b = np.zeros_like(start_biases.cpu().numpy())
+        # Since we modified weights in-place inside the loop, we calculate the net change
+        current_weight_values = self.engine.weight_values
+        delta_w = (current_weight_values - start_weight_values).cpu().numpy()
+        delta_b = np.zeros_like(start_biases.cpu().numpy()) # Biases not updated for now
         
         return delta_w, delta_b, delta_readout_w.cpu().numpy(), delta_readout_b.cpu().numpy(), loss_accum, correct_count
+        
+    def run_babbling(self, steps=50):
+        """
+        Phase 0: Hebbian Babbling.
+        Inject noise, let dynamics settle, apply Hebbian learning.
+        No targets, no readout training.
+        """
+        start_w = self.engine.weight_values.clone()
+        
+        for _ in range(steps):
+            # Random noise input to SENSORY nodes only
+            # We can use input_weights * random_byte effectively
+            rand_byte = np.random.randint(0, 256)
+            input_vec = self.input_weights[:, rand_byte]
+            
+            # Settle
+            self.engine.settle(input_vec, duration_steps=20)
+            
+            # Pure Hebbian Update (Self-Organization)
+            # Incorporates decay to prevent explosion
+            self.engine.update_weights_hebbian(learning_rate=0.01, decay=0.001)
+            
+        final_w = self.engine.weight_values
+        delta_w = (final_w - start_w).cpu().numpy()
+        return delta_w
 
 def generate_text_readout(engine, input_w, readout_w, readout_b, length=100, start_text="A"):
     current_text = start_text
@@ -185,6 +172,47 @@ def generate_text_readout(engine, input_w, readout_w, readout_b, length=100, sta
         
     return current_text
 
+def run_phase_babbling(num_workers, iterations, master_graph_refs, architecture_refs, global_weights, num_nodes):
+    print(f"\n=== Starting Phase: 0 (Hebbian Babbling) ===")
+    print("Self-organizing feature assemblies...")
+    
+    workers = []
+    indices_ref, values_ref, biases_ref, taus_ref = master_graph_refs
+    input_w_ref, readout_w_ref, readout_b_ref = architecture_refs
+    
+    # Spawn
+    for i in range(num_workers):
+        # Data args are dummy for babbling
+        worker = DragonWorker.remote(num_nodes, indices_ref, values_ref, biases_ref, taus_ref, input_w_ref, readout_w_ref, 0, 100, ray.put(b"dummy"))
+        workers.append(worker)
+        
+    # Sync weights
+    w_vals, b_vals, rw_vals, rb_vals = global_weights
+    w_ref = ray.put(w_vals)
+    b_ref = ray.put(b_vals)
+    rw_ref = ray.put(rw_vals)
+    rb_ref = ray.put(rb_vals)
+    ray.get([w.set_weights.remote(w_ref, b_ref, rw_ref, rb_ref) for w in workers])
+    
+    for i in range(iterations):
+        # Run babbling steps
+        futures = [w.run_babbling.remote(steps=50) for w in workers]
+        results = ray.get(futures)
+        
+        avg_delta_w = np.mean(results, axis=0)
+        w_vals += avg_delta_w
+        
+        # Broadcast
+        w_ref = ray.put(w_vals)
+        # Biases/Readout not changed
+        ray.get([w.set_weights.remote(w_ref, b_ref, rw_ref, rb_ref) for w in workers])
+        
+        if i % 5 == 0:
+            print(f"Babbling Iter {i}: Avg Delta {np.mean(np.abs(avg_delta_w)):.6f}")
+            
+    print("--- End of Babbling ---")
+    return [w_vals, b_vals, rw_vals, rb_vals]
+
 def run_phase(phase_name, data_path, num_workers, steps_per_iter, iterations, master_graph_refs, architecture_refs, global_weights, num_nodes):
     print(f"\n=== Starting Phase: {phase_name} ===")
     print(f"Loading data: {data_path}")
@@ -209,11 +237,8 @@ def run_phase(phase_name, data_path, num_workers, steps_per_iter, iterations, ma
     chunk_size = total_data_size // num_workers
     
     indices_ref, values_ref, biases_ref, taus_ref = master_graph_refs
-    input_w_ref, readout_w_ref, readout_b_ref = architecture_refs # Note: readout weights in refs are INITIAL.
-    # We must start workers with CURRENT global weights.
+    input_w_ref, readout_w_ref, readout_b_ref = architecture_refs 
     
-    # Worker Spawning
-    # We pass initial refs, but immediately update them.
     for i in range(num_workers):
         offset = i * chunk_size
         worker = DragonWorker.remote(num_nodes, indices_ref, values_ref, biases_ref, taus_ref, input_w_ref, readout_w_ref, offset, chunk_size, data_ref)
@@ -228,19 +253,18 @@ def run_phase(phase_name, data_path, num_workers, steps_per_iter, iterations, ma
     ray.get([w.set_weights.remote(w_ref, b_ref, rw_ref, rb_ref) for w in workers])
     
     # Training Loop
-    # Instantiate local engine for generation (using first worker's logic effectively)
-    # We need indices locally
     indices = ray.get(indices_ref)
     taus = ray.get(taus_ref)
     local_engine = DragonEngineTorch(num_nodes, indices, w_vals, b_vals, taus, dt=0.01, device='cpu')
     input_weights = ray.get(input_w_ref)
     local_input_w = torch.tensor(input_weights, dtype=torch.float32)
-
+    
     for i in range(iterations):
-        futures = [w.train_step.remote(steps=steps_per_iter, enable_plasticity=False) for w in workers] # Plasticity still disabled for now to isolate Curriculum effect
+        # ENABLE PLASTICITY: True, using Dopamine Learning
+        futures = [w.train_step.remote(steps=steps_per_iter, enable_plasticity=True) for w in workers] 
         results = ray.get(futures)
         
-        avg_delta_w = np.mean([r[0] for r in results], axis=0) # Zeros if disabled
+        avg_delta_w = np.mean([r[0] for r in results], axis=0)
         avg_delta_b = np.mean([r[1] for r in results], axis=0)
         avg_delta_rw = np.mean([r[2] for r in results], axis=0)
         avg_delta_rb = np.mean([r[3] for r in results], axis=0)
@@ -254,16 +278,17 @@ def run_phase(phase_name, data_path, num_workers, steps_per_iter, iterations, ma
         rb_vals += avg_delta_rb
         
         # Broadcast
-        # Optimize: Only broadcast readout if internal frozen
         rw_ref = ray.put(rw_vals)
         rb_ref = ray.put(rb_vals)
-        ray.get([w.set_weights.remote(ray.put(w_vals), ray.put(b_vals), rw_ref, rb_ref) for w in workers])
+        # Only broadcast internal weights if they changed (plasticity enabled)
+        w_ref = ray.put(w_vals)
+        ray.get([w.set_weights.remote(w_ref, ray.put(b_vals), rw_ref, rb_ref) for w in workers])
         
         # Stats
         total_predictions = num_workers * steps_per_iter
         accuracy = total_correct / total_predictions
         if i % 10 == 0:
-            print(f"Iter {i} Loss: {total_loss:.2f} | Acc: {accuracy:.2%}")
+            print(f"Iter {i} Loss: {total_loss:.2f} | Acc: {accuracy:.2%} | Avg dW: {np.mean(np.abs(avg_delta_w)):.6f}")
             
     # Generation Check
     local_engine.weight_values = torch.tensor(w_vals, dtype=torch.float32)
@@ -288,21 +313,40 @@ def main():
     indices, values = master_graph.export_sparse_components()
     biases = master_graph.biases
     taus = master_graph.taus
-    del master_graph # Free 400MB+ memory immediately
+    
+    # Extract Strict Masks
+    sensory_indices = master_graph.sensory_indices
+    motor_indices = master_graph.motor_indices
+    association_indices = master_graph.association_indices
+    
+    del master_graph # Free memory
     import gc; gc.collect()
     
     # Spectral Radius & Taus (Apply Refinements)
+    # Note: Taus are already correctly set by DynamicGraph now (Fast/Slow strict)
+    
     sparse_weights = sp.coo_matrix((values, (indices[0], indices[1])), shape=(num_nodes, num_nodes))
     eigvals = eigs(sparse_weights, k=1, which='LM', return_eigenvectors=False)
     values = values * (1.1 / (np.abs(eigvals[0]) + 1e-8))
     
-    taus = np.ones(num_nodes) * 0.2 # Medium
-    taus[:int(0.1*num_nodes)] = 0.02 # Fast (first 10% roughly)
-    taus[-int(0.1*num_nodes):] = 2.0 # Slow
-    
-    # Architecture
+    # Architecture - RESTRICTED I/O
+    # Inputs: 256 -> N
     input_weights = np.random.randn(num_nodes, 256).astype(np.float32) * 1.0
+    # Zero out non-sensory
+    mask_input = np.ones(num_nodes, dtype=bool)
+    mask_input[sensory_indices] = False # Logic check: we want to zero NON-sensory.
+    # Actually simpler: just create zeros and fill sensory.
+    input_weights_strict = np.zeros((num_nodes, 256), dtype=np.float32)
+    input_weights_strict[sensory_indices, :] = np.random.randn(len(sensory_indices), 256) * 1.0
+    input_weights = input_weights_strict
+
+    # Readout: 256 <- N
     readout_weights = np.random.randn(256, num_nodes).astype(np.float32) * 0.01
+    # Zero out non-motor
+    readout_weights_strict = np.zeros((256, num_nodes), dtype=np.float32)
+    readout_weights_strict[:, motor_indices] = np.random.randn(256, len(motor_indices)) * 0.01
+    readout_weights = readout_weights_strict
+    
     readout_bias = np.zeros(256, dtype=np.float32)
     
     # Refs
@@ -321,6 +365,11 @@ def main():
     global_weights = [values, biases, readout_weights, readout_bias]
     
     # 2. Run Phases
+    
+    # Phase 0: Hebbian Babbling (Self-Organization)
+    # 50 Iterations
+    global_weights = run_phase_babbling(96, 20, master_refs, arch_refs, global_weights, num_nodes)
+    
     # Phase 1: Advanced Chars (2x iters: 100)
     global_weights = run_phase("Chars", "ndcd/data/level1_chars.txt", 96, 100, 50, master_refs, arch_refs, global_weights, num_nodes)
     

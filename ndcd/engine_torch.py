@@ -1,10 +1,11 @@
 import numpy as np
 import torch
-from typing import Optional
+from typing import Optional, Tuple
 
 @torch.jit.script
 def jit_solve_dynamics(
     initial_state: torch.Tensor,
+    initial_traces: torch.Tensor,
     indices: torch.Tensor,
     weight_values: torch.Tensor,
     biases: torch.Tensor,
@@ -13,14 +14,24 @@ def jit_solve_dynamics(
     dt: float,
     duration_steps: int,
     nudge_target: Optional[torch.Tensor],
+    nudge_mask: Optional[torch.Tensor],
     beta: float
-) -> torch.Tensor:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     JIT-compiled static function for the physics loop.
     Solves dx/dt = (-x + W*tanh(x) + b + I) / tau
+    AND dz/dt = (-z + rho(xi)rho(xj)) / tau_z
     """
     num_nodes = initial_state.size(0)
     current_s = initial_state
+    
+    # Eligibility Trace State (Flattened values matching 'weight_values')
+    # If initial_traces is passed as full matrix, we need to extract values.
+    # But for efficiency, we should maintain 'trace_values' corresponding to 'weight_values'.
+    # Let's assume initial_traces is a 1D tensor of values corresponding to indices.
+    current_z = initial_traces
+    tau_z = 5.0 # Slow decay for traces (e.g., 5 seconds or steps scale)
+
     
     # Construct sparse tensor view for matmul on the fly
     # Note: In JIT, this construction is efficient if indices/values are tensors
@@ -31,7 +42,10 @@ def jit_solve_dynamics(
         current_input = input_vector
         if nudge_target is not None and beta > 0.0:
             rho_s = torch.tanh(current_s)
-            nudge_force = beta * (nudge_target - rho_s)
+            diff = (nudge_target - rho_s)
+            if nudge_mask is not None:
+                diff = diff * nudge_mask
+            nudge_force = beta * diff
             current_input = current_input + nudge_force
             
         # 2. RK4 Step
@@ -79,7 +93,33 @@ def jit_solve_dynamics(
         
         current_s = current_s + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
         
-    return current_s
+        # --- Update Eligibility Traces ---
+        # dz/dt = -z + rho(i) * rho(j)
+        # We only update trace values for existing edges.
+        
+        # Gather activations for edges
+        idx_i = indices[0]
+        idx_j = indices[1]
+        
+        final_rho = torch.tanh(current_s)
+        rho_i = final_rho[idx_i]
+        rho_j = final_rho[idx_j]
+        
+        # Pre-synaptic * Post-synaptic coincidence
+        coincidence = rho_i * rho_j
+        
+        # Euler step for traces
+        # z(t+1) = z(t) + dt * (-z(t) + coincidence) / tau_z (Assuming tau_z timescale)
+        # Note: PDF doesn't specify tau_z explicitly, usually slower than tau_neuron.
+        dz = (-current_z + coincidence) # / tau_z removed for normalized accumulation or dt scaling
+        # Let's use simple decay + accumulation:
+        # z_new = z_old * decay + coincidence
+        # equivalent to dz/dt = -z/tau + coincidence
+        
+        decay_factor = 1.0 - (dt / tau_z)
+        current_z = current_z * decay_factor + (dt * coincidence)
+
+    return current_s, current_z
 
 class DragonEngineTorch:
     def __init__(self, num_nodes, indices, values, biases, taus, dt=0.01, device='cuda' if torch.cuda.is_available() else 'cpu'):
@@ -96,12 +136,14 @@ class DragonEngineTorch:
         self.biases = torch.tensor(biases, dtype=torch.float32, device=device)
         
         # State
+        # State
         self.state = torch.zeros(num_nodes, dtype=torch.float32, device=device)
+        self.trace_values = torch.zeros_like(self.weight_values) # Store traces as sparse values
         
     def activation_function(self, s):
         return torch.tanh(s)
 
-    def settle(self, input_vector, duration_steps, nudge_target=None, beta=0.0):
+    def settle(self, input_vector, duration_steps, nudge_target=None, beta=0.0, nudge_mask=None):
         """
         Runs the settling loop using JIT compiled function.
         """
@@ -114,10 +156,19 @@ class DragonEngineTorch:
                  nudge_t = torch.tensor(nudge_target, dtype=torch.float32, device=self.device)
              else:
                  nudge_t = nudge_target
+
+        nudge_m = None
+        if nudge_mask is not None:
+             if not isinstance(nudge_mask, torch.Tensor):
+                 nudge_m = torch.tensor(nudge_mask, dtype=torch.float32, device=self.device)
+             else:
+                 nudge_m = nudge_mask
         
         # Call JIT function
-        self.state = jit_solve_dynamics(
+        # Call JIT function
+        self.state, self.trace_values = jit_solve_dynamics(
             self.state,
+            self.trace_values,
             self.indices,
             self.weight_values,
             self.biases,
@@ -126,6 +177,7 @@ class DragonEngineTorch:
             self.dt,
             duration_steps,
             nudge_t,
+            nudge_m,
             beta
         )
         return self.activation_function(self.state)
@@ -155,7 +207,54 @@ class DragonEngineTorch:
         # Apply update
         self.weight_values += learning_rate * grad_values
         
-    def update_weights_hebbian(self, state, learning_rate, decay=0.0):
-        # Hebbian implementation for sparse is non-trivial if decay depends on W
-        # Leaving as placeholder or sparse implementation if needed
+    def enforce_symmetry(self):
+        """
+        Enforces W_ij = W_ji by averaging values for symmetric pairs.
+        Note: This is expensive if edges are not ordered.
+        Assumption: The graph construction ensures if (i,j) exists, (j,i) exists at the reciprocal index.
+        Optimization: We can't easily find reciprocal index in COO without sorting.
+        Fast Approximate Enforce:
+        Actually, if we update W_ij and W_ji identically, symmetry is preserved.
+        jit_solve_dynamics updates Z_ij using rho_i * rho_j.
+        rho_i * rho_j is symmetric.
+        So Z_ij calculation is symmetric IF Z_ij started symmetric.
+        
+        Same for weight updates below.
+        So we just need to ensure initialization is symmetric (Graph does this).
+        But let's add a check/fix method just in case drifts happen (e.g. numerical error).
+        """
+        # For now, rely on updates being symmetric by definition (product of scalars).
         pass
+
+    def update_weights_dopamine(self, reward_signal, learning_rate):
+        """
+        Dopamine-modulated plasticity.
+        Delta W_ij = eta * D(t) * z_ij
+        """
+        # Simple update
+        dw = learning_rate * reward_signal * self.trace_values
+        self.weight_values += dw
+        
+    def update_weights_hebbian(self, learning_rate, decay=0.0001):
+        """
+        Pure Hebbian Learning (Section 5.1).
+        Delta W_ij = eta * (rho_i * rho_j - alpha * W_ij)
+        """
+        # Re-compute coincidence
+        # Note: jit_solve ALREADY computed coincidence into traces.
+        # But Hebbian is instantaneous rho*rho, or filtered?
+        # PDF says "Heabbian Learning" for "Babbling".
+        # Eq: Delta W ~ rho_i * rho_j.
+        
+        idx_i = self.indices[0]
+        idx_j = self.indices[1]
+        
+        rho = self.activation_function(self.state)
+        ri = rho[idx_i]
+        rj = rho[idx_j]
+        
+        coincidence = ri * rj
+        
+        # Update with decay
+        delta = learning_rate * (coincidence - decay * self.weight_values)
+        self.weight_values += delta

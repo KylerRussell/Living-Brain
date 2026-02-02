@@ -142,6 +142,6 @@ def generate_quotes(filename="ndcd/data/level3_quotes.txt", source_file="ndcd/da
 if __name__ == "__main__":
     os.makedirs("ndcd/data", exist_ok=True)
     generate_chars()
-    generate_words()
+    generate_toddler_words()
     generate_quotes()
     print("Curriculum data generated.")
