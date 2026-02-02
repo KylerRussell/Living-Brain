@@ -25,7 +25,7 @@ def ensure_data(data_path, phase_name):
                  print(f"Failed to download Sherlock: {e}")
 
 class SequentialTrainer:
-    def __init__(self, num_nodes=5000, device='cpu'):
+    def __init__(self, num_nodes=10000, device='cpu'):
         self.device = device
         self.num_nodes = num_nodes
         
@@ -100,7 +100,7 @@ class SequentialTrainer:
             # 3. Free Phase (Dream)
             # Run dynamics. Result is state_free.
             # We do NOT reset state. We continue from where we left off.
-            self.engine.settle(input_vec, duration_steps=15)
+            self.engine.settle(input_vec, duration_steps=100)
             state_free = self.engine.state.clone()
             
             # Measure Prediction (Readout) during Free Phase
@@ -152,7 +152,7 @@ class SequentialTrainer:
             nudge_mask[256:512] = 1.0
             
             # Run Nudged
-            self.engine.settle(input_vec, duration_steps=15, nudge_target=nudge_target, beta=beta, nudge_mask=nudge_mask)
+            self.engine.settle(input_vec, duration_steps=100, nudge_target=nudge_target, beta=beta, nudge_mask=nudge_mask)
             state_nudged = self.engine.state.clone()
             
             # 5. Weight Update (EqProp)
@@ -175,7 +175,7 @@ class SequentialTrainer:
             if val > 255: val = 0
             input_vec = torch.zeros(self.num_nodes, device=self.device)
             input_vec[val] = 5.0
-            self.engine.settle(input_vec, duration_steps=15)
+            self.engine.settle(input_vec, duration_steps=100)
             
         for _ in range(length):
             # 1. Free run (with last input still fading? No, we need to feed ... nothing? or Silence?)
@@ -196,7 +196,7 @@ class SequentialTrainer:
             # Feedback
             input_vec = torch.zeros(self.num_nodes, device=self.device)
             input_vec[next_byte] = 5.0
-            self.engine.settle(input_vec, duration_steps=15)
+            self.engine.settle(input_vec, duration_steps=100)
             
         print(curr_text)
         print("--------------------------------------")
@@ -204,7 +204,7 @@ class SequentialTrainer:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--nodes", type=int, default=1000) # Small for testing, 5000 for real
+    parser.add_argument("--nodes", type=int, default=10000) # Small for testing, 5000 for real
     args = parser.parse_args()
     
     device = args.device
@@ -226,7 +226,7 @@ def main():
     
     # Phase 1: Chars
     trainer.train_phase("Chars", "ndcd/data/level1_chars.txt", iterations=100, steps_per_iter=100, beta=0.5, lr=0.1)
-    trainer.generate()
+    trainer.generate(start_text="A")
     
     # Phase 2: Words
     trainer.train_phase("Words", "ndcd/data/level2_words.txt", iterations=200, steps_per_iter=100, beta=0.5, lr=0.05)
