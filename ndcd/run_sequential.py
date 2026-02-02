@@ -4,6 +4,8 @@ import numpy as np
 import os
 import time
 import argparse
+import scipy.sparse as sp
+from scipy.sparse.linalg import eigs
 from ndcd.graph import DynamicGraph
 from ndcd.engine_torch import DragonEngineTorch
 from ndcd.curriculum_gen import generate_chars, generate_toddler_words, generate_quotes
@@ -34,7 +36,31 @@ class SequentialTrainer:
         self.graph = DynamicGraph(num_nodes=num_nodes, m_edges=10, p_triad=0.1, seed=42)
         indices, values = self.graph.export_sparse_components()
         biases = self.graph.biases
+        biases = self.graph.biases
         taus = self.graph.taus
+        
+        # Spectral Radius Tuning
+        print("Tuning Spectral Radius to 0.95 (Stable)...")
+        # Construct sparse matrix depending on format
+        # values are from graph.weights[rows, cols]
+        # We need to construct Scipy sparse matrix
+        # indices is 2xE, values is 1xE
+        row = indices[0]
+        col = indices[1]
+        w_sparse = sp.csr_matrix((values, (row, col)), shape=(num_nodes, num_nodes))
+        
+        try:
+            # Calculate largest eigs
+            eigvals = eigs(w_sparse, k=1, which='LM', return_eigenvectors=False)
+            max_eig = np.abs(eigvals[0])
+            print(f"Original Spectral Radius: {max_eig:.4f}")
+            
+            target_radius = 0.95 # Stable for EqProp
+            scale_factor = target_radius / (max_eig + 1e-8)
+            values = values * scale_factor
+            print(f"Scaled weights by {scale_factor:.4f}")
+        except Exception as e:
+            print(f"Warning: Spectral tuning failed ({e}). Using default.")
         
         # 2. Initialize Engine
         # Continuous state is maintained in self.engine.state
@@ -99,8 +125,7 @@ class SequentialTrainer:
             
             # 3. Free Phase (Dream)
             # Run dynamics. Result is state_free.
-            # We do NOT reset state. We continue from where we left off.
-            self.engine.settle(input_vec, duration_steps=100)
+            self.engine.settle(input_vec, duration_steps=30)
             state_free = self.engine.state.clone()
             
             # Measure Prediction (Readout) during Free Phase
@@ -152,7 +177,7 @@ class SequentialTrainer:
             nudge_mask[256:512] = 1.0
             
             # Run Nudged
-            self.engine.settle(input_vec, duration_steps=100, nudge_target=nudge_target, beta=beta, nudge_mask=nudge_mask)
+            self.engine.settle(input_vec, duration_steps=30, nudge_target=nudge_target, beta=beta, nudge_mask=nudge_mask)
             state_nudged = self.engine.state.clone()
             
             # 5. Weight Update (EqProp)
@@ -175,7 +200,7 @@ class SequentialTrainer:
             if val > 255: val = 0
             input_vec = torch.zeros(self.num_nodes, device=self.device)
             input_vec[val] = 5.0
-            self.engine.settle(input_vec, duration_steps=100)
+            self.engine.settle(input_vec, duration_steps=30)
             
         for _ in range(length):
             # 1. Free run (with last input still fading? No, we need to feed ... nothing? or Silence?)
@@ -196,7 +221,7 @@ class SequentialTrainer:
             # Feedback
             input_vec = torch.zeros(self.num_nodes, device=self.device)
             input_vec[next_byte] = 5.0
-            self.engine.settle(input_vec, duration_steps=100)
+            self.engine.settle(input_vec, duration_steps=30)
             
         print(curr_text)
         print("--------------------------------------")

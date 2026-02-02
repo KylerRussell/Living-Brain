@@ -5,6 +5,8 @@ import numpy as np
 import os
 import time
 import argparse
+import scipy.sparse as sp
+from scipy.sparse.linalg import eigs
 from ndcd.graph import DynamicGraph
 from ndcd.engine_torch import DragonEngineTorch
 from ndcd.curriculum_gen import generate_chars, generate_toddler_words, generate_quotes
@@ -35,7 +37,26 @@ class RemoteTrainer:
         self.graph = DynamicGraph(num_nodes=num_nodes, m_edges=10, p_triad=0.1, seed=42)
         indices, values = self.graph.export_sparse_components()
         biases = self.graph.biases
+        biases = self.graph.biases
         taus = self.graph.taus
+
+        # Spectral Radius Tuning
+        print("Tuning Spectral Radius to 0.95 (Stable)...")
+        row = indices[0]
+        col = indices[1]
+        w_sparse = sp.csr_matrix((values, (row, col)), shape=(num_nodes, num_nodes))
+        
+        try:
+            eigvals = eigs(w_sparse, k=1, which='LM', return_eigenvectors=False)
+            max_eig = np.abs(eigvals[0])
+            print(f"Original Spectral Radius: {max_eig:.4f}")
+            
+            target_radius = 0.95 
+            scale_factor = target_radius / (max_eig + 1e-8)
+            values = values * scale_factor
+            print(f"Scaled weights by {scale_factor:.4f}")
+        except Exception as e:
+            print(f"Warning: Spectral tuning failed ({e}). Using default.")
         
         # 2. Initialize Engine
         self.engine = DragonEngineTorch(num_nodes, indices, values, biases, taus, dt=0.01, device=device)
@@ -70,8 +91,7 @@ class RemoteTrainer:
             input_vec = torch.zeros(self.num_nodes, device=self.device)
             input_vec[input_byte] = 5.0 
             
-            # Free Phase
-            self.engine.settle(input_vec, duration_steps=15)
+            self.engine.settle(input_vec, duration_steps=30)
             state_free = self.engine.state.clone()
             
             # Measure Prediction
@@ -95,7 +115,7 @@ class RemoteTrainer:
             nudge_mask = torch.zeros(self.num_nodes, device=self.device)
             nudge_mask[256:512] = 1.0
             
-            self.engine.settle(input_vec, duration_steps=15, nudge_target=nudge_target, beta=beta, nudge_mask=nudge_mask)
+            self.engine.settle(input_vec, duration_steps=30, nudge_target=nudge_target, beta=beta, nudge_mask=nudge_mask)
             state_nudged = self.engine.state.clone()
             
             # Update
@@ -117,7 +137,7 @@ class RemoteTrainer:
             if val > 255: val = 0
             input_vec = torch.zeros(self.num_nodes, device=self.device)
             input_vec[val] = 5.0
-            self.engine.settle(input_vec, duration_steps=15)
+            self.engine.settle(input_vec, duration_steps=30)
             
         for _ in range(length):
             state = self.engine.state
@@ -149,9 +169,9 @@ def main():
     
     # Phase 1: Chars
     ray.get(trainer.train_phase.remote("Chars", "ndcd/data/level1_chars.txt", iterations=100, steps_per_iter=100, beta=0.5, lr=0.1))
-    print(ray.get(trainer.generate.remote()))
+    print(ray.get(trainer.generate.remote(start_text="A")))
     
-    # Phase 2: Words
+    '''# Phase 2: Words
     ray.get(trainer.train_phase.remote("Words", "ndcd/data/level2_words.txt", iterations=200, steps_per_iter=100, beta=0.5, lr=0.05))
     print(ray.get(trainer.generate.remote()))
     
@@ -161,7 +181,7 @@ def main():
     
     # Phase 4: Literature
     ray.get(trainer.train_phase.remote("Literature", "ndcd/data/sherlock.txt", iterations=500, steps_per_iter=500, beta=1.0, lr=0.01))
-    print(ray.get(trainer.generate.remote(start_text="Sherlock", length=200)))
+    print(ray.get(trainer.generate.remote(start_text="Sherlock", length=200)))'''
     
     print("Done!")
     ray.shutdown()
