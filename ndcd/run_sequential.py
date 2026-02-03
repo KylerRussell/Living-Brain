@@ -39,32 +39,16 @@ class SequentialTrainer:
         biases = self.graph.biases
         taus = self.graph.taus
         
-        # Spectral Radius Tuning
-        print("Tuning Spectral Radius to 0.95 (Stable)...")
-        # Construct sparse matrix depending on format
-        # values are from graph.weights[rows, cols]
-        # We need to construct Scipy sparse matrix
-        # indices is 2xE, values is 1xE
-        row = indices[0]
-        col = indices[1]
-        w_sparse = sp.csr_matrix((values, (row, col)), shape=(num_nodes, num_nodes))
+        self.indices = indices
+        self.initial_values = values
         
-        try:
-            # Calculate largest eigs
-            eigvals = eigs(w_sparse, k=1, which='LM', return_eigenvectors=False)
-            max_eig = np.abs(eigvals[0])
-            print(f"Original Spectral Radius: {max_eig:.4f}")
-            
-            target_radius = 3.0 # Boosted for clamped inputs
-            scale_factor = target_radius / (max_eig + 1e-8)
-            values = values * scale_factor
-            print(f"Scaled weights by {scale_factor:.4f}")
-        except Exception as e:
-            print(f"Warning: Spectral tuning failed ({e}). Using default.")
+        
+        # Spectral Radius Tuning
+        self.tune_spectral_radius(target_radius=0.95)
         
         # 2. Initialize Engine
         # Continuous state is maintained in self.engine.state
-        self.engine = DragonEngineTorch(num_nodes, indices, values, biases, taus, dt=0.01, device=device)
+        self.engine = DragonEngineTorch(num_nodes, indices, self.initial_values, biases, taus, dt=0.01, device=device)
         
         # 3. Define I/O Masks
         # Nodes 0-255: Input
@@ -76,6 +60,54 @@ class SequentialTrainer:
         # Input Projection: mapping byte 0-255 to node 0-255 is just Identity
         # But technically we inject current into these nodes.
         self.eye = torch.eye(256, device=device)
+
+    def tune_spectral_radius(self, target_radius=0.95):
+        """
+        Tunes the spectral radius of the weight matrix to a target value.
+        Updates self.initial_values.
+        If self.engine exists, it also updates self.engine.weight_values.
+        """
+        print(f"Tuning Spectral Radius to {target_radius:.2f} (Stable)...")
+        # Re-construct sparse matrix from components
+        # We need to use what is currently available. 
+        # If engine exists, use engine weights (as they change during babbling).
+        # But we need numpy for scipy eigs.
+        
+        if hasattr(self, 'engine'):
+            # Pull from GPU if needed
+            w_tensor = self.engine.weight_values.cpu().numpy()
+            indices = self.indices # We need to store indices in self
+        else:
+             # Initial construction
+             if not hasattr(self, 'initial_values'):
+                 # Need to get from graph if not yet saved?
+                 # Actually __init__ flow shows we have 'values' from graph export
+                 # We need to save 'values' to self.initial_values in __init__
+                 pass
+             w_tensor = self.initial_values
+             indices = self.indices
+             
+        row = indices[0]
+        col = indices[1]
+        w_sparse = sp.csr_matrix((w_tensor, (row, col)), shape=(self.num_nodes, self.num_nodes))
+        
+        try:
+            # Calculate largest eigs
+            eigvals = eigs(w_sparse, k=1, which='LM', return_eigenvectors=False)
+            max_eig = np.abs(eigvals[0])
+            print(f"Current Spectral Radius: {max_eig:.4f}")
+            
+            scale_factor = target_radius / (max_eig + 1e-8)
+            w_tensor = w_tensor * scale_factor
+            print(f"Scaled weights by {scale_factor:.4f}")
+            
+            if hasattr(self, 'engine'):
+                self.engine.weight_values = torch.tensor(w_tensor, dtype=torch.float32, device=self.device)
+            else:
+                self.initial_values = w_tensor
+
+        except Exception as e:
+            print(f"Warning: Spectral tuning failed ({e}). Using default.")
         
     def train_babbling(self, iterations=1000, lr=0.01):
         print(f"\n=== Starting Phase 0: Hebbian Babbling ===")
@@ -101,6 +133,12 @@ class SequentialTrainer:
                 print(f"Babbling Step {i}/{iterations}", end='\r')
                 
         print(f"\nBabbling Complete. Time: {time.time()-start_time:.2f}s")
+        
+        # RE-TUNE SPECTRAL RADIUS
+        # Hebbian learning likely exploded the weights. We need to normalize back to 0.95
+        # so EqProp starts in a stable regime.
+        print("\nRe-tuning after Babbling...")
+        self.tune_spectral_radius(target_radius=0.95)
         
     def train_phase(self, phase_name, data_path, iterations, steps_per_iter, beta=0.1, lr=0.01, use_rl=False):
         print(f"\n=== Starting Phase: {phase_name} ===")
@@ -214,7 +252,7 @@ class SequentialTrainer:
             if val > 255: val = 0
             input_vec = torch.zeros(self.num_nodes, device=self.device)
             input_vec[val] = 1.0
-            self.engine.settle(input_vec, duration_steps=30)
+            self.engine.settle(input_vec, max_steps=30)
             
         for _ in range(length):
             # 1. Free run (with last input still fading? No, we need to feed ... nothing? or Silence?)
@@ -235,7 +273,7 @@ class SequentialTrainer:
             # Feedback
             input_vec = torch.zeros(self.num_nodes, device=self.device)
             input_vec[next_byte] = 1.0
-            self.engine.settle(input_vec, duration_steps=30)
+            self.engine.settle(input_vec, max_steps=30)
             
         print(curr_text)
         print("--------------------------------------")
