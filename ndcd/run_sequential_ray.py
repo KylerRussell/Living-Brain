@@ -28,13 +28,18 @@ def ensure_data(data_path, phase_name):
 
 @ray.remote(num_cpus=1)
 class RemoteTrainer:
-    def __init__(self, num_nodes=5000, device='cpu'):
+    def __init__(self, num_nodes=1000, device='cpu', m_edges=20, target_radius=3.0, input_scale=1.0, clamp_mode='hard', dt=0.01):
         self.device = device
         self.num_nodes = num_nodes
+        self.input_scale = input_scale
+        self.clamp_mode = clamp_mode
+        self.dt = dt
+        self.target_radius = target_radius
+        self.m_edges = m_edges
         
         # 1. Initialize Graph
-        print("Initializing Dynamic Graph...")
-        self.graph = DynamicGraph(num_nodes=num_nodes, m_edges=10, p_triad=0.1, seed=42)
+        print(f"Initializing Dynamic Graph (m={m_edges})...")
+        self.graph = DynamicGraph(num_nodes=num_nodes, m_edges=m_edges, p_triad=0.1, seed=42)
         indices, values = self.graph.export_sparse_components()
         biases = self.graph.biases
         biases = self.graph.biases
@@ -51,15 +56,17 @@ class RemoteTrainer:
             max_eig = np.abs(eigvals[0])
             print(f"Original Spectral Radius: {max_eig:.4f}")
             
-            target_radius = 0.95 
+            print(f"Original Spectral Radius: {max_eig:.4f}")
+            
             scale_factor = target_radius / (max_eig + 1e-8)
             values = values * scale_factor
-            print(f"Scaled weights by {scale_factor:.4f}")
+            print(f"Scaled weights by {scale_factor:.4f} (Target: {target_radius})")
         except Exception as e:
             print(f"Warning: Spectral tuning failed ({e}). Using default.")
         
         # 2. Initialize Engine
-        self.engine = DragonEngineTorch(num_nodes, indices, values, biases, taus, dt=0.01, device=device)
+        # 2. Initialize Engine
+        self.engine = DragonEngineTorch(num_nodes, indices, values, biases, taus, dt=dt, device=device)
         self.eye = torch.eye(256, device=device)
         self.input_indices = list(range(0, 256))
         self.output_indices = list(range(256, 512))
@@ -78,8 +85,9 @@ class RemoteTrainer:
             input_vec = torch.zeros(self.num_nodes, device=self.device)
             input_vec[self.input_indices] = input_vals
             
-            # Settle (Free logic, but inputs clamped)
-            self.engine.settle(input_vec, input_mask=input_mask)
+            # Settle
+            mask = input_mask if self.clamp_mode == 'hard' else None
+            self.engine.settle(input_vec, input_mask=mask)
             
             # Hebbian Update
             self.engine.update_weights_hebbian(learning_rate=lr)
@@ -120,9 +128,11 @@ class RemoteTrainer:
             input_mask[self.input_indices] = 1.0
             
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[input_byte] = 5.0 
+            input_vec = torch.zeros(self.num_nodes, device=self.device)
+            input_vec[input_byte] = self.input_scale
             
-            self.engine.settle(input_vec, input_mask=input_mask)
+            mask = input_mask if self.clamp_mode == 'hard' else None
+            self.engine.settle(input_vec, input_mask=mask)
             state_free = self.engine.state.clone()
             
             # Measure Prediction
@@ -156,7 +166,7 @@ class RemoteTrainer:
                 nudge_mask = torch.zeros(self.num_nodes, device=self.device)
                 nudge_mask[self.output_indices] = 1.0
                 
-                self.engine.settle(input_vec, nudge_target=nudge_target, beta=beta, nudge_mask=nudge_mask, input_mask=input_mask)
+                self.engine.settle(input_vec, nudge_target=nudge_target, beta=beta, nudge_mask=nudge_mask, input_mask=mask)
                 state_nudged = self.engine.state.clone()
                 
                 # Update
@@ -166,8 +176,19 @@ class RemoteTrainer:
                  # Print to Ray logs
                  print(f"Step {step}/{total_steps} | Acc: {correct_count/(step+1):.2%}")
                  
-        print(f"Phase Complete. Final Acc: {correct_count/total_steps:.2%}")
-        return correct_count/total_steps
+        avg_acc = correct_count / total_steps
+        
+        # Collect Stats
+        state_mag = self.engine.state.abs().mean().item()
+        weight_mag = self.engine.weight_values.abs().mean().item()
+        
+        print(f"Phase Complete. Final Acc: {avg_acc:.2%} | Act: {state_mag:.4f} | W: {weight_mag:.4f}")
+        return {
+            "acc": avg_acc,
+            "activity": state_mag,
+            "weights": weight_mag,
+            "correct": correct_count
+        }
         
     def generate(self, start_text="The", length=100):
         print(f"\n--- Generating: {start_text} ... ---")
@@ -177,8 +198,8 @@ class RemoteTrainer:
             val = ord(char)
             if val > 255: val = 0
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[val] = 5.0
-            self.engine.settle(input_vec, duration_steps=30)
+            input_vec[val] = self.input_scale
+            self.engine.settle(input_vec)
             
         for _ in range(length):
             state = self.engine.state
@@ -192,8 +213,10 @@ class RemoteTrainer:
             curr_text += char
             
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[next_byte] = 5.0
-            self.engine.settle(input_vec, input_mask=input_mask)
+            input_vec[next_byte] = self.input_scale
+            
+            mask = input_mask if self.clamp_mode == 'hard' else None
+            self.engine.settle(input_vec, input_mask=mask)
             
         print(curr_text)
         print("--------------------------------------")
@@ -205,7 +228,7 @@ def main():
     
     # Instantiate Remote Actor
     # We use a single actor to maintain state!
-    trainer = RemoteTrainer.remote(num_nodes=1000, device='cpu')
+    trainer = RemoteTrainer.remote(num_nodes=1000, device='cpu', m_edges=20, target_radius=3.0, input_scale=1.0, clamp_mode='hard')
     
     # Run Phases
     print("Starting Sequential Training on Ray...")

@@ -33,7 +33,7 @@ class SequentialTrainer:
         
         # 1. Initialize Graph
         print("Initializing Dynamic Graph...")
-        self.graph = DynamicGraph(num_nodes=num_nodes, m_edges=10, p_triad=0.1, seed=42)
+        self.graph = DynamicGraph(num_nodes=num_nodes, m_edges=20, p_triad=0.1, seed=42)
         indices, values = self.graph.export_sparse_components()
         biases = self.graph.biases
         biases = self.graph.biases
@@ -55,7 +55,7 @@ class SequentialTrainer:
             max_eig = np.abs(eigvals[0])
             print(f"Original Spectral Radius: {max_eig:.4f}")
             
-            target_radius = 0.95 # Stable for EqProp
+            target_radius = 3.0 # Boosted for clamped inputs
             scale_factor = target_radius / (max_eig + 1e-8)
             values = values * scale_factor
             print(f"Scaled weights by {scale_factor:.4f}")
@@ -145,7 +145,7 @@ class SequentialTrainer:
 
             input_vec = torch.zeros(self.num_nodes, device=self.device)
             # One-hot input current (used as value for clamping)
-            input_vec[input_byte] = 5.0 
+            input_vec[input_byte] = 1.0 
             
             # 3. Free Phase (Dream)
             # Run dynamics. Result is state_free.
@@ -213,7 +213,7 @@ class SequentialTrainer:
             val = ord(char)
             if val > 255: val = 0
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[val] = 5.0
+            input_vec[val] = 1.0
             self.engine.settle(input_vec, duration_steps=30)
             
         for _ in range(length):
@@ -234,7 +234,7 @@ class SequentialTrainer:
             
             # Feedback
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[next_byte] = 5.0
+            input_vec[next_byte] = 1.0
             self.engine.settle(input_vec, duration_steps=30)
             
         print(curr_text)
