@@ -25,8 +25,8 @@ class DebugTrainer(SequentialTrainer):
         
         curr_idx = 0
         
-        # We'll run just a few steps
-        total_steps = 10 
+        # Use provided iterations logic
+        total_steps = iterations * steps_per_iter
         
         for step in range(total_steps):
             if curr_idx >= len(data) - 1: curr_idx = 0
@@ -96,10 +96,9 @@ def main():
     
     # Run a bit of babbling
     trainer.train_babbling(iterations=50) # Short warmup
-    trainer.train_phase("Chars", "ndcd/data/level1_chars.txt", iterations=10, steps_per_iter=100, beta=0.5, lr=0.1, use_rl=False)
     
     # Run debug phase
-    trainer.train_debug("Chars", "ndcd/data/level1_chars.txt", iterations=1, steps_per_iter=10, beta=0.5, lr=0.1)
+    trainer.train_debug("Chars", "ndcd/data/level1_chars.txt", iterations=10, steps_per_iter=10, beta=0.5, lr=0.1)
 
 if __name__ == "__main__":
     main()

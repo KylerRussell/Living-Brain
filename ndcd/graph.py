@@ -96,7 +96,8 @@ class DynamicGraph:
         
         # State Vectors
         self.states = np.zeros(num_nodes) # Internal potential s
-        self.biases = np.zeros(num_nodes)
+        # Initialize biases with small noise to break dead states
+        self.biases = np.random.uniform(-0.01, 0.01, num_nodes)
         
     def export_sparse_components(self):
         """

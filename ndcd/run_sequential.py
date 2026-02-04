@@ -27,7 +27,7 @@ def ensure_data(data_path, phase_name):
                  print(f"Failed to download Sherlock: {e}")
 
 class SequentialTrainer:
-    def __init__(self, num_nodes=10000, device='cpu'):
+    def __init__(self, num_nodes=2000, device='cpu'):
         self.device = device
         self.num_nodes = num_nodes
         
@@ -44,7 +44,7 @@ class SequentialTrainer:
         
         
         # Spectral Radius Tuning
-        self.tune_spectral_radius(target_radius=0.95)
+        self.tune_spectral_radius(target_radius=0.99)
         
         # 2. Initialize Engine
         # Continuous state is maintained in self.engine.state
@@ -138,7 +138,7 @@ class SequentialTrainer:
         # Hebbian learning likely exploded the weights. We need to normalize back to 0.95
         # so EqProp starts in a stable regime.
         print("\nRe-tuning after Babbling...")
-        self.tune_spectral_radius(target_radius=0.95)
+        self.tune_spectral_radius(target_radius=0.99)
         
     def train_phase(self, phase_name, data_path, iterations, steps_per_iter, beta=0.1, lr=0.01, use_rl=False):
         print(f"\n=== Starting Phase: {phase_name} ===")
@@ -159,7 +159,10 @@ class SequentialTrainer:
         total_steps = iterations * steps_per_iter
         
         loss_accum = 0.0
-        correct_count = 0
+        loss_accum = 0.0
+        # Rolling Accuracy Window
+        acc_window = []
+        acc_top3_window = []
         
         # EqProp Hyperparams
         # free_phase_steps = 10 # Settling time
@@ -195,13 +198,25 @@ class SequentialTrainer:
             # Output is nodes 256-511
             output_activity = state_free[256:512]
             probs = torch.softmax(output_activity, dim=0)
+            
+            # Top-1
             pred_idx = torch.argmax(probs).item()
             
+            # Top-3
+            _, top3_indices = torch.topk(probs, 3)
+            is_top3 = (target_byte in top3_indices.tolist())
+            if is_top3:
+                acc_top3_window.append(1.0)
+            else:
+                acc_top3_window.append(0.0)
+            
             reward = 0.0
-            if pred_idx == target_byte:
-                correct_count += 1
+            is_correct = (pred_idx == target_byte)
+            if is_correct:
+                acc_window.append(1.0)
                 reward = 1.0
             else:
+                acc_window.append(0.0)
                 reward = -0.1
                 
             loss = -torch.log(probs[target_byte] + 1e-8).item()
@@ -238,9 +253,18 @@ class SequentialTrainer:
                 self.engine.update_weights_eq_prop(state_free, state_nudged, beta, lr)
             
             if step % 100 == 0:
-                 print(f"Step {step}/{total_steps} | Loss: {loss:.4f} | Acc: {correct_count/(step+1):.2%}", end='\r')
+                 # Rolling Acc
+                 if len(acc_window) > 100: acc_window = acc_window[-100:]
+                 if len(acc_top3_window) > 100: acc_top3_window = acc_top3_window[-100:]
                  
-        print(f"\nPhase Complete. Avg Loss: {loss_accum/total_steps:.4f} | Final Acc: {correct_count/total_steps:.2%}")
+                 rolling_acc = sum(acc_window) / len(acc_window) if len(acc_window) > 0 else 0.0
+                 rolling_acc3 = sum(acc_top3_window) / len(acc_top3_window) if len(acc_top3_window) > 0 else 0.0
+                 
+                 print(f"Step {step}/{total_steps} | Loss: {loss:.4f} | Roll Acc: {rolling_acc:.2%} | Top3: {rolling_acc3:.2%}", end='\r')
+                 
+        final_acc = sum(acc_window)/len(acc_window) if len(acc_window) > 0 else 0.0
+        final_acc3 = sum(acc_top3_window)/len(acc_top3_window) if len(acc_top3_window) > 0 else 0.0
+        print(f"\nPhase Complete. Avg Loss: {loss_accum/total_steps:.4f} | Final Roll Acc: {final_acc:.2%} | Final Top3: {final_acc3:.2%}")
         
     def generate(self, start_text="The", length=100):
         print(f"\n--- Generating: {start_text} ... ---")
@@ -281,7 +305,7 @@ class SequentialTrainer:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--nodes", type=int, default=10000) # Small for testing, 5000 for real
+    parser.add_argument("--nodes", type=int, default=2000) # Small for testing, 5000 for real
     args = parser.parse_args()
     
     device = args.device
@@ -301,7 +325,9 @@ def main():
     trainer.train_babbling(iterations=1000)
     
     # Phase 1: Chars
-    trainer.train_phase("Chars", "ndcd/data/level1_chars.txt", iterations=100, steps_per_iter=100, beta=0.5, lr=0.1, use_rl=False)
+    # Increased Beta and LR for stronger learning signal
+    # Increased iterations for optimization (500)
+    trainer.train_phase("Chars", "ndcd/data/level1_chars.txt", iterations=500, steps_per_iter=100, beta=1.0, lr=0.1, use_rl=False)
     trainer.generate(start_text="A")
     
     # Phase 2: Words
