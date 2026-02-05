@@ -46,6 +46,9 @@ def jit_solve_dynamics(
     # Pre-calculate inhibition constant part if needed
     # But inhibition depends on current_s state, so it's dynamic.
     
+    # Track previous spikes for LIF propagation
+    previous_spikes = torch.zeros_like(current_s)
+    
     while step_count < max_steps and diff > tol:
         old_state = current_s
         
@@ -79,104 +82,94 @@ def jit_solve_dynamics(
             inhibition_signal = (total_activity - masked_activity) * inhibition_mask
             current_input = current_input - (inhibition_beta * inhibition_signal)
 
-        # 2. RK4 Step with Attention Modulation
-            # Attention scales effectively "time speed" or "precision" -> dt * attention_factor
-            effective_dt = dt * attention_factor
-
-            # Define activation: Tanh (Rate) OR Spiking (LIF) are handled implicitly?
-            # RK4 is for the continuous potential 's'.
-            # The interaction term depends on rho(s).
-            # If spiking, rho(s) should be spike (1 or 0) from *previous* step?
-            # For continuous dynamics, we use tanh(s) inside RK4. 
-            # If we want spiking, we check threshold AFTER update, reset s, and emit spike for NEXT step.
-            # But inside RK4 step, we need the "input" from neighbors.
-            # In rate code: input ~ W * tanh(s).
-            # In spiking code: input ~ W * spikes.
-            # Here we hybridize: We use tanh(s) for the continuous integration phase (sub-threshold dynamics),
-            # but if we reset, we conceptually fired.
-            # However, standard LIF is linear below threshold. 
-            # User asks to "Modify rk4_step... to include threshold".
-            # Providing a Spiking Mode switch logic is complex in pure RK4.
-            # Simpler: Use activation inside RK4 as tanh(s) usually, unless we track spikes explicitly.
-            # Let's stick to cleaning up the integration first.
-            
-            def get_activation(s: torch.Tensor, threshold: float) -> torch.Tensor:
-                # If threshold is high (e.g. > 10), behave like rate code (tanh)
-                # If threshold is reasonable (e.g. 1.0), behave like LIF?
-                # Actually, mixing them in JIT is tricky without a bool flag.
-                # Use tanh always for RK4 gradient calculation to keep smooth flow, 
-                # Spiking is an "event" on top.
-                return torch.tanh(s)
-
-            # k1
-            rho_s = torch.tanh(current_s) # Continuous approximation for dynamics
+        # 1.6 Spike Propagation (LIF)
+        # Add impulse from neurons that fired in the PREVIOUS step
+        if spiking_threshold < 10.0:
             if current_s.dim() == 1:
-                synaptic_input = torch.mv(weights, rho_s)
+                spike_input = torch.mv(weights, previous_spikes)
             else:
-                synaptic_input = torch.matmul(weights, rho_s.t()).t()
-                
-            total_input = synaptic_input + biases + current_input
-            k1 = (-current_s + total_input) / taus
+                spike_input = torch.matmul(weights, previous_spikes.t()).t()
+            current_input = current_input + spike_input
             
-            # k2
-            s2 = current_s + 0.5 * effective_dt * k1
-            rho_s = torch.tanh(s2)
-            if s2.dim() == 1:
-                synaptic_input = torch.mv(weights, rho_s)
-            else:
-                synaptic_input = torch.matmul(weights, rho_s.t()).t()
-            total_input = synaptic_input + biases + current_input
-            k2 = (-s2 + total_input) / taus
-            
-            # k3
-            s3 = current_s + 0.5 * effective_dt * k2
-            rho_s = torch.tanh(s3)
-            if s3.dim() == 1:
-                synaptic_input = torch.mv(weights, rho_s)
-            else:
-                synaptic_input = torch.matmul(weights, rho_s.t()).t()
-            total_input = synaptic_input + biases + current_input
-            k3 = (-s3 + total_input) / taus
-            
-            # k4
-            s4 = current_s + effective_dt * k3
-            rho_s = torch.tanh(s4)
-            if s4.dim() == 1:
-                synaptic_input = torch.mv(weights, rho_s)
-            else:
-                synaptic_input = torch.matmul(weights, rho_s.t()).t()
-            total_input = synaptic_input + biases + current_input
-            k4 = (-s4 + total_input) / taus
-            
-            current_s = current_s + (effective_dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+        # 2. RK4 Step with Attention Modulation
+        # Attention scales effectively "time speed" or "precision" -> dt * attention_factor
+        effective_dt = dt * attention_factor
 
-            # --- Spiking Logic (LIF) ---
-            # If potential > threshold, Fire & Reset.
-            # We track spikes for output (but next step uses them? 
-            # For now, this modifies current_s for proper reset).
-            if spiking_threshold < 10.0: # Heuristic to enable spiking
-                spikes = (current_s > spiking_threshold).float()
-                # reset fired neurons to 0
-                current_s = current_s * (1.0 - spikes) 
-                # "Fire" is transient. The 'rho' for next step's input *should* reflect this spike.
-                # But current logic recalculates rho=tanh(s) at start of loop.
-                # Tanh(0) = 0. So the spike is LOST in the next step's input if we just reset!
-                # We need a mechanism to sustain the spike effect or use the spike in the next step.
-                # Simplified: The "Output" of this function will be state. 
-                # If we rely on rate coding, we shouldn't reset.
-                # If we rely on spike coding, we need to return spikes.
-                # Given existing codebase expects continuous values, we will just implement the RESET mechanism
-                # which acts as a metabolic cost / regulator, and assume 'spikes' are the high values before reset?
-                # No, user said "fire a spike (output = 1)".
-                # Let's force the STATE to be high briefly? No, that violates reset.
-                # The user says "Output=1". This suggests the external observer sees 1.
-                # But internal dynamics see 0?
-                # Real neurons: Pulse is emitted.
-                # We will handle it by NOT resetting fully? Or by adding a "refractory" term?
-                # User instructions: "When a potential exceeds a threshold... 'fire' a spike (output = 1) and reset the potential to 0."
-                # We will just do the reset here to satisfy the "Dynamics" request. 
-                # The High Value was achieved during RK4, so it contributed to 'diff' and traces.
-                pass 
+        # Define activation: Tanh (Rate) OR Spiking (LIF) are handled implicitly?
+        # RK4 is for the continuous potential 's'.
+        # The interaction term depends on rho(s).
+        # If spiking, rho(s) should be spike (1 or 0) from *previous* step?
+        # For continuous dynamics, we use tanh(s) inside RK4. 
+        # If we want spiking, we check threshold AFTER update, reset s, and emit spike for NEXT step.
+        # But inside RK4 step, we need the "input" from neighbors.
+        # In rate code: input ~ W * tanh(s).
+        # In spiking code: input ~ W * spikes.
+        # Here we hybridize: We use tanh(s) for the continuous integration phase (sub-threshold dynamics),
+        # but if we reset, we conceptually fired.
+        # However, standard LIF is linear below threshold. 
+        # User asks to "Modify rk4_step... to include threshold".
+        # Providing a Spiking Mode switch logic is complex in pure RK4.
+        # Simpler: Use activation inside RK4 as tanh(s) usually, unless we track spikes explicitly.
+        # Let's stick to cleaning up the integration first.
+        
+
+        # k1
+        rho_s = torch.tanh(current_s) # Continuous approximation for dynamics
+        if current_s.dim() == 1:
+            synaptic_input = torch.mv(weights, rho_s)
+        else:
+            synaptic_input = torch.matmul(weights, rho_s.t()).t()
+            
+        total_input = synaptic_input + biases + current_input
+        k1 = (-current_s + total_input) / taus
+        
+        # k2
+        s2 = current_s + 0.5 * effective_dt * k1
+        rho_s = torch.tanh(s2)
+        if s2.dim() == 1:
+            synaptic_input = torch.mv(weights, rho_s)
+        else:
+            synaptic_input = torch.matmul(weights, rho_s.t()).t()
+        total_input = synaptic_input + biases + current_input
+        k2 = (-s2 + total_input) / taus
+        
+        # k3
+        s3 = current_s + 0.5 * effective_dt * k2
+        rho_s = torch.tanh(s3)
+        if s3.dim() == 1:
+            synaptic_input = torch.mv(weights, rho_s)
+        else:
+            synaptic_input = torch.matmul(weights, rho_s.t()).t()
+        total_input = synaptic_input + biases + current_input
+        k3 = (-s3 + total_input) / taus
+        
+        # k4
+        s4 = current_s + effective_dt * k3
+        rho_s = torch.tanh(s4)
+        if s4.dim() == 1:
+            synaptic_input = torch.mv(weights, rho_s)
+        else:
+            synaptic_input = torch.matmul(weights, rho_s.t()).t()
+        total_input = synaptic_input + biases + current_input
+        k4 = (-s4 + total_input) / taus
+        
+        current_s = current_s + (effective_dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+
+        # --- Spiking Logic (LIF) ---
+        # If potential > threshold, Fire & Reset.
+        # We track spikes for output (but next step uses them? 
+        # For now, this modifies current_s for proper reset).
+        if spiking_threshold < 10.0: # Heuristic to enable spiking
+            new_spikes = (current_s > spiking_threshold).float()
+            # reset fired neurons to 0
+            current_s = current_s * (1.0 - new_spikes)
+            previous_spikes = new_spikes # Save for next iteration to propagate signal
+                
+        else:
+                previous_spikes = torch.zeros_like(current_s)
+                 
+        
+        # --- Hard Clamping ---
 
         
         # --- Hard Clamping ---
@@ -235,7 +228,7 @@ class DragonEngineTorch:
     def activation_function(self, s):
         return torch.tanh(s)
 
-    def settle(self, input_vector, max_steps=5000, tol=1e-4, nudge_target=None, beta=0.0, nudge_mask=None, input_mask=None, inhibition_mask=None, inhibition_beta=0.0, attention_factor=1.0):
+    def settle(self, input_vector, max_steps=5000, tol=1e-4, nudge_target=None, beta=0.0, nudge_mask=None, input_mask=None, inhibition_mask=None, inhibition_beta=0.0, attention_factor=1.0, spiking_threshold=100.0):
 
         """
         Runs the settling loop using JIT compiled function.
@@ -288,16 +281,9 @@ class DragonEngineTorch:
             beta,
             input_m,
             inhib_m,
-            input_m,
-            inhib_m,
             inhibition_beta,
             attention_factor,
-            1.0 if attention_factor > 1.5 else 100.0 # Heuristic: if focused, enable spiking? Or just separate param? Hardcoding threshold 100 to disable for now unless specified.
-            # Wait, user asked for Spiking Integration generally. Let's default to RATE mode (threshold=100) to preserve logic,
-            # but allow future enablement. Or set to 1.5 if we want to test LIF. 
-            # User said "When potential exceeds threshold (e.g. 1.0)...".
-            # For this task, we enable it if the user wants "Spiking Dynamics". I'll default to 100.0 (OFF) effectively, 
-            # but the capability is there.
+            spiking_threshold
         )
         return self.activation_function(self.state)
 
