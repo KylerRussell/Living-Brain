@@ -142,6 +142,7 @@ class SequentialTrainer:
         
     def train_phase(self, phase_name, data_path, iterations, steps_per_iter, beta=0.1, lr=0.01, use_rl=False):
         print(f"\n=== Starting Phase: {phase_name} ===")
+        print(f"Run started at: {time.ctime()}")
         ensure_data(data_path, phase_name)
         
         if not os.path.exists(data_path):
@@ -236,8 +237,8 @@ class SequentialTrainer:
                 nudge_mask = torch.zeros(self.num_nodes, device=self.device)
                 nudge_mask[self.output_indices] = 1.0
                 
-                # Initialize target to slightly negative (suppress incorrect classes)
-                nudge_target = torch.ones(self.num_nodes, device=self.device) * -0.1 
+                # Initialize target to output suppression (strong negative to force decision)
+                nudge_target = torch.ones(self.num_nodes, device=self.device) * -0.8
                 # Zero out the non-output nodes so we don't suppress the brain!
                 nudge_target[:256] = 0.0 
                 nudge_target[512:] = 0.0
@@ -245,8 +246,13 @@ class SequentialTrainer:
                 # Pull the correct answer UP strongly
                 nudge_target[256 + target_byte] = 1.0
                 
-                # Run Nudged
-                self.engine.settle(input_vec, nudge_target=nudge_target, beta=beta, nudge_mask=nudge_mask, input_mask=input_mask)
+                # Lateral Inhibition Mask (Output Nodes Only)
+                inhib_mask = torch.zeros(self.num_nodes, device=self.device)
+                inhib_mask[self.output_indices] = 1.0
+                
+                # Run Nudged (with Lateral Inhibition)
+                # Apply inhibition_beta=1.0 to enforce Winner-Take-All
+                self.engine.settle(input_vec, nudge_target=nudge_target, beta=beta, nudge_mask=nudge_mask, input_mask=input_mask, inhibition_mask=inhib_mask, inhibition_beta=1.0)
                 state_nudged = self.engine.state.clone()
                 
                 # 5. Weight Update (EqProp)
@@ -260,7 +266,8 @@ class SequentialTrainer:
                  rolling_acc = sum(acc_window) / len(acc_window) if len(acc_window) > 0 else 0.0
                  rolling_acc3 = sum(acc_top3_window) / len(acc_top3_window) if len(acc_top3_window) > 0 else 0.0
                  
-                 print(f"Step {step}/{total_steps} | Loss: {loss:.4f} | Roll Acc: {rolling_acc:.2%} | Top3: {rolling_acc3:.2%}", end='\r')
+                 elapsed = time.time() - start_time
+                 print(f"Step {step}/{total_steps} | Time: {elapsed:.0f}s | Loss: {loss:.4f} | Roll Acc: {rolling_acc:.2%} | Top3: {rolling_acc3:.2%}", end='\r')
                  
         final_acc = sum(acc_window)/len(acc_window) if len(acc_window) > 0 else 0.0
         final_acc3 = sum(acc_top3_window)/len(acc_top3_window) if len(acc_top3_window) > 0 else 0.0

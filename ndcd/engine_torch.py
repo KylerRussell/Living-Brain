@@ -3,7 +3,6 @@ import torch
 from typing import Optional, Tuple
 
 @torch.jit.script
-@torch.jit.script
 def jit_solve_dynamics(
     initial_state: torch.Tensor,
     initial_traces: torch.Tensor,
@@ -18,7 +17,9 @@ def jit_solve_dynamics(
     nudge_target: Optional[torch.Tensor],
     nudge_mask: Optional[torch.Tensor],
     beta: float,
-    input_mask: Optional[torch.Tensor]
+    input_mask: Optional[torch.Tensor],
+    inhibition_mask: Optional[torch.Tensor],
+    inhibition_beta: float
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     JIT-compiled static function for the physics loop.
@@ -38,6 +39,9 @@ def jit_solve_dynamics(
     step_count = 0
     diff = 1.0
     
+    # Pre-calculate inhibition constant part if needed
+    # But inhibition depends on current_s state, so it's dynamic.
+    
     while step_count < max_steps and diff > tol:
         old_state = current_s
         
@@ -51,6 +55,23 @@ def jit_solve_dynamics(
             nudge_force = beta * diff_nudge
             current_input = current_input + nudge_force
             
+            
+        # 1.5 Lateral Inhibition (Softmax-like competition)
+        # I_inhib = -beta_inhib * (Sum(rho * mask) - (rho * mask))
+        # Effectively: Everyone inhibited by the Total Activity of the group, except themselves.
+        if inhibition_mask is not None and inhibition_beta > 0.0:
+            rho_s = torch.tanh(current_s)
+            # Masked activity
+            masked_activity = rho_s * inhibition_mask
+            total_activity = torch.sum(masked_activity)
+            # Inhibition signal: Total - Self
+            # We want to inhibit 's' by this amount.
+            # I_inhib_vec = -inhibition_beta * (total_activity - masked_activity)
+            # But we only apply this inhibition TO the masked nodes.
+            
+            inhibition_signal = (total_activity - masked_activity) * inhibition_mask
+            current_input = current_input - (inhibition_beta * inhibition_signal)
+
         # 2. RK4 Step
         # Unrolled for JIT compatibility
         
@@ -142,7 +163,7 @@ class DragonEngineTorch:
     def activation_function(self, s):
         return torch.tanh(s)
 
-    def settle(self, input_vector, max_steps=5000, tol=1e-4, nudge_target=None, beta=0.0, nudge_mask=None, input_mask=None):
+    def settle(self, input_vector, max_steps=5000, tol=1e-4, nudge_target=None, beta=0.0, nudge_mask=None, input_mask=None, inhibition_mask=None, inhibition_beta=0.0):
         """
         Runs the settling loop using JIT compiled function.
         """
@@ -169,6 +190,13 @@ class DragonEngineTorch:
                  input_m = torch.tensor(input_mask, dtype=torch.float32, device=self.device)
              else:
                  input_m = input_mask
+                  
+        inhib_m = None
+        if inhibition_mask is not None:
+             if not isinstance(inhibition_mask, torch.Tensor):
+                 inhib_m = torch.tensor(inhibition_mask, dtype=torch.float32, device=self.device)
+             else:
+                 inhib_m = inhibition_mask
         
         # Call JIT function
         self.state, self.trace_values = jit_solve_dynamics(
@@ -185,7 +213,9 @@ class DragonEngineTorch:
             nudge_t,
             nudge_m,
             beta,
-            input_m
+            input_m,
+            inhib_m,
+            inhibition_beta
         )
         return self.activation_function(self.state)
 
