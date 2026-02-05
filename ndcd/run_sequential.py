@@ -76,7 +76,7 @@ class SequentialTrainer:
         if hasattr(self, 'engine'):
             # Pull from GPU if needed
             w_tensor = self.engine.weight_values.cpu().numpy()
-            indices = self.indices # We need to store indices in self
+            indices = self.engine.indices.cpu().numpy() # Use dynamic indices from engine
         else:
              # Initial construction
              if not hasattr(self, 'initial_values'):
@@ -170,6 +170,22 @@ class SequentialTrainer:
         # nudged_phase_steps = 10 
         
         for step in range(total_steps):
+            
+            # --- NEW: Sleep / Remodeling Cycle ---
+            # Run this periodically (e.g., every 1000 steps)
+            if step > 0 and step % 1000 == 0:
+                print("\n--- Initiating Sleep Phase (Structural Plasticity) ---")
+                
+                # 1. Prune weak, grow new
+                # growth_rate: How many new connections to try per cycle
+                self.engine.remodel_structure(prune_threshold=0.005, growth_rate=200)
+                
+                # 2. Re-Stabilize (CRITICAL)
+                # This ensures the new random weights don't push eigenvalues > 1.0
+                self.tune_spectral_radius(target_radius=0.99)
+                
+                # Optional: Reset optimizer momentum if you were using Adam (not used here)
+            
             # 1. Get Data Stream
             if curr_idx >= data_len - 1:
                 curr_idx = 0

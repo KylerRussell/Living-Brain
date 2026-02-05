@@ -295,3 +295,51 @@ class DragonEngineTorch:
         # Update with decay
         delta = learning_rate * (coincidence - decay * self.weight_values)
         self.weight_values += delta
+
+    def remodel_structure(self, prune_threshold=0.001, growth_rate=100):
+        """
+        Dynamically changes the brain's wiring.
+        1. Prune: Removes edges with absolute weight < threshold.
+        2. Grow: Adds 'growth_rate' new random edges (bidirectional).
+        """
+        # --- 1. PRUNING ---
+        # Identify strong connections
+        keep_mask = torch.abs(self.weight_values) > prune_threshold
+        
+        # Filter existing tensors
+        self.indices = self.indices[:, keep_mask]
+        self.weight_values = self.weight_values[keep_mask]
+        self.trace_values = self.trace_values[keep_mask]
+        
+        # --- 2. GROWTH ---
+        # Generate random candidate pairs
+        # Note: In a dense implementation, we'd check for duplicates, but 
+        # in a sparse brain, collisions are rare enough to ignore for speed.
+        new_src = torch.randint(0, self.num_nodes, (growth_rate,), device=self.device)
+        new_dst = torch.randint(0, self.num_nodes, (growth_rate,), device=self.device)
+        
+        # Enforce No-Self-Loops (simple check)
+        mask_no_self = new_src != new_dst
+        new_src = new_src[mask_no_self]
+        new_dst = new_dst[mask_no_self]
+        
+        # Create Bidirectional Pairs (Symmetry is required for EqProp Energy)
+        # Pair 1: A -> B
+        p1_indices = torch.stack([new_src, new_dst])
+        # Pair 2: B -> A
+        p2_indices = torch.stack([new_dst, new_src])
+        
+        new_indices = torch.cat([p1_indices, p2_indices], dim=1)
+        
+        # Initialize new weights near zero (so we don't shock the brain)
+        num_new = new_indices.shape[1]
+        new_values = torch.zeros(num_new, device=self.device)
+        new_traces = torch.zeros(num_new, device=self.device)
+        
+        # --- 3. MERGE ---
+        self.indices = torch.cat([self.indices, new_indices], dim=1)
+        self.weight_values = torch.cat([self.weight_values, new_values], dim=0)
+        self.trace_values = torch.cat([self.trace_values, new_traces], dim=0)
+        
+        print(f"Brain Remodeled: {self.weight_values.shape[0]} edges (Pruned < {prune_threshold}, Grew {num_new})")
+
