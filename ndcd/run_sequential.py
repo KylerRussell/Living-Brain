@@ -48,8 +48,8 @@ class SequentialTrainer:
         
         # 2. Initialize Engine
         # Continuous state is maintained in self.engine.state
-        self.engine = DragonEngineTorch(num_nodes, indices, self.initial_values, biases, taus, dt=0.01, device=device)
-        
+        self.engine = DragonEngineTorch(num_nodes, indices, self.initial_values, biases, taus, positions=self.graph.pos, dt=0.01, device=device)
+                
         # 3. Define I/O Masks
         # Nodes 0-255: Input
         # Nodes 256-511: Output
@@ -241,7 +241,15 @@ class SequentialTrainer:
             
             if use_rl:
                 # 4a. RL Update (Dopamine)
-                self.engine.update_weights_dopamine(reward, lr)
+                # 4a. RL Update (Multi-Factor Neuromodulation)
+                # D(t) = Reward
+                # A(t) = Attention (e.g. 1.0 + |Error|) -> Higher plasticity on error
+                # S(t) = Mood (e.g. 0.0)
+                
+                attention_val = 1.0 + (loss * 0.1) # Simple heuristic: Pay attention when confused
+                mood_val = 0.0 # Neural baseline
+                
+                self.engine.apply_neuromodulators(reward=reward, attention=attention_val, mood=mood_val)
             else:
                 # 4b. Nudged Phase (EqProp)
                 # We want to pull the Output Nodes towards the target.
@@ -268,7 +276,10 @@ class SequentialTrainer:
                 
                 # Run Nudged (with Lateral Inhibition)
                 # Apply inhibition_beta=1.0 to enforce Winner-Take-All
-                self.engine.settle(input_vec, nudge_target=nudge_target, beta=beta, nudge_mask=nudge_mask, input_mask=input_mask, inhibition_mask=inhib_mask, inhibition_beta=1.0)
+                # Run Nudged (with Lateral Inhibition)
+                # Apply inhibition_beta=1.0 to enforce Winner-Take-All
+                # Attention: High attention during supervised phase?
+                self.engine.settle(input_vec, nudge_target=nudge_target, beta=beta, nudge_mask=nudge_mask, input_mask=input_mask, inhibition_mask=inhib_mask, inhibition_beta=1.0, attention_factor=1.2)
                 state_nudged = self.engine.state.clone()
                 
                 # 5. Weight Update (EqProp)
