@@ -296,50 +296,67 @@ class DragonEngineTorch:
         delta = learning_rate * (coincidence - decay * self.weight_values)
         self.weight_values += delta
 
-    def remodel_structure(self, prune_threshold=0.001, growth_rate=100):
+    def remodel_structure(self, prune_quantile=0.1):
         """
         Dynamically changes the brain's wiring.
-        1. Prune: Removes edges with absolute weight < threshold.
-        2. Grow: Adds 'growth_rate' new random edges (bidirectional).
+        1. Prune: Removes the bottom 'prune_quantile' fraction of edges (by absolute weight).
+        2. Grow: Adds exactly enough new random edges to replace the pruned ones.
         """
+        start_edges = self.weight_values.shape[0]
+        
         # --- 1. PRUNING ---
+        # Calculate threshold at the given quantile
+        # We use abs() because negative weights make sense, but small magnitude is weak.
+        threshold = torch.quantile(torch.abs(self.weight_values), prune_quantile)
+        
         # Identify strong connections
-        keep_mask = torch.abs(self.weight_values) > prune_threshold
+        keep_mask = torch.abs(self.weight_values) > threshold
         
         # Filter existing tensors
         self.indices = self.indices[:, keep_mask]
         self.weight_values = self.weight_values[keep_mask]
         self.trace_values = self.trace_values[keep_mask]
         
+        end_edges = self.weight_values.shape[0]
+        num_pruned = start_edges - end_edges
+        
         # --- 2. GROWTH ---
-        # Generate random candidate pairs
-        # Note: In a dense implementation, we'd check for duplicates, but 
-        # in a sparse brain, collisions are rare enough to ignore for speed.
-        new_src = torch.randint(0, self.num_nodes, (growth_rate,), device=self.device)
-        new_dst = torch.randint(0, self.num_nodes, (growth_rate,), device=self.device)
+        # We want to replace exactly what we lost to maintain Zero Net Growth.
+        # Edges are added in pairs (bidirectional), so we add num_pruned//2 pairs.
         
-        # Enforce No-Self-Loops (simple check)
-        mask_no_self = new_src != new_dst
-        new_src = new_src[mask_no_self]
-        new_dst = new_dst[mask_no_self]
+        num_pairs = max(0, num_pruned // 2)
         
-        # Create Bidirectional Pairs (Symmetry is required for EqProp Energy)
-        # Pair 1: A -> B
-        p1_indices = torch.stack([new_src, new_dst])
-        # Pair 2: B -> A
-        p2_indices = torch.stack([new_dst, new_src])
+        if num_pairs > 0:
+            # Generate random candidate pairs
+            new_src = torch.randint(0, self.num_nodes, (num_pairs,), device=self.device)
+            new_dst = torch.randint(0, self.num_nodes, (num_pairs,), device=self.device)
+            
+            # Enforce No-Self-Loops (simple check)
+            mask_no_self = new_src != new_dst
+            new_src = new_src[mask_no_self]
+            new_dst = new_dst[mask_no_self]
+            
+            # Create Bidirectional Pairs
+            # Pair 1: A -> B
+            p1_indices = torch.stack([new_src, new_dst])
+            # Pair 2: B -> A
+            p2_indices = torch.stack([new_dst, new_src])
+            
+            new_indices = torch.cat([p1_indices, p2_indices], dim=1)
+            
+            # Initialize new weights near zero
+            num_new = new_indices.shape[1]
+            new_values = torch.zeros(num_new, device=self.device)
+            new_traces = torch.zeros(num_new, device=self.device)
+            
+            # --- 3. MERGE ---
+            self.indices = torch.cat([self.indices, new_indices], dim=1)
+            self.weight_values = torch.cat([self.weight_values, new_values], dim=0)
+            self.trace_values = torch.cat([self.trace_values, new_traces], dim=0)
+            
+            # Note: We might add slightly fewer than pruned due to self-loop filtering
+            # or odd numbers, but it stays very consistent.
         
-        new_indices = torch.cat([p1_indices, p2_indices], dim=1)
-        
-        # Initialize new weights near zero (so we don't shock the brain)
-        num_new = new_indices.shape[1]
-        new_values = torch.zeros(num_new, device=self.device)
-        new_traces = torch.zeros(num_new, device=self.device)
-        
-        # --- 3. MERGE ---
-        self.indices = torch.cat([self.indices, new_indices], dim=1)
-        self.weight_values = torch.cat([self.weight_values, new_values], dim=0)
-        self.trace_values = torch.cat([self.trace_values, new_traces], dim=0)
-        
-        print(f"Brain Remodeled: {self.weight_values.shape[0]} edges (Pruned < {prune_threshold}, Grew {num_new})")
+        final_edges = self.weight_values.shape[0]
+        print(f"Brain Remodeled: {final_edges} edges (Pruned {num_pruned}, Grew {final_edges - end_edges})")
 

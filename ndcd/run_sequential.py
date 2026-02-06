@@ -177,8 +177,8 @@ class SequentialTrainer:
                 print("\n--- Initiating Sleep Phase (Structural Plasticity) ---")
                 
                 # 1. Prune weak, grow new
-                # growth_rate: How many new connections to try per cycle
-                self.engine.remodel_structure(prune_threshold=0.005, growth_rate=200)
+                # prune_quantile=0.05: Replace bottom 5% of connections
+                self.engine.remodel_structure(prune_quantile=0.05)
                 
                 # 2. Re-Stabilize (CRITICAL)
                 # This ensures the new random weights don't push eigenvalues > 1.0
