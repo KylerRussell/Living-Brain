@@ -1,7 +1,25 @@
-import os
 import random
 import json
 import urllib.request
+import os
+
+def generate_simple_lowercase(filename="ndcd/data/simple_lower.txt", size=10000):
+    """
+    Trivial task: Lowecase alphabet sequence ONLY.
+    a -> b -> c ... -> z -> a
+    """
+    print(f"Generating {filename} (Lowercase Alphabet Only)...")
+    chars = "abcdefghijklmnopqrstuvwxyz"
+    
+    with open(filename, "w") as f:
+        # Just repeat the alphabet sequence
+        for _ in range(size // 26 + 1):
+            f.write(chars + " ")
+            
+            # Occasionally repeat single letters to anchor them (a a a b b b)
+            if random.random() < 0.1:
+                char = random.choice(chars)
+                f.write((char * 5) + " ")
 
 def download_file(url, target_path):
     if not os.path.exists(target_path):

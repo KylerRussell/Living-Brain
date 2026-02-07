@@ -287,7 +287,7 @@ class DragonEngineTorch:
         )
         return self.activation_function(self.state)
 
-    def update_weights_eq_prop(self, state_free, state_nudged, beta, learning_rate):
+    def update_weights_eq_prop(self, state_free, state_nudged, beta, learning_rate, decay=0.0):
         """
         EqProp Update: dW ~ (rho_cov_nudged - rho_cov_free) / beta
         """
@@ -310,7 +310,11 @@ class DragonEngineTorch:
         grad_values = ((rn_i * rn_j) - (rf_i * rf_j)) / beta
         
         # Apply update
-        self.weight_values += learning_rate * grad_values
+        delta = learning_rate * grad_values
+        if decay > 0.0:
+            delta -= (decay * self.weight_values)
+            
+        self.weight_values += delta
         
     # enforce_symmetry removed for Directed Equilibrium Propagation
 
@@ -369,15 +373,17 @@ class DragonEngineTorch:
         delta = learning_rate * (coincidence - decay * self.weight_values)
         self.weight_values += delta
 
-    def remodel_structure(self, prune_threshold=0.001, growth_rate=100):
+    def remodel_structure(self, turnover_rate=0.05, protected_nodes=None):
         """
-        Dynamically changes the brain's wiring.
-        1. Prune: Removes edges with absolute weight < threshold.
-        2. Grow: Adds 'growth_rate' new random edges (bidirectional).
+        Dynamically changes the brain's wiring to maintain constant density.
+        1. Prune: Removes bottom 'turnover_rate' (e.g. 5%) of edges based on Value/Cost.
+           Metric: |Weight| / Distance.
+           *Protected Nodes*: Edges attached to these nodes are never pruned.
+        2. Grow: Adds exactly the number of edges pruned (maintaining total count).
         """
-        # --- 1. PRUNING ---
-        # Heuristic: Prune if Weight < Threshold * Distance
-        # We need to compute distances for current edges.
+        # --- 1. METRIC CALCULATION ---
+        current_count = self.weight_values.shape[0]
+        num_to_prune = int(current_count * turnover_rate)
         
         row_indices = self.indices[0]
         col_indices = self.indices[1]
@@ -385,51 +391,110 @@ class DragonEngineTorch:
         pos_i = self.positions[row_indices]
         pos_j = self.positions[col_indices]
         
-        # Euclidean distance
-        distances = torch.norm(pos_i - pos_j, dim=1)
+        # Euclidean distance (add epsilon to avoid div-by-zero)
+        distances = torch.norm(pos_i - pos_j, dim=1) + 1e-6
         
-        # Dynamic Threshold based on wiring cost
-        # Logic: Long edges need HIGH weight to survive. Short edges can survive with low weight.
-        # Condition to KEEP: |W| > prune_threshold * distance
-        # Note: distance is in [0, sqrt(3)]. 
+        # Score: ROI (Return on Investment). High weight at long distance is harder to keep.
+        scores = torch.abs(self.weight_values) / distances
         
-        cost = prune_threshold * distances
-        keep_mask = torch.abs(self.weight_values) > cost
+        # --- PROTECT NODES ---
+        if protected_nodes is not None:
+             if not isinstance(protected_nodes, torch.Tensor):
+                 protected_nodes = torch.tensor(protected_nodes, device=self.device)
+             
+             # Create mask of protected nodes
+             # We can't use isin efficiently in older torch, so let's use a bool mask map
+             node_mask = torch.zeros(self.num_nodes, dtype=torch.bool, device=self.device)
+             node_mask[protected_nodes] = True
+             
+             # Check if src OR dst is protected
+             is_protected = node_mask[row_indices] | node_mask[col_indices]
+             
+             # Set score to infinity so they are never in the bottom percentile
+             scores[is_protected] = float('inf')
         
-        # Remove deleted edges from tensors
-        self.indices = self.indices[:, keep_mask]
-        self.weight_values = self.weight_values[keep_mask]
-        self.trace_values = self.trace_values[keep_mask]
-                
-        # --- 2. GROWTH ---
+        # --- 2. PRUNING (Percentile) ---
+        # We need to find the threshold score that separates the bottom 5%.
+        # topk(largest=False) gives smallest.
+        
+        if num_to_prune > 0:
+            # Find the indices of the smallest scores
+            # torch.topk with largest=False returns smallest elements
+            _, prune_indices = torch.topk(scores, num_to_prune, largest=False)
+            
+            # Create a boolean mask of edges to KEEP
+            # It's faster to create a ones mask and set prune indices to 0
+            keep_mask = torch.ones(current_count, dtype=torch.bool, device=self.device)
+            keep_mask[prune_indices] = False
+            
+            # Apply Mask
+            self.indices = self.indices[:, keep_mask]
+            self.weight_values = self.weight_values[keep_mask]
+            self.trace_values = self.trace_values[keep_mask]
+            
+        
+        # --- 3. GROWTH (Restoration) ---
+        # We want to get back to 'current_count'
+        num_kept = self.weight_values.shape[0]
+        num_to_add = current_count - num_kept
+        
         # Generate random candidate pairs
-        # Note: In a dense implementation, we'd check for duplicates, but 
-        # in a sparse brain, collisions are rare enough to ignore for speed.
-        new_src = torch.randint(0, self.num_nodes, (growth_rate,), device=self.device)
-        new_dst = torch.randint(0, self.num_nodes, (growth_rate,), device=self.device)
+        new_src = torch.randint(0, self.num_nodes, (num_to_add,), device=self.device)
+        new_dst = torch.randint(0, self.num_nodes, (num_to_add,), device=self.device)
         
         # Enforce No-Self-Loops (simple check)
         mask_no_self = new_src != new_dst
         new_src = new_src[mask_no_self]
         new_dst = new_dst[mask_no_self]
         
-        # Create Bidirectional Pairs (Symmetry is required for EqProp Energy)
-        # Pair 1: A -> B
-        p1_indices = torch.stack([new_src, new_dst])
-        # Pair 2: B -> A
-        p2_indices = torch.stack([new_dst, new_src])
+        # Note: If self-loops removed, we might add slightly fewer than intended.
+        # That's fine, it prevents infinite growth if we accidentally added more.
+        # If we want exact count, we'd need a while loop, but approximate homeostasis is fine.
         
-        new_indices = torch.cat([p1_indices, p2_indices], dim=1)
+        # Create Bidirectional Pairs? 
+        # Previous code created bidirectional:
+        # p1_indices = torch.stack([new_src, new_dst])
+        # p2_indices = torch.stack([new_dst, new_src])
+        # This doubled the growth rate.
+        # Here we are counting EDGES. 
+        # If the graph is directed (indices has shape [2, M]), then each column is an edge.
+        # If we prune M edges and add M edges, we are good.
+        # BUT, if we want symmetry, we should add M/2 pairs.
+        # The previous code: grew 'growth_rate' pairs -> 2 * growth_rate edges.
+        # Our `current_count` is total directed edges.
+        # If we just add random directed edges, we might lose symmetry.
+        # EqProp usually assumes symmetry (W_ij = W_ji).
+        # Let's enforce symmetry in growth.
+        # We have 'num_to_add' slots.
+        # We should generate num_to_add // 2 PAIRS.
         
-        # Initialize new weights near zero (so we don't shock the brain)
-        num_new = new_indices.shape[1]
-        new_values = torch.zeros(num_new, device=self.device)
-        new_traces = torch.zeros(num_new, device=self.device)
-        
-        # --- 3. MERGE ---
-        self.indices = torch.cat([self.indices, new_indices], dim=1)
-        self.weight_values = torch.cat([self.weight_values, new_values], dim=0)
-        self.trace_values = torch.cat([self.trace_values, new_traces], dim=0)
-        
-        print(f"Brain Remodeled: {self.weight_values.shape[0]} edges (Pruned < {prune_threshold}, Grew {num_new})")
+        pairs_to_add = num_to_add // 2
+        if pairs_to_add > 0:
+            p_src = torch.randint(0, self.num_nodes, (pairs_to_add,), device=self.device)
+            p_dst = torch.randint(0, self.num_nodes, (pairs_to_add,), device=self.device)
+            
+            # No self loops
+            mask = p_src != p_dst
+            p_src = p_src[mask]
+            p_dst = p_dst[mask]
+            
+            # Pair 1: A -> B
+            p1 = torch.stack([p_src, p_dst])
+            # Pair 2: B -> A
+            p2 = torch.stack([p_dst, p_src])
+            
+            new_indices = torch.cat([p1, p2], dim=1)
+            
+            # Initialize new weights
+            # Small random or zero? Start at 0 to not shock dynamics.
+            num_new = new_indices.shape[1]
+            new_values = torch.zeros(num_new, device=self.device)
+            new_traces = torch.zeros(num_new, device=self.device) # Traces 0
+            
+            self.indices = torch.cat([self.indices, new_indices], dim=1)
+            self.weight_values = torch.cat([self.weight_values, new_values], dim=0)
+            self.trace_values = torch.cat([self.trace_values, new_traces], dim=0)
+            
+        final_count = self.weight_values.shape[0]
+        print(f"Brain Remodeled: {final_count} edges (Pruned {num_to_prune}, Added {final_count - num_kept})")
 

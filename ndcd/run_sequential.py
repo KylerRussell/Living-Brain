@@ -30,6 +30,8 @@ class SequentialTrainer:
     def __init__(self, num_nodes=2000, device='cpu'):
         self.device = device
         self.num_nodes = num_nodes
+        if num_nodes < 512:
+            raise ValueError(f"num_nodes ({num_nodes}) must be >= 512 to support 256 input + 256 output nodes.")
         
         # 1. Initialize Graph
         print("Initializing Dynamic Graph...")
@@ -177,12 +179,17 @@ class SequentialTrainer:
                 print("\n--- Initiating Sleep Phase (Structural Plasticity) ---")
                 
                 # 1. Prune weak, grow new
-                # growth_rate: How many new connections to try per cycle
-                self.engine.remodel_structure(prune_threshold=0.005, growth_rate=200)
+                # turnover_rate: Prune bottom 5% and regrow same amount
+                # Protect Input/Output Nodes from pruning
+                protected = self.input_indices + self.output_indices
+                self.engine.remodel_structure(turnover_rate=0.05, protected_nodes=protected)
                 
                 # 2. Re-Stabilize (CRITICAL)
                 # This ensures the new random weights don't push eigenvalues > 1.0
-                self.tune_spectral_radius(target_radius=0.99)
+                # DISABLED AGGRESSIVE TUNING: It destroys learned weights. 
+                # Instead, rely on weight decay to keep magnitude in check.
+                # Only tune if it's wildly unstable (optional check could go here)
+                pass # self.tune_spectral_radius(target_radius=0.99)
                 
                 # Optional: Reset optimizer momentum if you were using Adam (not used here)
             
@@ -208,7 +215,12 @@ class SequentialTrainer:
             # 3. Free Phase (Dream)
             # Run dynamics. Result is state_free.
             # Using default convergence (removed duration_steps)
-            self.engine.settle(input_vec, input_mask=input_mask)
+            
+            # Lateral Inhibition Mask (Output Nodes Only) - Consistent with Nudged Phase
+            inhib_mask = torch.zeros(self.num_nodes, device=self.device)
+            inhib_mask[self.output_indices] = 1.0
+            
+            self.engine.settle(input_vec, input_mask=input_mask, inhibition_mask=inhib_mask, inhibition_beta=1.0)
             state_free = self.engine.state.clone()
             
             # Measure Prediction (Readout) during Free Phase
@@ -283,7 +295,8 @@ class SequentialTrainer:
                 state_nudged = self.engine.state.clone()
                 
                 # 5. Weight Update (EqProp)
-                self.engine.update_weights_eq_prop(state_free, state_nudged, beta, lr)
+                # Added decay to prevent explosion
+                self.engine.update_weights_eq_prop(state_free, state_nudged, beta, lr, decay=1e-5)
             
             if step % 100 == 0:
                  # Rolling Acc
