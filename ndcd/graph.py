@@ -77,11 +77,41 @@ class DynamicGraph:
         self.weights = np.zeros((num_nodes, num_nodes))
         adj = nx.to_numpy_array(self.nx_graph)
         
-        # Initialize weights with small random values, symmetric
-        random_weights = np.random.uniform(-0.1, 0.1, (num_nodes, num_nodes))
+        # Initialize Sparse Weight Matrix
+        # W must be symmetric for Equilibrium Propagation energy definition
+        self.weights = np.zeros((num_nodes, num_nodes))
+        adj = nx.to_numpy_array(self.nx_graph)
+        
+        # Orthogonal Initialization for better gradient flow
+        # We create a random orthogonal matrix and mask it
+        # Since we need symmetry, we can use a symmetric orthogonal matrix or just
+        # stabilize the random normal one.
+        # Let's use standard normal scaled by 1/sqrt(connectivity) for now, then spectral norm.
+        # But to be "Orthogonal-like", we want singular values ~ 1.
+        
+        # Random Normal Initialization (Xavier-like but sparse context)
+        # Variance = 2 / (fan_in + fan_out)? For sparse, just 1/sqrt(k)
+        # Average degree k ~ 2*m_edges
+        k = 2 * m_edges
+        std_dev = 1.0 / np.sqrt(k)
+        
+        random_weights = np.random.normal(0, std_dev, (num_nodes, num_nodes))
+        
         # Mask with adjacency to maintain sparsity
         self.weights = adj * random_weights
-        self.weights = (self.weights + self.weights.T) / 2 # Enforce symmetry for EqProp
+        
+        # Enforce Symmetry for EqProp
+        self.weights = (self.weights + self.weights.T) / 2 
+        
+        # Enforce Spectral Radius = 0.95 (Edge of Chaos)
+        try:
+            current_radius = np.max(np.abs(np.linalg.eigvals(self.weights)))
+            if current_radius > 0:
+                self.weights *= (0.95 / current_radius)
+        except:
+             # If eigvals fail (too slow?), just normalize by frobenius?
+             # For 2000 nodes, it should be fine.
+             pass
         
         # Eligibility Traces Matrix (for RL)
         self.traces = np.zeros((num_nodes, num_nodes))

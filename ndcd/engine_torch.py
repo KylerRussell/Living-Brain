@@ -290,27 +290,33 @@ class DragonEngineTorch:
         )
         return self.activation_function(self.state)
 
-    def update_weights_eq_prop(self, state_free, state_nudged, beta, learning_rate, decay=0.0):
+    def update_weights_eq_prop(self, state_pos, state_neg, beta, learning_rate, decay=0.0):
         """
-        EqProp Update: dW ~ (rho_cov_nudged - rho_cov_free) / beta
+        Symmetric EqProp Update: dW ~ (rho_pos*rho_pos - rho_neg*rho_neg) / (2 * beta)
+        Args:
+            state_pos: Equilibrium state with +beta nudge
+            state_neg: Equilibrium state with -beta nudge
+            beta: Nudge strength
         """
-        rho_free = self.activation_function(state_free)
-        rho_nudged = self.activation_function(state_nudged)
+        rho_pos = self.activation_function(state_pos)
+        rho_neg = self.activation_function(state_neg)
         
-        # Sparse Update: dW_ij ~ (rho_n[i]*rho_n[j] - rho_f[i]*rho_f[j]) / beta
+        # Sparse Update: dW_ij ~ (rho_pos[i]*rho_pos[j] - rho_neg[i]*rho_neg[j]) / (2 * beta)
         # We only update existing edges (defined by self.indices)
         
         idx_i = self.indices[0]
         idx_j = self.indices[1]
         
         # Vectorized gather of activations for edge endpoints
-        rf_i = rho_free[idx_i]
-        rf_j = rho_free[idx_j]
-        rn_i = rho_nudged[idx_i]
-        rn_j = rho_nudged[idx_j]
+        rp_i = rho_pos[idx_i]
+        rp_j = rho_pos[idx_j]
+        rn_i = rho_neg[idx_i]
+        rn_j = rho_neg[idx_j]
         
         # Compute gradient for each edge value
-        grad_values = ((rn_i * rn_j) - (rf_i * rf_j)) / beta
+        # Symmetry Note: Both directions produce the same term since rho_i * rho_j = rho_j * rho_i
+        
+        grad_values = ((rp_i * rp_j) - (rn_i * rn_j)) / (2.0 * beta)
         
         # Apply update
         delta = learning_rate * grad_values
@@ -320,8 +326,8 @@ class DragonEngineTorch:
         self.weight_values += delta
         
         # --- Fix: Enable Bias Learning ---
-        # Gradient for bias is (rho_nudged - rho_free) / beta
-        bias_grad = (rho_nudged - rho_free) / beta
+        # Gradient for bias is (rho_pos - rho_neg) / (2 * beta)
+        bias_grad = (rho_pos - rho_neg) / (2.0 * beta)
         self.biases += learning_rate * bias_grad
 
         # --- Fix: Enforce Symmetry ---
@@ -369,17 +375,14 @@ class DragonEngineTorch:
         self.apply_neuromodulators(reward_signal, attention=1.0, mood=0.0)
         
         
-    def update_weights_hebbian(self, learning_rate, decay=0.0001):
+    def update_weights_hebbian(self, learning_rate, alpha=1.0):
         """
-        Pure Hebbian Learning (Section 5.1).
-        Delta W_ij = eta * (rho_i * rho_j - alpha * W_ij)
-        """
-        # Re-compute coincidence
-        # Note: jit_solve ALREADY computed coincidence into traces.
-        # But Hebbian is instantaneous rho*rho, or filtered?
-        # PDF says "Heabbian Learning" for "Babbling".
-        # Eq: Delta W ~ rho_i * rho_j.
+        Oja's Rule (Stabilized Hebbian Learning).
+        Delta W_ij = eta * (rho_i * rho_j - alpha * rho_i^2 * W_ij)
         
+        This rule inherently bounds the growth of weights by penalizing them 
+        proportional to the squared output activity.
+        """
         idx_i = self.indices[0]
         idx_j = self.indices[1]
         
@@ -387,11 +390,28 @@ class DragonEngineTorch:
         ri = rho[idx_i]
         rj = rho[idx_j]
         
-        coincidence = ri * rj
+        # Hebbian Term: ri * rj
+        hebbian_term = ri * rj
         
-        # Update with decay
-        delta = learning_rate * (coincidence - decay * self.weight_values)
+        # Oja's Decay Term: ri^2 * W_ij
+        # This acts as a normalization force.
+        # Fixed: Oja's rule usually is y(x - yw) -> yx - y^2 w.
+        # Here x is input (ri), y is output (rj) or vice versa?
+        # In recurrent W_ij (from j to i), output is i, input is j.
+        # So it should be ri * (rj - alpha * ri * W_ij).
+        
+        oja_decay = alpha * (ri * ri) * self.weight_values
+        
+        # Update
+        delta = learning_rate * (hebbian_term - oja_decay)
         self.weight_values += delta
+
+    def damp_weights(self, factor=0.9):
+        """
+        Damps the recurrent weights by a factor.
+        Used for reactive control when spectral radius explodes.
+        """
+        self.weight_values *= factor
 
     def remodel_structure(self, turnover_rate=0.05, protected_nodes=None):
         """
