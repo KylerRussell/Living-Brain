@@ -38,7 +38,6 @@ class SequentialTrainer:
         self.graph = DynamicGraph(num_nodes=num_nodes, m_edges=20, p_triad=0.1, seed=42)
         indices, values = self.graph.export_sparse_components()
         biases = self.graph.biases
-        biases = self.graph.biases
         taus = self.graph.taus
         
         self.indices = indices
@@ -46,7 +45,7 @@ class SequentialTrainer:
         
         
         # Spectral Radius Tuning
-        self.tune_spectral_radius(target_radius=0.99)
+        self.tune_spectral_radius(target_radius=1.1)
         
         # 2. Initialize Engine
         # Continuous state is maintained in self.engine.state
@@ -63,7 +62,7 @@ class SequentialTrainer:
         # But technically we inject current into these nodes.
         self.eye = torch.eye(256, device=device)
 
-    def tune_spectral_radius(self, target_radius=0.95):
+    def tune_spectral_radius(self, target_radius=1.1):
         """
         Tunes the spectral radius of the weight matrix to a target value.
         Updates self.initial_values.
@@ -140,7 +139,7 @@ class SequentialTrainer:
         # Hebbian learning likely exploded the weights. We need to normalize back to 0.95
         # so EqProp starts in a stable regime.
         print("\nRe-tuning after Babbling...")
-        self.tune_spectral_radius(target_radius=0.99)
+        self.tune_spectral_radius(target_radius=1.1)
         
     def train_phase(self, phase_name, data_path, iterations, steps_per_iter, beta=0.1, lr=0.01, use_rl=False):
         print(f"\n=== Starting Phase: {phase_name} ===")
@@ -182,7 +181,7 @@ class SequentialTrainer:
                 # turnover_rate: Prune bottom 5% and regrow same amount
                 # Protect Input/Output Nodes from pruning
                 protected = self.input_indices + self.output_indices
-                self.engine.remodel_structure(turnover_rate=0.05, protected_nodes=protected)
+                # self.engine.remodel_structure(turnover_rate=0.05, protected_nodes=protected)
                 
                 # 2. Re-Stabilize (CRITICAL)
                 # This ensures the new random weights don't push eigenvalues > 1.0

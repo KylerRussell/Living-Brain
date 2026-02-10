@@ -59,7 +59,10 @@ def jit_solve_dynamics(
             # For LIF, we might still use potential or smoothed spike rate?
             # Keeping tanh(s) as proxy for "activity state" even in LIF for gradient guidance
             rho_s = torch.tanh(current_s)
-            diff_nudge = (nudge_target - rho_s)
+            # Fix: Include derivative of activation (1 - tanh^2) for correct gradient scaling
+            d_rho = 1.0 - (rho_s * rho_s)
+            diff_nudge = (nudge_target - rho_s) * d_rho
+            
             if nudge_mask is not None:
                 diff_nudge = diff_nudge * nudge_mask
             nudge_force = beta * diff_nudge
@@ -315,6 +318,23 @@ class DragonEngineTorch:
             delta -= (decay * self.weight_values)
             
         self.weight_values += delta
+        
+        # --- Fix: Enable Bias Learning ---
+        # Gradient for bias is (rho_nudged - rho_free) / beta
+        bias_grad = (rho_nudged - rho_free) / beta
+        self.biases += learning_rate * bias_grad
+
+        # --- Fix: Enforce Symmetry ---
+        # Reconstruct dense matrix to easily symmetrize values
+        # We assume structure is symmetric from init.
+        W_sparse = torch.sparse_coo_tensor(self.indices, self.weight_values, (self.num_nodes, self.num_nodes))
+        W_dense = W_sparse.to_dense()
+        W_sym = (W_dense + W_dense.t()) / 2.0
+        
+        # Extract values back to our sparse structure
+        row = self.indices[0]
+        col = self.indices[1]
+        self.weight_values = W_sym[row, col]
         
     # enforce_symmetry removed for Directed Equilibrium Propagation
 

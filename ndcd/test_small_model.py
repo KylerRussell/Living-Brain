@@ -44,8 +44,8 @@ class SmallModelTrainer:
         print(f"Inputs: {self.input_indices}")
         print(f"Outputs: {self.output_indices}")
         
-        # 2. Tune Spectral Radius
-        self.tune_spectral_radius(target_radius=0.9)
+        # 2. Tune Spectral Radius (Section 5.1: Increase to > 1.0)
+        self.tune_spectral_radius(target_radius=1.1)
         
         # 3. Initialize Engine
         self.engine = DragonEngineTorch(
@@ -59,8 +59,8 @@ class SmallModelTrainer:
             device=device
         )
         
-        # Bias initialization for sparsity (as seen in run_simple)
-        self.engine.biases.fill_(-0.5)
+        # Bias initialization: Removed override to use small random noise from graph.py
+        # self.engine.biases.fill_(-0.5)
 
         # Monitoring
         self.loss_history = []
@@ -117,6 +117,9 @@ class SmallModelTrainer:
         acc_window = []
         
         for step in range(iterations):
+            # Fix: Reset State to prevent ghost gradients (Section 7.2 E)
+            self.engine.state.zero_()
+            
             target_num = next(data) # The next number in sequence
             
             # 1. Create Inputs
