@@ -331,7 +331,12 @@ class DragonEngineTorch:
         # Symmetry Note: Both directions produce the same term since rho_i * rho_j = rho_j * rho_i
         
         grad_values = ((rp_i * rp_j) - (rn_i * rn_j)) / (2.0 * beta)
-        
+
+        # Gradient clipping: prevents catastrophic weight jumps from
+        # outlier activation products (e.g., two neurons both near ±1
+        # in one phase but not the other).
+        grad_values = grad_values.clamp(-1.0, 1.0)
+
         # Apply update
         delta = learning_rate * grad_values
         if decay > 0.0:
