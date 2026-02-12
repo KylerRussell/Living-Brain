@@ -50,6 +50,10 @@ def jit_solve_dynamics(
     previous_spikes = torch.zeros_like(current_s)
     
     while step_count < max_steps and diff > tol:
+        # 1. Input Clamping (Moved to start)
+        if input_mask is not None:
+             current_s = current_s * (1 - input_mask) + input_vector * input_mask
+
         old_state = current_s
         
         # 1. Nudge Logic / Input
@@ -59,9 +63,9 @@ def jit_solve_dynamics(
             # For LIF, we might still use potential or smoothed spike rate?
             # Keeping tanh(s) as proxy for "activity state" even in LIF for gradient guidance
             rho_s = torch.tanh(current_s)
-            # Fix: Include derivative of activation (1 - tanh^2) for correct gradient scaling
-            d_rho = 1.0 - (rho_s * rho_s)
-            diff_nudge = (nudge_target - rho_s) * d_rho
+            # Fix: Apply error directly to potential space: diff_nudge = nudge_target - rho_s
+            # Removed derivative d_rho to fix gradient scaling
+            diff_nudge = (nudge_target - rho_s)
             
             if nudge_mask is not None:
                 diff_nudge = diff_nudge * nudge_mask
@@ -69,7 +73,11 @@ def jit_solve_dynamics(
             current_input = current_input + nudge_force
             
             
-        # 1.5 Lateral Inhibition (Softmax-like competition)
+        if input_mask is not None:
+            # Re-clamp inputs after nudge (if they overlap) to ensure strict clamping
+             current_s = current_s * (1 - input_mask) + input_vector * input_mask
+
+        # 1.6 Lateral Inhibition (Softmax-like competition)
         # I_inhib = -beta_inhib * (Sum(rho * mask) - (rho * mask))
         # Effectively: Everyone inhibited by the Total Activity of the group, except themselves.
         if inhibition_mask is not None and inhibition_beta > 0.0:
@@ -175,9 +183,9 @@ def jit_solve_dynamics(
         # --- Hard Clamping ---
 
         
-        # --- Hard Clamping ---
-        if input_mask is not None:
-             current_s = current_s * (1 - input_mask) + input_vector * input_mask
+        # --- Hard Clamping (Removed - moved to start) ---
+
+        # 1.5 Nudge Logic / Input
 
         # --- Update Eligibility Traces ---
         # dz/dt = -z + rho(i) * rho(j)
@@ -330,17 +338,9 @@ class DragonEngineTorch:
         bias_grad = (rho_pos - rho_neg) / (2.0 * beta)
         self.biases += learning_rate * bias_grad
 
-        # --- Fix: Enforce Symmetry ---
-        # Reconstruct dense matrix to easily symmetrize values
-        # We assume structure is symmetric from init.
-        W_sparse = torch.sparse_coo_tensor(self.indices, self.weight_values, (self.num_nodes, self.num_nodes))
-        W_dense = W_sparse.to_dense()
-        W_sym = (W_dense + W_dense.t()) / 2.0
-        
-        # Extract values back to our sparse structure
-        row = self.indices[0]
-        col = self.indices[1]
-        self.weight_values = W_sym[row, col]
+        # Fix: Strict Weight Clipping and Removal of Symmetry Enforcement
+        # Directed Equilibrium Propagation requires asymmetric weights (no forced symmetry).
+        self.weight_values.clamp_(-1.0, 1.0)
         
     # enforce_symmetry removed for Directed Equilibrium Propagation
 
@@ -375,36 +375,28 @@ class DragonEngineTorch:
         self.apply_neuromodulators(reward_signal, attention=1.0, mood=0.0)
         
         
-    def update_weights_hebbian(self, learning_rate, alpha=1.0):
+    def update_weights_hebbian(self, learning_rate=0.01, oja_alpha=0.001):
         """
-        Oja's Rule (Stabilized Hebbian Learning).
-        Delta W_ij = eta * (rho_i * rho_j - alpha * rho_i^2 * W_ij)
-        
-        This rule inherently bounds the growth of weights by penalizing them 
-        proportional to the squared output activity.
+        Hebbian update with proper Oja normalization
         """
-        idx_i = self.indices[0]
-        idx_j = self.indices[1]
+        with torch.no_grad():
+            current_activation = torch.tanh(self.state)
+            
+            # Get pre and post activations
+            ri = current_activation[self.indices[0]]  # Presynaptic (as per user map)
+            rj = current_activation[self.indices[1]]  # Postsynaptic (as per user map)
+            
+            # Standard Hebbian term
+            hebbian_update = learning_rate * ri * rj
         
-        rho = self.activation_function(self.state)
-        ri = rho[idx_i]
-        rj = rho[idx_j]
+        # Oja normalization (use postsynaptic variance as requested)
+        oja_decay = oja_alpha * (rj * rj) * self.weight_values
         
-        # Hebbian Term: ri * rj
-        hebbian_term = ri * rj
+        # Combined update
+        self.weight_values += hebbian_update - oja_decay
         
-        # Oja's Decay Term: ri^2 * W_ij
-        # This acts as a normalization force.
-        # Fixed: Oja's rule usually is y(x - yw) -> yx - y^2 w.
-        # Here x is input (ri), y is output (rj) or vice versa?
-        # In recurrent W_ij (from j to i), output is i, input is j.
-        # So it should be ri * (rj - alpha * ri * W_ij).
-        
-        oja_decay = alpha * (ri * ri) * self.weight_values
-        
-        # Update
-        delta = learning_rate * (hebbian_term - oja_decay)
-        self.weight_values += delta
+        # CRITICAL FIX 2: Clip weights after each update
+        self.weight_values.clamp_(-1.0, 1.0)
 
     def damp_weights(self, factor=0.9):
         """

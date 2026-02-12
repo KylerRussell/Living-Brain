@@ -128,13 +128,27 @@ class SequentialTrainer:
             self.engine.settle(input_vec, input_mask=input_mask)
             
             # Hebbian Update
-            # Hebbian Update (Oja's Rule with Alpha=1.0 for stability)
-            self.engine.update_weights_hebbian(learning_rate=lr, alpha=1.0)
+            # CRITICAL FIX 1: Much smaller learning rate to prevent explosion
+            self.engine.update_weights_hebbian(learning_rate=lr * 0.01)
             
+            # CRITICAL FIX 2: Clip weights after each update
+            self.engine.weight_values.clamp_(-1.0, 1.0)
+            
+            # CRITICAL FIX 3: Monitor spectral radius during training
             if i % 100 == 0:
-                print(f"Babbling Step {i}/{iterations}", end='\r')
+                W_sparse = torch.sparse_coo_tensor(
+                    self.engine.indices, 
+                    self.engine.weight_values,
+                    (self.num_nodes, self.num_nodes)
+                )
+                W_dense = W_sparse.to_dense().cpu().numpy()
+                current_rho = np.max(np.abs(np.linalg.eigvals(W_dense)))
+                print(f"Babbling {i}/{iterations} - Spectral Radius: {current_rho:.4f}")
                 
-        print(f"\nBabbling Complete. Time: {time.time()-start_time:.2f}s")
+                # Emergency brake
+                if current_rho > 1.5:
+                    print(f"WARNING: Spectral radius too high, applying damping")
+                    self.engine.weight_values *= 0.8
         
         # RE-TUNE SPECTRAL RADIUS
         print("\nRe-tuning after Babbling...")
@@ -200,7 +214,9 @@ class SequentialTrainer:
             state_free = self.engine.state.clone()
             
             # Measure Prediction
-            output_activity = state_free[256:512]
+            # Fix: Use activated state (tanh) for output probability calculation
+            # Use activation from engine state directly or consistent with settling
+            output_activity = torch.tanh(state_free[256:512])
             probs = torch.softmax(output_activity, dim=0)
             pred_idx = torch.argmax(probs).item()
             
@@ -233,8 +249,10 @@ class SequentialTrainer:
                 nudge_mask[self.output_indices] = 1.0
                 
                 # Target Vector construction
-                # We want to pull correct answer UP, incorrect DOWN
-                # One-hot target
+                # We want to pull correct answer UP, incorrect DOWN? NO.
+                # Nudged Phase - gentler target encoding
+                # Target: +1.0 for correct class
+                # Other outputs: 0.0 (not -0.1) -> More stable
                 target_vec = torch.zeros(self.num_nodes, device=self.device)
                 target_vec[256 + target_byte] = 1.0
                 
@@ -283,7 +301,8 @@ class SequentialTrainer:
             
         for _ in range(length):
             state = self.engine.state
-            out_act = state[256:512]
+            # Fix: Use activated state
+            out_act = torch.tanh(state[256:512])
             probs = torch.softmax(out_act, dim=0)
             
             # Sample
@@ -322,21 +341,20 @@ def main():
     trainer.train_babbling(iterations=1000)
     
     # Phase 1: Chars
-    # Increased Beta and LR for stronger learning signal
-    # Increased iterations for optimization (500)
-    trainer.train_phase("Chars", "ndcd/data/level1_chars.txt", iterations=500, steps_per_iter=100, beta=1.0, lr=0.1, use_rl=False)
+    # Reduced Beta to 0.05, lr to 0.01 for stability
+    trainer.train_phase("Chars", "ndcd/data/level1_chars.txt", iterations=500, steps_per_iter=100, beta=0.05, lr=0.01, use_rl=False)
     trainer.generate(start_text="A")
     
     # Phase 2: Words
-    trainer.train_phase("Words", "ndcd/data/level2_words.txt", iterations=200, steps_per_iter=100, beta=0.5, lr=0.05, use_rl=True)
+    trainer.train_phase("Words", "ndcd/data/level2_words.txt", iterations=200, steps_per_iter=100, beta=0.05, lr=0.01, use_rl=True)
     trainer.generate()
     
     # Phase 3: Quotes
-    trainer.train_phase("Quotes", "ndcd/data/level3_quotes.txt", iterations=200, steps_per_iter=200, beta=0.5, lr=0.02, use_rl=True)
+    trainer.train_phase("Quotes", "ndcd/data/level3_quotes.txt", iterations=200, steps_per_iter=200, beta=0.05, lr=0.01, use_rl=True)
     trainer.generate()
     
     # Phase 4: Literature
-    trainer.train_phase("Literature", "ndcd/data/sherlock.txt", iterations=500, steps_per_iter=500, beta=1.0, lr=0.01)
+    trainer.train_phase("Literature", "ndcd/data/sherlock.txt", iterations=500, steps_per_iter=500, beta=0.1, lr=0.005)
     trainer.generate(start_text="Sherlock", length=200)
 
 if __name__ == "__main__":
