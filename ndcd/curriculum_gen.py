@@ -41,21 +41,33 @@ def generate_chars(filename="ndcd/data/level1_chars.txt", size=20000):
     chars_lower = "abcdefghijklmnopqrstuvwxyz"
     all_chars = chars_upper + chars_lower
     
+    # Build exercises as a list, then shuffle to interleave alphabet
+    # sequences and repetition blocks. Without this, 50 sequential
+    # alphabets (~6500 chars) followed by a solid repetition block
+    # (~10000 chars) creates sharp regime boundaries that crash
+    # accuracy when the training loop wraps around the data.
+    exercises = []
+
+    # 1. Forward/Backward Sequences
+    for _ in range(50):
+        exercises.append(chars_upper + " ")
+        exercises.append(chars_lower + " ")
+        exercises.append(chars_upper[::-1] + " ")
+        exercises.append(chars_lower[::-1] + " ")
+        exercises.append("0123456789 ")
+        exercises.append("9876543210 ")
+
+    # 2. Block Repetitions (Stability)
+    for _ in range(size // 15):
+        char = random.choice(all_chars)
+        repeat = random.randint(5, 10)
+        exercises.append(char * repeat + " ")
+
+    random.shuffle(exercises)
+
     with open(filename, "w") as f:
-        # 1. Forward/Backward Sequences (repeated many times)
-        for _ in range(50):
-            f.write(chars_upper + " ")
-            f.write(chars_lower + " ")
-            f.write(chars_upper[::-1] + " ")
-            f.write(chars_lower[::-1] + " ")
-            f.write("0123456789 ")
-            f.write("9876543210 ")
-            
-        # 2. Block Repetitions (Stability)
-        for _ in range(size // 15):
-            char = random.choice(all_chars)
-            repeat = random.randint(5, 10)
-            f.write(char * repeat + " ")
+        for ex in exercises:
+            f.write(ex)
             
 def generate_toddler_words(filename="ndcd/data/level2_words.txt", source_file="ndcd/data/google-10000-english.txt", size=150000):
     """

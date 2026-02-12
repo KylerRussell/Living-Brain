@@ -4,7 +4,6 @@ import numpy as np
 import os
 import time
 import argparse
-import random
 import scipy.sparse as sp
 from scipy.sparse.linalg import eigs
 from ndcd.graph import DynamicGraph
@@ -174,17 +173,7 @@ class SequentialTrainer:
             data = f.read()
             
         data_len = len(data)
-
-        # Chunk-shuffled data reading: break data into ~200-byte chunks,
-        # shuffle chunk order to prevent regime-shift crashes.
-        # Without this, sequential reading wraps at data boundaries causing
-        # sharp distribution shifts (e.g., Phase 1 crashes at steps 19k, 36k
-        # when alphabets -> repetition blocks transition repeats).
-        CHUNK_SIZE = 200
-        chunk_starts = list(range(0, data_len - 1, CHUNK_SIZE))
-        random.shuffle(chunk_starts)
-        chunk_idx = 0
-        pos_in_chunk = 0
+        curr_idx = 0
         
         start_time = time.time()
         
@@ -209,22 +198,13 @@ class SequentialTrainer:
             #     self.engine.remodel_structure(turnover_rate=0.05, protected_nodes=protected)
             #     self.tune_spectral_radius(target_radius=0.95)
             
-            # 1. Get Data from shuffled chunks
-            is_chunk_start = (pos_in_chunk == 0)
+            # 1. Get Data Stream
+            if curr_idx >= data_len - 1:
+                curr_idx = 0
 
-            cs = chunk_starts[chunk_idx % len(chunk_starts)]
-            chunk_end = min(cs + CHUNK_SIZE, data_len - 1)
-            data_pos = cs + pos_in_chunk
-            input_byte = data[data_pos]
-            target_byte = data[data_pos + 1]
-
-            # Advance within chunk; move to next chunk at boundary
-            pos_in_chunk += 1
-            if cs + pos_in_chunk >= chunk_end:
-                pos_in_chunk = 0
-                chunk_idx += 1
-                if chunk_idx % len(chunk_starts) == 0:
-                    random.shuffle(chunk_starts)
+            input_byte = data[curr_idx]
+            target_byte = data[curr_idx + 1]
+            curr_idx += 1
             
             # 2. Input Setup
             input_mask = torch.zeros(self.num_nodes, device=self.device)
@@ -240,12 +220,9 @@ class SequentialTrainer:
             inhib_mask = torch.zeros(self.num_nodes, device=self.device)
             inhib_mask[self.output_indices] = 1.0
 
-            # State decay: stronger reset at chunk boundaries (new context),
-            # normal 90% decay within chunks for contextual memory.
-            if is_chunk_start:
-                self.engine.state *= 0.01
-            else:
-                self.engine.state *= 0.1
+            # Partial state decay: preserves ~10% of previous state as
+            # contextual memory for sequence prediction.
+            self.engine.state *= 0.1
 
             # Run Free Phase
             self.engine.settle(input_vec, input_mask=input_mask, inhibition_mask=inhib_mask, inhibition_beta=0.0, max_steps=100)
