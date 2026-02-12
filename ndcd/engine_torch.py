@@ -58,7 +58,7 @@ def jit_solve_dynamics(
         
         # 1. Nudge Logic / Input
         current_input = input_vector
-        if nudge_target is not None and beta > 0.0:
+        if nudge_target is not None and beta != 0.0:
             # Use appropriate activation for error calculation
             # For LIF, we might still use potential or smoothed spike rate?
             # Keeping tanh(s) as proxy for "activity state" even in LIF for gradient guidance
@@ -165,6 +165,12 @@ def jit_solve_dynamics(
         k4 = (-s4 + total_input) / taus
         
         current_s = current_s + (effective_dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+
+        # --- State Clamping ---
+        # Prevent saturation: keep neurons in responsive regime of tanh
+        # At |s|=3, tanh'(s) ~ 0.01 which is small but usable;
+        # at |s|=6, tanh'(s) ~ 0.00001 which kills all gradients.
+        current_s = current_s.clamp(-3.0, 3.0)
 
         # --- Spiking Logic (LIF) ---
         # If potential > threshold, Fire & Reset.
