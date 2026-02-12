@@ -53,7 +53,12 @@ class SequentialTrainer:
         
         # 2. Initialize Engine
         # Continuous state is maintained in self.engine.state
-        self.engine = DragonEngineTorch(num_nodes, indices, self.initial_values, biases, taus, positions=self.graph.pos, dt=0.01, device=device)
+        # dt=0.05: With tau=0.1 and spectral_radius=0.95, the slowest network
+        # mode has effective time constant tau/(1-rho) = 2.0. At 100 steps:
+        #   dt=0.01 → 0.5 slow-mode time constants (40% converged)
+        #   dt=0.05 → 2.5 slow-mode time constants (92% converged)
+        # RK4 is stable up to dt ~ 2.78*tau = 0.278, so dt=0.05 is safe.
+        self.engine = DragonEngineTorch(num_nodes, indices, self.initial_values, biases, taus, positions=self.graph.pos, dt=0.05, device=device)
         
         # 3. Define I/O Masks
         # Nodes 0-255: Input
@@ -182,11 +187,16 @@ class SequentialTrainer:
         for step in range(total_steps):
             
             # --- Sleep / Remodeling Cycle ---
-            if step > 0 and step % 1000 == 0:
-                print("\n--- Initiating Sleep Phase (Homeostasis & Restructuring) ---")
-                protected = self.input_indices + self.output_indices
-                self.engine.remodel_structure(turnover_rate=0.05, protected_nodes=protected)
-                self.tune_spectral_radius(target_radius=0.95)
+            # Disabled: remodeling prunes 5% of edges every 1000 steps and replaces
+            # with zero-weight edges. This systematically destroys learned structure,
+            # causing catastrophic accuracy drops (e.g., 32% → 2% after one remodel).
+            # The spectral radius re-tuning further disrupts weight distribution.
+            # Re-enable once base learning converges reliably.
+            # if step > 0 and step % 1000 == 0:
+            #     print("\n--- Initiating Sleep Phase (Homeostasis & Restructuring) ---")
+            #     protected = self.input_indices + self.output_indices
+            #     self.engine.remodel_structure(turnover_rate=0.05, protected_nodes=protected)
+            #     self.tune_spectral_radius(target_radius=0.95)
             
             # 1. Get Data Stream
             if curr_idx >= data_len - 1:
@@ -220,10 +230,13 @@ class SequentialTrainer:
             state_free = self.engine.state.clone()
             
             # Measure Prediction
-            # Fix: Use activated state (tanh) for output probability calculation
-            # Use activation from engine state directly or consistent with settling
+            # Use activated state (tanh) for output probability calculation.
+            # Temperature scaling: with activations ~0.1, raw logit differences
+            # are ~0.01, making softmax nearly uniform (loss ≈ ln(256)) even when
+            # the correct class IS ranked highest. Scaling by 10x amplifies the
+            # differences so softmax produces meaningful probabilities.
             output_activity = torch.tanh(state_free[256:512])
-            probs = torch.softmax(output_activity, dim=0)
+            probs = torch.softmax(output_activity * 10.0, dim=0)
             pred_idx = torch.argmax(probs).item()
             
             # Metrics
@@ -255,11 +268,13 @@ class SequentialTrainer:
                 nudge_mask[self.output_indices] = 1.0
                 
                 # Target Vector construction
-                # We want to pull correct answer UP, incorrect DOWN? NO.
-                # Nudged Phase - gentler target encoding
-                # Target: +1.0 for correct class
-                # Other outputs: 0.0 (not -0.1) -> More stable
+                # Contrastive encoding: push correct UP, push all others DOWN.
+                # With activations ~0.1, a target of 0.0 for non-targets barely
+                # nudges them (force = beta*(0.0-0.1) = -0.02). Using -0.5 gives
+                # force = beta*(-0.5-0.1) = -0.12, creating much larger pos/neg
+                # state differences and hence larger EqProp gradients.
                 target_vec = torch.zeros(self.num_nodes, device=self.device)
+                target_vec[256:512] = -0.5
                 target_vec[256 + target_byte] = 1.0
                 
                 # Positive Phase (+beta)
@@ -277,7 +292,7 @@ class SequentialTrainer:
                 state_neg = self.engine.state.clone()
                 
                 # Weight Update
-                self.engine.update_weights_eq_prop(state_pos, state_neg, beta, lr, decay=1e-5)
+                self.engine.update_weights_eq_prop(state_pos, state_neg, beta, lr, decay=0.0)
             
             if step % 100 == 0:
                  if len(acc_window) > 100: acc_window = acc_window[-100:]
@@ -307,9 +322,9 @@ class SequentialTrainer:
             
         for _ in range(length):
             state = self.engine.state
-            # Fix: Use activated state
+            # Use activated state with temperature scaling (matching training)
             out_act = torch.tanh(state[256:512])
-            probs = torch.softmax(out_act, dim=0)
+            probs = torch.softmax(out_act * 10.0, dim=0)
             
             # Sample
             next_byte = torch.multinomial(probs, 1).item()
@@ -350,8 +365,9 @@ def main():
     trainer.train_babbling(iterations=0)
     
     # Phase 1: Chars
-    # Reduced Beta to 0.05, lr to 0.01 for stability
-    trainer.train_phase("Chars", "ndcd/data/level1_chars.txt", iterations=500, steps_per_iter=100, beta=0.05, lr=0.01, use_rl=False)
+    # beta=0.2: stronger nudge creates bigger pos/neg state difference → larger gradients
+    # lr=0.05: compensates for tiny activation products (rho~0.1, rho*rho~0.01)
+    trainer.train_phase("Chars", "ndcd/data/level1_chars.txt", iterations=500, steps_per_iter=100, beta=0.2, lr=0.05, use_rl=False)
     trainer.generate(start_text="A")
     
     # Phase 2: Words
