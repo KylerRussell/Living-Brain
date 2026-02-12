@@ -220,10 +220,17 @@ class SequentialTrainer:
             inhib_mask = torch.zeros(self.num_nodes, device=self.device)
             inhib_mask[self.output_indices] = 1.0
 
-            # Reset state before each example to prevent attractor lock-in.
-            # Without this, state carries over and the system gets stuck in a
-            # single deep attractor where all inputs produce the same output.
-            self.engine.state.zero_()
+            # Partial state decay instead of full reset: preserves ~10% of
+            # previous state as contextual memory. Without ANY context, the
+            # network is a pure bigram model (each input predicts next in
+            # isolation) which caps accuracy at ~50-60% on this data since
+            # many characters have ambiguous successors.  With partial decay,
+            # the recurrent state encodes recent history (e.g., "we're in the
+            # forward alphabet" vs "a repetition block"), enabling contextual
+            # prediction.  Full zero was needed before to break attractor
+            # lock-in, but the ±3 state clamp now prevents saturation, so a
+            # 90% decay is sufficient.
+            self.engine.state *= 0.1
 
             # Run Free Phase
             self.engine.settle(input_vec, input_mask=input_mask, inhibition_mask=inhib_mask, inhibition_beta=0.0, max_steps=100)
@@ -291,18 +298,31 @@ class SequentialTrainer:
                 self.engine.settle(input_vec, nudge_target=target_vec, beta=-beta, nudge_mask=nudge_mask, input_mask=input_mask, inhibition_mask=inhib_mask, inhibition_beta=0.0, max_steps=100)
                 state_neg = self.engine.state.clone()
                 
-                # Weight Update
-                self.engine.update_weights_eq_prop(state_pos, state_neg, beta, lr, decay=0.0)
+                # Weight Update with cosine LR schedule
+                # Decays from lr to lr*0.1 over training. Once easy bigram
+                # patterns are learned, the full lr causes oscillation.
+                lr_mult = 0.5 * (1.0 + np.cos(np.pi * step / total_steps))
+                effective_lr = lr * max(lr_mult, 0.1)
+                self.engine.update_weights_eq_prop(state_pos, state_neg, beta, effective_lr, decay=0.0)
             
             if step % 100 == 0:
-                 if len(acc_window) > 100: acc_window = acc_window[-100:]
-                 if len(acc_top3_window) > 100: acc_top3_window = acc_top3_window[-100:]
-                 
-                 rolling_acc = sum(acc_window) / len(acc_window) if len(acc_window) > 0 else 0.0
-                 rolling_acc3 = sum(acc_top3_window) / len(acc_top3_window) if len(acc_top3_window) > 0 else 0.0
-                 
+                 # Keep 1000-sample window for milestone prints
+                 if len(acc_window) > 1000: acc_window = acc_window[-1000:]
+                 if len(acc_top3_window) > 1000: acc_top3_window = acc_top3_window[-1000:]
+
                  elapsed = time.time() - start_time
-                 print(f"Step {step}/{total_steps} | Time: {elapsed:.0f}s | Loss: {loss:.4f} | Acc: {rolling_acc:.2%} | Top3: {rolling_acc3:.2%} | ||s||: {state_norm:.3f}", end='\r')
+
+                 if step % 1000 == 0:
+                     # Milestone: print on NEW LINE with 1000-sample stats
+                     acc_1k = sum(acc_window) / len(acc_window) if acc_window else 0.0
+                     acc3_1k = sum(acc_top3_window) / len(acc_top3_window) if acc_top3_window else 0.0
+                     avg_loss = loss_accum / max(step, 1)
+                     print(f"Step {step}/{total_steps} | Time: {elapsed:.0f}s | AvgLoss: {avg_loss:.4f} | Acc@1k: {acc_1k:.2%} | Top3@1k: {acc3_1k:.2%} | ||s||/√N: {state_norm:.4f}")
+                 else:
+                     # Frequent: overwrite line with recent 100-sample stats
+                     recent_acc = sum(acc_window[-100:]) / min(len(acc_window), 100)
+                     recent_acc3 = sum(acc_top3_window[-100:]) / min(len(acc_top3_window), 100)
+                     print(f"  step {step}/{total_steps} | Loss: {loss:.4f} | Acc: {recent_acc:.2%} | Top3: {recent_acc3:.2%} | ||s||/√N: {state_norm:.4f}        ", end='\r')
                  
         final_acc = sum(acc_window)/len(acc_window) if len(acc_window) > 0 else 0.0
         final_acc3 = sum(acc_top3_window)/len(acc_top3_window) if len(acc_top3_window) > 0 else 0.0
