@@ -347,6 +347,10 @@ class DragonEngineTorch:
         # Fix: Strict Weight Clipping and Removal of Symmetry Enforcement
         # Directed Equilibrium Propagation requires asymmetric weights (no forced symmetry).
         self.weight_values.clamp_(-1.0, 1.0)
+        # Clip biases to prevent drift: with lr=0.05 and no clipping, bias
+        # updates of ~0.025/step accumulate over thousands of steps until
+        # biases dominate output, washing out input-dependent signal.
+        self.biases.clamp_(-1.0, 1.0)
         
     # enforce_symmetry removed for Directed Equilibrium Propagation
 
