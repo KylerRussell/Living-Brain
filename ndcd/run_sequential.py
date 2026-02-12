@@ -125,7 +125,8 @@ class SequentialTrainer:
             input_vec[self.input_indices] = input_vals * self.input_scale_factor
             
             # Settle (Free logic, but inputs clamped)
-            self.engine.settle(input_vec, input_mask=input_mask)
+            self.engine.state.zero_()
+            self.engine.settle(input_vec, input_mask=input_mask, max_steps=100)
             
             # Hebbian Update
             # CRITICAL FIX 1: Much smaller learning rate to prevent explosion
@@ -200,17 +201,22 @@ class SequentialTrainer:
             input_mask[self.input_indices] = 1.0
 
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[input_byte] = 1.0 * self.input_scale_factor 
+            input_vec[input_byte] = 5.0 * self.input_scale_factor
             
             # 3. Free Phase (Monitor Only - or use as pivot if doing one-sided)
             # For Symmetric Nudging, we don't strictly *need* the free phase state for gradient,
             # but we need it to calculate the prediction loss!
-            
+
             inhib_mask = torch.zeros(self.num_nodes, device=self.device)
             inhib_mask[self.output_indices] = 1.0
-            
+
+            # Reset state before each example to prevent attractor lock-in.
+            # Without this, state carries over and the system gets stuck in a
+            # single deep attractor where all inputs produce the same output.
+            self.engine.state.zero_()
+
             # Run Free Phase
-            self.engine.settle(input_vec, input_mask=input_mask, inhibition_mask=inhib_mask, inhibition_beta=1.0)
+            self.engine.settle(input_vec, input_mask=input_mask, inhibition_mask=inhib_mask, inhibition_beta=0.0, max_steps=100)
             state_free = self.engine.state.clone()
             
             # Measure Prediction
@@ -259,15 +265,15 @@ class SequentialTrainer:
                 # Positive Phase (+beta)
                 # s_pos = settle(x, beta, target)
                 # We start from free state? Or input state? Starting from free state is faster.
-                self.engine.state = state_free.clone() 
-                self.engine.settle(input_vec, nudge_target=target_vec, beta=beta, nudge_mask=nudge_mask, input_mask=input_mask, inhibition_mask=inhib_mask, inhibition_beta=1.0)
+                self.engine.state = state_free.clone()
+                self.engine.settle(input_vec, nudge_target=target_vec, beta=beta, nudge_mask=nudge_mask, input_mask=input_mask, inhibition_mask=inhib_mask, inhibition_beta=0.0, max_steps=100)
                 state_pos = self.engine.state.clone()
-                
+
                 # Negative Phase (-beta)
                 # s_neg = settle(x, -beta, target)
                 # Start from free state again
                 self.engine.state = state_free.clone()
-                self.engine.settle(input_vec, nudge_target=target_vec, beta=-beta, nudge_mask=nudge_mask, input_mask=input_mask, inhibition_mask=inhib_mask, inhibition_beta=1.0)
+                self.engine.settle(input_vec, nudge_target=target_vec, beta=-beta, nudge_mask=nudge_mask, input_mask=input_mask, inhibition_mask=inhib_mask, inhibition_beta=0.0, max_steps=100)
                 state_neg = self.engine.state.clone()
                 
                 # Weight Update
@@ -338,7 +344,10 @@ def main():
     # Learning Rates need to be small for EqProp
     
     # Phase 0: Babbling (Warmup)
-    trainer.train_babbling(iterations=1000)
+    # Disabled: Hebbian babbling creates deep attractors that trap the system.
+    # The spectral radius grows during babbling and the weight structure creates
+    # a single dominant attractor basin. Re-enable once supervised learning works.
+    trainer.train_babbling(iterations=0)
     
     # Phase 1: Chars
     # Reduced Beta to 0.05, lr to 0.01 for stability
