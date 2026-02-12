@@ -201,7 +201,7 @@ class SequentialTrainer:
             # 1. Get Data Stream
             if curr_idx >= data_len - 1:
                 curr_idx = 0
-            
+
             input_byte = data[curr_idx]
             target_byte = data[curr_idx + 1]
             curr_idx += 1
@@ -220,16 +220,8 @@ class SequentialTrainer:
             inhib_mask = torch.zeros(self.num_nodes, device=self.device)
             inhib_mask[self.output_indices] = 1.0
 
-            # Partial state decay instead of full reset: preserves ~10% of
-            # previous state as contextual memory. Without ANY context, the
-            # network is a pure bigram model (each input predicts next in
-            # isolation) which caps accuracy at ~50-60% on this data since
-            # many characters have ambiguous successors.  With partial decay,
-            # the recurrent state encodes recent history (e.g., "we're in the
-            # forward alphabet" vs "a repetition block"), enabling contextual
-            # prediction.  Full zero was needed before to break attractor
-            # lock-in, but the ±3 state clamp now prevents saturation, so a
-            # 90% decay is sufficient.
+            # Partial state decay: preserves ~10% of previous state as
+            # contextual memory for sequence prediction.
             self.engine.state *= 0.1
 
             # Run Free Phase
@@ -383,23 +375,32 @@ def main():
     # The spectral radius grows during babbling and the weight structure creates
     # a single dominant attractor basin. Re-enable once supervised learning works.
     trainer.train_babbling(iterations=0)
-    
+
+    # Reset state and traces before curriculum begins
+    trainer.engine.state.zero_()
+    trainer.engine.trace_values.zero_()
+
     # Phase 1: Chars
     # beta=0.2: stronger nudge creates bigger pos/neg state difference → larger gradients
     # lr=0.05: compensates for tiny activation products (rho~0.1, rho*rho~0.01)
     trainer.train_phase("Chars", "ndcd/data/level1_chars.txt", iterations=500, steps_per_iter=100, beta=0.2, lr=0.05, use_rl=False)
     trainer.generate(start_text="A")
     
-    # Phase 2: Words
-    trainer.train_phase("Words", "ndcd/data/level2_words.txt", iterations=200, steps_per_iter=100, beta=0.05, lr=0.01, use_rl=True)
+    # Phase 2: Words (converted from RL to EqProp — RL pathway uses stale
+    # eligibility traces and has uncontrolled lr, causing loss to INCREASE)
+    trainer.engine.trace_values.zero_()
+    trainer.train_phase("Words", "ndcd/data/level2_words.txt", iterations=200, steps_per_iter=100, beta=0.2, lr=0.05, use_rl=False)
     trainer.generate()
     
-    # Phase 3: Quotes
-    trainer.train_phase("Quotes", "ndcd/data/level3_quotes.txt", iterations=200, steps_per_iter=200, beta=0.05, lr=0.01, use_rl=True)
+    # Phase 3: Quotes (converted from RL to EqProp — same reasoning as Phase 2)
+    trainer.engine.trace_values.zero_()
+    trainer.train_phase("Quotes", "ndcd/data/level3_quotes.txt", iterations=200, steps_per_iter=200, beta=0.2, lr=0.05, use_rl=False)
     trainer.generate()
     
-    # Phase 4: Literature
-    trainer.train_phase("Literature", "ndcd/data/sherlock.txt", iterations=500, steps_per_iter=500, beta=0.1, lr=0.005)
+    # Phase 4: Literature (increased from beta=0.1/lr=0.005 which gave 1/40th
+    # the gradient of Phase 1, causing stagnation at ~20%)
+    trainer.engine.trace_values.zero_()
+    trainer.train_phase("Literature", "ndcd/data/sherlock.txt", iterations=500, steps_per_iter=500, beta=0.2, lr=0.05)
     trainer.generate(start_text="Sherlock", length=200)
 
 if __name__ == "__main__":
