@@ -220,14 +220,44 @@ class SequentialTrainer:
             inhib_mask = torch.zeros(self.num_nodes, device=self.device)
             inhib_mask[self.output_indices] = 1.0
 
-            # Partial state decay: preserves ~10% of previous state as
-            # contextual memory for sequence prediction.
-            self.engine.state *= 0.1
+            # Only reset fast nodes; slow nodes carry context naturally
+            # with multi-timescale τ values providing working memory.
+            fast_mask = self.engine.taus < 0.5  # fast group
+            self.engine.state[fast_mask] *= 0.1
+            # Medium/slow/ultra-slow nodes retain their state between tokens
 
             # Run Free Phase
             self.engine.settle(input_vec, input_mask=input_mask, inhibition_mask=inhib_mask, inhibition_beta=0.0, max_steps=100)
             state_free = self.engine.state.clone()
-            
+
+            # --- VICReg Regularization on Hidden Representations ---
+            # Prevents representational collapse by encouraging variance
+            # and decorrelation among association node activations.
+            hidden_act = torch.tanh(state_free[512:])  # association nodes
+
+            if not hasattr(self, '_vicreg_buffer'):
+                self._vicreg_buffer = []
+            self._vicreg_buffer.append(hidden_act.detach())
+            if len(self._vicreg_buffer) >= 32:  # mini-batch of 32
+                batch = torch.stack(self._vicreg_buffer)  # [32, num_hidden]
+
+                # Variance loss: hinge at γ=1.0
+                std = torch.sqrt(batch.var(dim=0) + 1e-4)
+                var_loss = torch.relu(1.0 - std).mean()
+
+                # Covariance loss: decorrelate dimensions
+                batch_centered = batch - batch.mean(dim=0)
+                cov = (batch_centered.T @ batch_centered) / (batch.shape[0] - 1)
+                # Zero diagonal (we only penalize off-diagonal)
+                cov_loss = (cov.fill_diagonal_(0).pow(2).sum()) / hidden_act.shape[0]
+
+                # Apply as bias nudge to prevent collapse
+                vicreg_lr = 0.001
+                with torch.no_grad():
+                    self.engine.biases[512:] -= vicreg_lr * (var_loss + cov_loss)
+
+                self._vicreg_buffer = []
+
             # Measure Prediction
             # Use activated state (tanh) for output probability calculation.
             # Temperature scaling: with activations ~0.1, raw logit differences
@@ -354,7 +384,7 @@ class SequentialTrainer:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--nodes", type=int, default=2000) # Small for testing, 5000 for real
+    parser.add_argument("--nodes", type=int, default=10000) # 10K nodes for multi-timescale hierarchy
     args = parser.parse_args()
     
     device = args.device
