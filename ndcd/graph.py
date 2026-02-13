@@ -116,12 +116,27 @@ class DynamicGraph:
         # Eligibility Traces Matrix (for RL)
         self.traces = np.zeros((num_nodes, num_nodes))
         
-        # Initialize Neuron Parameters (Heterogeneous Tau)
-        # Harmonize Time Constants (Section 3.1 fix)
-        self.taus = np.ones(num_nodes) * 0.1 
-        
-        # self.taus[self.sensory_indices] = 0.01 # Removed mismatch
-        # self.taus[self.motor_indices] = 0.01   # Removed mismatch
+        # Initialize Neuron Parameters (Multi-timescale Tau Hierarchy)
+        # Fast nodes handle bytes/chars, medium handle words, slow handle
+        # sentences, ultra-slow handle topic/context.
+        # Input/output nodes (0-511) are always fast.
+        n_io = min(512, num_nodes)  # I/O nodes are always fast
+        n_remaining = num_nodes - n_io
+
+        # Distribute remaining nodes across timescales (cortical ratios)
+        # Fast: ~30% of remaining, Medium: ~40%, Slow: ~20%, Ultra-slow: ~10%
+        n_fast_extra = int(n_remaining * 0.3)
+        n_medium = int(n_remaining * 0.4)
+        n_slow = int(n_remaining * 0.2)
+        n_ultra = n_remaining - n_fast_extra - n_medium - n_slow
+
+        self.taus = np.concatenate([
+            np.ones(n_io) * 0.1,              # I/O nodes: τ ≈ 2 steps effective
+            np.ones(n_fast_extra) * 0.1,       # Extra fast association nodes
+            np.ones(n_medium) * 0.75,          # τ ≈ 15 steps
+            np.ones(n_slow) * 5.0,             # τ ≈ 100 steps
+            np.ones(n_ultra) * 25.0,           # τ ≈ 500 steps
+        ])
         
         # State Vectors
         self.states = np.zeros(num_nodes) # Internal potential s

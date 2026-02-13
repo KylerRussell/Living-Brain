@@ -241,6 +241,12 @@ class DragonEngineTorch:
         # State
         self.state = torch.zeros(num_nodes, dtype=torch.float32, device=device)
         self.trace_values = torch.zeros_like(self.weight_values) # Store traces as sparse values
+
+        # Short-term plasticity (Mongillo et al., 2008)
+        self.facilitation = torch.ones_like(self.weight_values) * 0.2   # u, baseline ~0.2
+        self.depression = torch.ones_like(self.weight_values)            # x, baseline 1.0
+        self.tau_facil = 150.0   # ~1500ms equivalent in steps
+        self.tau_depress = 20.0  # ~200ms equivalent
         
     def activation_function(self, s):
         return torch.tanh(s)
@@ -281,12 +287,15 @@ class DragonEngineTorch:
              else:
                  inhib_m = inhibition_mask
         
+        # Compute effective weights with short-term plasticity
+        effective_weights = self.weight_values * self.facilitation * self.depression
+
         # Call JIT function
         self.state, self.trace_values = jit_solve_dynamics(
             self.state,
             self.trace_values,
             self.indices,
-            self.weight_values,
+            effective_weights,
             self.biases,
             self.taus,
             input_vector,
@@ -302,7 +311,36 @@ class DragonEngineTorch:
             attention_factor,
             spiking_threshold
         )
+
+        # Update short-term plasticity after settling
+        self._update_short_term_plasticity()
+
         return self.activation_function(self.state)
+
+    def _update_short_term_plasticity(self):
+        """
+        Update facilitation and depression variables based on presynaptic activity.
+        Facilitation increases with activity (decays to baseline 0.2).
+        Depression decreases with activity (recovers to baseline 1.0).
+        """
+        with torch.no_grad():
+            rho = torch.tanh(self.state)
+            pre_activity = rho[self.indices[0]]
+
+            # Facilitation: increases with activity, decays to baseline
+            self.facilitation += (
+                (-self.facilitation + 0.2) / self.tau_facil
+                + 0.1 * pre_activity * (1 - self.facilitation)
+            )
+
+            # Depression: decreases with activity, recovers to 1.0
+            self.depression += (
+                (1.0 - self.depression) / self.tau_depress
+                - 0.05 * pre_activity * self.facilitation * self.depression
+            )
+
+            self.facilitation.clamp_(0.0, 1.0)
+            self.depression.clamp_(0.0, 1.0)
 
     def update_weights_eq_prop(self, state_pos, state_neg, beta, learning_rate, decay=0.0):
         """
