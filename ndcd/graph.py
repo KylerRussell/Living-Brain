@@ -1,6 +1,7 @@
 
 import networkx as nx
 import numpy as np
+import scipy.sparse as sp
 
 class DynamicGraph:
     def __init__(self, num_nodes, m_edges=2, p_triad=0.1, seed=None,
@@ -233,33 +234,33 @@ class DynamicGraph:
             print(f"  Level {level}: {n_mods} modules, "
                   f"avg size {np.mean(mod_sizes):.0f} nodes")
 
-        # Initialize weights
+        # Initialize weights (sparse — never allocate dense num_nodes × num_nodes)
         # Xavier-like: std = sqrt(2 / (avg_fan_in + avg_fan_out))
         avg_degree = num_edges / num_nodes
         std_dev = np.sqrt(2.0 / (avg_degree + avg_degree))
 
-        weight_vals = np.random.normal(0, std_dev, num_edges)
+        weight_vals = np.random.normal(0, std_dev, num_edges).astype(np.float32)
 
-        # Build full sparse weight matrix for spectral analysis
-        self.weights = np.zeros((num_nodes, num_nodes))
-        self.weights[edge_rows, edge_cols] = weight_vals
+        # Build sparse CSR weight matrix directly from edge lists
+        self.weight_sparse = sp.csr_matrix(
+            (weight_vals, (edge_rows, edge_cols)),
+            shape=(num_nodes, num_nodes)
+        )
 
         # Enforce Spectral Radius = 0.95 (Edge of Chaos)
         try:
-            # Use sparse eigvals for efficiency
             from scipy.sparse.linalg import eigs as sp_eigs
-            from scipy.sparse import csr_matrix
-            W_sp = csr_matrix(self.weights)
-            eigvals = sp_eigs(W_sp, k=1, which='LM', return_eigenvectors=False)
+            eigvals = sp_eigs(self.weight_sparse.astype(np.float64),
+                              k=1, which='LM', return_eigenvectors=False)
             current_radius = np.abs(eigvals[0])
             if current_radius > 0:
-                self.weights *= (0.95 / current_radius)
+                self.weight_sparse *= np.float32(0.95 / current_radius)
                 print(f"Spectral radius tuned: {current_radius:.4f} -> 0.95")
         except Exception as e:
             print(f"Spectral tuning via sparse eigs failed ({e}), using Frobenius norm fallback")
-            frob = np.sqrt(np.sum(self.weights ** 2))
+            frob = sp.linalg.norm(self.weight_sparse, 'fro')
             if frob > 0:
-                self.weights *= (0.95 * np.sqrt(num_nodes) / frob)
+                self.weight_sparse *= np.float32(0.95 * np.sqrt(num_nodes) / frob)
 
         # --- Timescale Assignment (per-module, per-level) ---
         # Level 0: fast (tau=0.1), Level 1: medium (tau=0.75),
@@ -277,9 +278,6 @@ class DynamicGraph:
         # State and bias initialization
         self.states = np.zeros(num_nodes)
         self.biases = np.random.uniform(-0.01, 0.01, num_nodes)
-
-        # Eligibility Traces (legacy, kept for compatibility)
-        self.traces = np.zeros((num_nodes, num_nodes))
 
         # Store hierarchical connection metadata for predictive coding
         # Top-down weight indices: for each (upper_mod, lower_mod) pair,
@@ -352,10 +350,10 @@ class DynamicGraph:
         """
         Exports the graph weights as sparse components (indices, values).
         Returns:
-            indices (np.ndarray): 2xE array of edge indices.
-            values (np.ndarray): 1xE array of edge weights.
+            indices (np.ndarray): 2xE array of edge indices (int64).
+            values (np.ndarray): 1xE array of edge weights (float32).
         """
-        rows, cols = np.nonzero(self.weights)
-        values = self.weights[rows, cols]
-        indices = np.stack([rows, cols])
+        coo = self.weight_sparse.tocoo()
+        indices = np.stack([coo.row.astype(np.int64), coo.col.astype(np.int64)])
+        values = coo.data.astype(np.float32)
         return indices, values
