@@ -286,6 +286,44 @@ class DynamicGraph:
         # store the edge indices in the sparse representation
         self._build_hierarchical_index(edge_rows, edge_cols)
 
+        # --- Complementary Learning Systems ---
+        # Mark ~20% of modules at each level as hippocampal (fast learners)
+        # Remaining 80% are neocortical (slow learners that extract regularities)
+        self.hippocampal_modules = set()
+        self.neocortical_modules = set()
+        for level in range(num_levels):
+            level_mods = self.level_modules[level]
+            n_hippo = max(1, int(len(level_mods) * 0.2))
+            for mod_id in level_mods[:n_hippo]:
+                self.hippocampal_modules.add(mod_id)
+            for mod_id in level_mods[n_hippo:]:
+                self.neocortical_modules.add(mod_id)
+        print(f"CLS: {len(self.hippocampal_modules)} hippocampal modules, "
+              f"{len(self.neocortical_modules)} neocortical modules")
+
+        # Build node-to-module lookup
+        self.node_to_module = np.full(num_nodes, -1, dtype=np.int64)
+        for mod in self.modules:
+            self.node_to_module[mod['start']:mod['end']] = mod['id']
+
+        # Build connectivity map between hippocampal and neocortical modules
+        self._build_cls_connectivity(edge_rows, edge_cols)
+
+    def _build_cls_connectivity(self, edge_rows, edge_cols):
+        """Build map of which neocortical modules each hippocampal module connects to."""
+        self.hippo_to_neo = {h: set() for h in self.hippocampal_modules}
+        for r, c in zip(edge_rows, edge_cols):
+            src_mod = self.node_to_module[r]
+            dst_mod = self.node_to_module[c]
+            if src_mod in self.hippocampal_modules and dst_mod in self.neocortical_modules:
+                self.hippo_to_neo[src_mod].add(dst_mod)
+            elif dst_mod in self.hippocampal_modules and src_mod in self.neocortical_modules:
+                self.hippo_to_neo[dst_mod].add(src_mod)
+
+    def get_connected_neocortical(self, hippo_mod_id):
+        """Return set of neocortical module IDs connected to a hippocampal module."""
+        return self.hippo_to_neo.get(hippo_mod_id, set())
+
     def _build_hierarchical_index(self, edge_rows, edge_cols):
         """
         Build index structures for predictive coding:

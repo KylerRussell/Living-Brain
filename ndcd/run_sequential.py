@@ -83,12 +83,37 @@ class SequentialTrainer:
         # Pre-compute One-Hot Identity Matrices
         self.eye = torch.eye(256, device=device)
 
+        # --- Complementary Learning Systems setup ---
+        # Store module classification and connectivity on engine for access during training
+        self.hippocampal_modules = self.graph.hippocampal_modules
+        self.neocortical_modules = self.graph.neocortical_modules
+        self.node_to_module = torch.tensor(
+            self.graph.node_to_module, dtype=torch.long, device=device)
+
+        # Build per-edge module type mask for differentiated learning rates
+        src_modules = self.graph.node_to_module[indices[0]]
+        self.hippo_edge_mask = torch.tensor(
+            np.isin(src_modules, list(self.hippocampal_modules)),
+            dtype=torch.bool, device=device)
+
+        # Set differentiated cascade rates for hippocampal modules
+        # Hippocampal: faster deep cascade (τ_deep = 1000 not 10000)
+        self.engine.tau_deep_hippo = 1000.0
+        self.engine.tau_deep_neo = 10000.0
+
+        # Synaptic intelligence consolidation interval
+        self.si_consolidation_interval = 10000
+
+        # Sleep phase interval
+        self.sleep_interval = 5000
+
     def tune_spectral_radius(self, target_radius=0.95):
         """Tunes the spectral radius of the weight matrix to a target value."""
         print(f"Tuning Spectral Radius to {target_radius:.2f}...")
 
         if hasattr(self, 'engine'):
-            w_tensor = self.engine.weight_values.cpu().numpy()
+            # Use effective weights (cascade sum) for spectral analysis
+            w_tensor = self.engine.effective_weights.cpu().numpy()
             indices = self.engine.indices.cpu().numpy()
         else:
             w_tensor = self.initial_values
@@ -104,15 +129,17 @@ class SequentialTrainer:
             print(f"Current Spectral Radius: {max_eig:.4f}")
 
             scale_factor = target_radius / (max_eig + 1e-8)
-            w_tensor = w_tensor * scale_factor
             print(f"Scaled weights by {scale_factor:.4f}")
 
             self.input_scale_factor = 1.0
 
             if hasattr(self, 'engine'):
-                self.engine.weight_values = torch.tensor(w_tensor, dtype=torch.float32, device=self.device)
+                # Scale all cascade levels proportionally
+                self.engine.w_deep *= scale_factor
+                self.engine.w_mid *= scale_factor
+                self.engine.w_surface *= scale_factor
             else:
-                self.initial_values = w_tensor
+                self.initial_values = w_tensor * scale_factor
 
         except Exception as e:
             print(f"Warning: Spectral tuning failed ({e}). Using default.")
@@ -215,6 +242,28 @@ class SequentialTrainer:
             effective_lr = lr * max(lr_mult, 0.1)
             self.engine.update_weights_predictive(learning_rate=effective_lr)
 
+            # 8b. CLS: boost hippocampal synapse updates (10x), decay them faster
+            with torch.no_grad():
+                # Hippocampal synapses get extra surface boost
+                hippo_boost = self.engine.w_surface[self.hippo_edge_mask] * 9.0  # 9x extra = 10x total
+                self.engine.w_surface[self.hippo_edge_mask] += effective_lr * hippo_boost.clamp(-0.1, 0.1)
+                # Hippocampal synapses also decay faster (more forgettable)
+                self.engine.w_surface[self.hippo_edge_mask] *= 0.999
+
+            # 8c. Metaplastic cascade transfer
+            self.engine.cascade_transfer()
+
+            # 8d. Synaptic intelligence tracking
+            self.engine.update_synaptic_intelligence(current_loss=energy)
+
+            # 8e. Periodic synaptic intelligence consolidation
+            if step > 0 and step % self.si_consolidation_interval == 0:
+                self.engine.consolidate_importance()
+
+            # 8f. Sleep replay phase for memory consolidation
+            if step > 0 and step % self.sleep_interval == 0:
+                self.sleep_phase(num_replay_cycles=200, replay_lr_mult=0.1)
+
             # 9. VICReg Regularization — per-module to avoid OOM
             # Global covariance over ~49K hidden nodes would be 49K×49K ≈ 9GB.
             # Per-module covariance is ~1000×1000 ≈ 4MB each.
@@ -268,6 +317,11 @@ class SequentialTrainer:
                           f"Acc@1k: {acc_1k:.2%} | Top3@1k: {acc3_1k:.2%} | "
                           f"||s||/√N: {state_norm:.4f}")
                     print(f"  PredErr: {err_str}")
+
+                    # Cascade distribution diagnostic
+                    cstats = self.engine.cascade_stats()
+                    print(f"  Cascade: surface={cstats['surface']:.4f} "
+                          f"mid={cstats['mid']:.4f} deep={cstats['deep']:.4f}")
                 else:
                     recent_acc = sum(acc_window[-100:]) / min(len(acc_window), 100)
                     recent_acc3 = sum(acc_top3_window[-100:]) / min(len(acc_top3_window), 100)
@@ -279,6 +333,139 @@ class SequentialTrainer:
         final_acc3 = sum(acc_top3_window)/len(acc_top3_window) if len(acc_top3_window) > 0 else 0.0
         print(f"\nPhase Complete. Avg Loss: {loss_accum/total_steps:.4f} | "
               f"Avg Energy: {energy_accum/total_steps:.4f} | Final Acc: {final_acc:.2%}")
+
+    def compute_network_energy(self):
+        """Compute total network energy (sum of squared states + weight interactions)."""
+        rho = torch.tanh(self.engine.state)
+        cascade_weights = self.engine.effective_weights
+        weights = torch.sparse_coo_tensor(
+            self.engine.indices, cascade_weights,
+            (self.num_nodes, self.num_nodes))
+        interaction = -0.5 * torch.dot(rho, torch.mv(weights, rho))
+        field = -torch.dot(self.engine.biases, rho)
+        return (interaction + field).item()
+
+    def sleep_phase(self, num_replay_cycles=200, replay_lr_mult=0.1):
+        """
+        Offline consolidation: replay learned patterns by settling
+        from noise without external input, then strengthen attractors.
+
+        The energy-based architecture is inherently generative — disconnecting
+        input and settling into energy minima naturally replays learned patterns.
+        """
+        print("\n--- Sleep Phase: Consolidation ---")
+
+        # Save current state
+        awake_state = self.engine.state.clone()
+
+        for cycle in range(num_replay_cycles):
+            # 1. Initialize with low-amplitude noise biased toward recent activity
+            noise = torch.randn(self.num_nodes, device=self.device) * 0.1
+            replay_init = awake_state * 0.05 + noise
+            self.engine.state = replay_init
+
+            # 2. Settle with NO external input, NO input clamping
+            #    The network falls into a learned attractor — a "memory"
+            input_vec = torch.zeros(self.num_nodes, device=self.device)
+            self.engine.settle(input_vec, max_steps=50)
+
+            # 3. Strengthen this attractor with Hebbian update
+            rho = torch.tanh(self.engine.state)
+            idx_i = self.engine.indices[0]
+            idx_j = self.engine.indices[1]
+            ri = rho[idx_i]
+            rj = rho[idx_j]
+
+            # Only update the mid level during sleep (surface is for online learning)
+            hebbian_update = replay_lr_mult * 0.001 * ri * rj
+            self.engine.w_mid += hebbian_update
+
+            # 4. CLS: hippocampal-to-neocortical transfer during replay
+            #    Hippocampal modules replay their rapidly-learned patterns,
+            #    and the replay signal trains the neocortical modules.
+            for hippo_mod_id in self.hippocampal_modules:
+                hippo_mod = self.graph.modules[hippo_mod_id]
+                hippo_start, hippo_end = hippo_mod['start'], hippo_mod['end']
+                hippo_activity = rho[hippo_start:hippo_end]
+
+                for neo_mod_id in self.graph.get_connected_neocortical(hippo_mod_id):
+                    neo_mod = self.graph.modules[neo_mod_id]
+                    neo_start, neo_end = neo_mod['start'], neo_mod['end']
+                    neo_activity = rho[neo_start:neo_end]
+
+                    # Find edges between hippo and neo modules and strengthen them
+                    # Use a stronger Hebbian signal for hippo→neo transfer
+                    hippo_mean = hippo_activity.mean()
+                    neo_update = replay_lr_mult * 0.005 * hippo_mean * neo_activity
+                    self.engine.biases[neo_start:neo_end] += neo_update.clamp(-0.01, 0.01)
+
+            # Log every 50 cycles
+            if cycle % 50 == 0:
+                energy = self.compute_network_energy()
+                num_active = (rho.abs() > 0.3).sum().item()
+                print(f"  Replay {cycle}/{num_replay_cycles} | "
+                      f"Energy: {energy:.4f} | Active nodes: {num_active}/{self.num_nodes}")
+
+        # Restore awake state (partial — allow some sleep influence)
+        self.engine.state = awake_state * 0.5
+
+        # Consolidate synaptic intelligence after sleep
+        self.engine.consolidate_importance()
+
+        print("--- Sleep Phase Complete ---")
+
+    def evaluate_retention(self, data_path, num_samples=5000):
+        """
+        Test accuracy on earlier curriculum data without updating weights.
+        Used to measure backward transfer (retention of earlier learning).
+        """
+        ensure_data(data_path, "retention_eval")
+        if not os.path.exists(data_path):
+            print(f"Cannot evaluate retention: {data_path} not found")
+            return 0.0
+
+        with open(data_path, 'rb') as f:
+            data = f.read()
+
+        data_len = len(data)
+        num_samples = min(num_samples, data_len - 1)
+
+        correct = 0
+        correct_top3 = 0
+
+        # Save state to restore after evaluation
+        saved_state = self.engine.state.clone()
+
+        for i in range(num_samples):
+            idx = i % (data_len - 1)
+            input_byte = data[idx]
+            target_byte = data[idx + 1]
+
+            input_vec = torch.zeros(self.num_nodes, device=self.device)
+            input_vec[input_byte] = 5.0 * self.input_scale_factor
+
+            input_mask = torch.zeros(self.num_nodes, device=self.device)
+            input_mask[self.input_indices] = 1.0
+
+            self.engine.settle(input_vec, input_mask=input_mask, max_steps=10)
+
+            output_activity = torch.tanh(self.engine.state[256:512])
+            probs = torch.softmax(output_activity * 10.0, dim=0)
+            pred_idx = torch.argmax(probs).item()
+
+            if pred_idx == target_byte:
+                correct += 1
+            _, top3 = torch.topk(probs, 3)
+            if target_byte in top3.tolist():
+                correct_top3 += 1
+
+        # Restore state
+        self.engine.state = saved_state
+
+        acc = correct / num_samples
+        acc3 = correct_top3 / num_samples
+        print(f"Retention eval on {data_path}: Acc={acc:.2%} Top3={acc3:.2%} ({num_samples} samples)")
+        return acc
 
     def generate(self, start_text="The", length=100):
         print(f"\n--- Generating: {start_text} ... ---")
@@ -311,8 +498,8 @@ class SequentialTrainer:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--nodes", type=int, default=50000)
-    parser.add_argument("--modules", type=int, default=50)
+    parser.add_argument("--nodes", type=int, default=200000)
+    parser.add_argument("--modules", type=int, default=200)
     args = parser.parse_args()
 
     device = args.device
@@ -334,19 +521,25 @@ def main():
                         iterations=500, steps_per_iter=100, lr=0.05)
     trainer.generate(start_text="A")
 
-    # Phase 2: Words
+    # Phase 2: Words — evaluate retention on Chars after training
     trainer.train_phase("Words", "ndcd/data/level2_words.txt",
                         iterations=200, steps_per_iter=100, lr=0.05)
+    trainer.evaluate_retention("ndcd/data/level1_chars.txt")
     trainer.generate()
 
-    # Phase 3: Quotes
+    # Phase 3: Quotes — evaluate retention on Chars and Words
     trainer.train_phase("Quotes", "ndcd/data/level3_quotes.txt",
                         iterations=200, steps_per_iter=200, lr=0.05)
+    trainer.evaluate_retention("ndcd/data/level1_chars.txt")
+    trainer.evaluate_retention("ndcd/data/level2_words.txt")
     trainer.generate()
 
-    # Phase 4: Literature
+    # Phase 4: Literature — evaluate retention on all prior phases
     trainer.train_phase("Literature", "ndcd/data/sherlock.txt",
                         iterations=500, steps_per_iter=500, lr=0.05)
+    trainer.evaluate_retention("ndcd/data/level1_chars.txt")
+    trainer.evaluate_retention("ndcd/data/level2_words.txt")
+    trainer.evaluate_retention("ndcd/data/level3_quotes.txt")
     trainer.generate(start_text="Sherlock", length=200)
 
 if __name__ == "__main__":
