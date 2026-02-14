@@ -148,6 +148,28 @@ class PredictiveCodingEngine:
             a += torch.randn(size, dtype=torch.float32, device=device) * 0.05
             self.temporal_A.append(a)
 
+        # --- Metaplastic cascade: 3 timescales per synapse ---
+        # Surface: fast, updated every step
+        # Mid: medium, τ ≈ 100 steps
+        # Deep: slow, τ ≈ 10000 steps
+        self.w_deep = self.weight_values.clone()   # Initialize with current learned weights
+        self.w_surface = torch.zeros_like(self.weight_values)
+        self.w_mid = torch.zeros_like(self.weight_values)
+
+        # Cascade transfer rates
+        self.tau_surface_to_mid = 100.0
+        self.tau_mid_to_deep = 10000.0
+
+        # Metaplastic scaling: how much accumulated deep weight
+        # reduces surface learning rate
+        self.meta_scale = 1.0  # tunable
+
+        # --- Synaptic intelligence (Zenke et al., 2017) ---
+        self.omega = torch.zeros_like(self.weight_values)       # accumulated importance
+        self.prev_weights = self.effective_weights.clone()       # for computing Δw
+        self.running_contribution = torch.zeros_like(self.weight_values)  # path integral
+        self.si_damping = 0.1  # prevents omega from growing unboundedly
+
         # Short-term plasticity (Mongillo et al., 2008)
         self.facilitation = torch.ones_like(self.weight_values) * 0.2
         self.depression = torch.ones_like(self.weight_values)
@@ -170,6 +192,56 @@ class PredictiveCodingEngine:
     def activation_function(self, s):
         return torch.tanh(s)
 
+    @property
+    def effective_weights(self):
+        """Effective weight is always the sum of all three cascade levels."""
+        return self.w_surface + self.w_mid + self.w_deep
+
+    def cascade_transfer(self):
+        """Call once per training step after weight update.
+
+        Transfers weight magnitude downward through the cascade:
+        surface → mid (fast) and mid → deep (slow).
+        """
+        # Surface → Mid (fast transfer)
+        transfer_sm = self.w_surface / self.tau_surface_to_mid
+        self.w_mid += transfer_sm
+        self.w_surface -= transfer_sm
+
+        # Mid → Deep (slow transfer)
+        transfer_md = self.w_mid / self.tau_mid_to_deep
+        self.w_deep += transfer_md
+        self.w_mid -= transfer_md
+
+    def update_synaptic_intelligence(self, current_loss):
+        """Call after each weight update with the current prediction error.
+
+        Tracks how much each synapse contributes to reducing prediction error,
+        giving a second importance signal alongside metaplastic depth.
+        """
+        # Compute weight change since last call
+        delta_w = self.effective_weights - self.prev_weights
+
+        # Approximate gradient contribution: -loss * delta_w
+        self.running_contribution += -current_loss * delta_w
+
+        self.prev_weights = self.effective_weights.clone()
+
+    def consolidate_importance(self):
+        """Call at phase boundaries or every ~10K steps.
+
+        Transfers running contribution to permanent importance (omega).
+        """
+        delta_w_total = self.effective_weights - self.prev_weights
+        # Normalize by total weight change to get per-unit importance
+        self.omega += torch.relu(self.running_contribution) / (delta_w_total.pow(2) + 1e-6)
+
+        # Decay old importance slowly to allow forgetting truly obsolete knowledge
+        self.omega *= (1.0 - self.si_damping)
+
+        # Reset accumulator
+        self.running_contribution.zero_()
+
     def settle(self, input_vector, max_steps=20, tol=1e-3,
                input_mask=None):
         """
@@ -188,8 +260,9 @@ class PredictiveCodingEngine:
             else:
                 input_m = input_mask
 
-        # Compute effective weights with short-term plasticity
-        effective_weights = self.weight_values * self.facilitation * self.depression
+        # Compute effective weights: cascade sum modulated by short-term plasticity
+        cascade_weights = self.effective_weights
+        effective_weights = cascade_weights * self.facilitation * self.depression
 
         # Single-phase IMEX settling
         self.state = jit_solve_dynamics_imex(
@@ -226,9 +299,10 @@ class PredictiveCodingEngine:
         """
         rho = torch.tanh(self.state)
 
-        # Build the full weight matrix for prediction extraction
+        # Build the full weight matrix for prediction extraction using cascade weights
+        cascade_weights = self.effective_weights
         weights = torch.sparse_coo_tensor(
-            self.indices, self.weight_values * self.facilitation * self.depression,
+            self.indices, cascade_weights * self.facilitation * self.depression,
             (self.num_nodes, self.num_nodes))
 
         # Compute what the network predicts for each node (W * rho)
@@ -281,11 +355,11 @@ class PredictiveCodingEngine:
         Local Hebbian weight update based on prediction errors.
 
         Spatial weight update:
-            ΔW_ij ∝ lr * ε_{lower_j} * tanh(x_upper_i)^T
+            ΔW_ij ∝ meta_lr * ε_{lower_j} * tanh(x_upper_i)^T
 
-        This is the predictive coding learning rule: weights change
-        to reduce prediction errors at lower levels using activations
-        from higher levels.
+        Updates go to w_surface only. The metaplastic scaling and synaptic
+        intelligence reduce per-synapse learning rate for consolidated and
+        important synapses, preventing catastrophic forgetting.
 
         Temporal transition update:
             ΔA_ℓ ∝ lr * ε_temporal * x_prev^T
@@ -294,7 +368,6 @@ class PredictiveCodingEngine:
             rho = torch.tanh(self.state)
 
             # --- Spatial weight update ---
-            # For each edge (i->j), compute: lr * spatial_error[j] * rho[i]
             idx_i = self.indices[0]
             idx_j = self.indices[1]
 
@@ -308,8 +381,18 @@ class PredictiveCodingEngine:
             # Gradient clipping
             grad = grad.clamp(-1.0, 1.0)
 
-            self.weight_values += learning_rate * grad
-            self.weight_values.clamp_(-1.0, 1.0)
+            # Combined importance-aware learning rate (metaplastic + SI)
+            consolidation = torch.abs(self.w_deep)
+            importance = self.omega
+            meta_lr = learning_rate / (1.0 + self.meta_scale * consolidation + 0.1 * importance)
+
+            # Apply update only to surface level
+            self.w_surface += meta_lr * grad
+            # Keep total effective weight in bounds
+            effective = self.effective_weights
+            effective.clamp_(-1.0, 1.0)
+            # Redistribute clamped values back
+            self.w_surface = effective - self.w_mid - self.w_deep
 
             # --- Bias update from prediction errors ---
             # Biases absorb mean prediction errors
@@ -355,8 +438,16 @@ class PredictiveCodingEngine:
             self.depression.clamp_(0.0, 1.0)
 
     def damp_weights(self, factor=0.9):
-        """Damps recurrent weights by a factor."""
-        self.weight_values *= factor
+        """Damps recurrent weights by a factor (applied to deep level)."""
+        self.w_deep *= factor
+
+    def cascade_stats(self):
+        """Returns mean absolute magnitude at each cascade level for diagnostics."""
+        return {
+            'surface': self.w_surface.abs().mean().item(),
+            'mid': self.w_mid.abs().mean().item(),
+            'deep': self.w_deep.abs().mean().item(),
+        }
 
     def get_prediction_error_by_level(self):
         """
