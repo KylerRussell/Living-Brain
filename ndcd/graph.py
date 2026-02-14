@@ -3,146 +3,313 @@ import networkx as nx
 import numpy as np
 
 class DynamicGraph:
-    def __init__(self, num_nodes, m_edges=2, p_triad=0.1, seed=None):
+    def __init__(self, num_nodes, m_edges=2, p_triad=0.1, seed=None,
+                 num_modules=50, num_levels=4):
         """
-        Initializes the Substrate using Holme-Kim Scale-Free Small-World model.
-        
+        Initializes the Substrate using a Hierarchical Modular topology
+        for Predictive Coding.
+
+        Instead of a flat Holme-Kim graph, creates explicit modules with:
+        - Dense internal connectivity (~60% within module)
+        - Sparse inter-module connectivity at same level (~2-5%)
+        - Sparse hierarchical connections between levels (~1-3%)
+
+        Modules are assigned to hierarchical levels:
+        - Level 0: Closest to input (fast tau, receives input projections)
+        - Level 1: Low-level features (word-internal sequences)
+        - Level 2: Mid-level features (word-to-word transitions)
+        - Level 3: Most abstract (topic persistence, ultra-slow tau)
+
         Args:
-           num_nodes: Total neurons in the brain.
-           m_edges: Number of edges to add per new node (sparsity control).
-           p_triad: Probability of forming a triangle (Clustering control).
-           seed: Random seed for reproducibility.
+            num_nodes: Total neurons in the brain (should be >= 512 + num_modules*2).
+            m_edges: Legacy parameter (unused in modular topology).
+            p_triad: Legacy parameter (unused in modular topology).
+            seed: Random seed for reproducibility.
+            num_modules: Number of learning modules.
+            num_levels: Number of hierarchical levels (default 4).
         """
         self.num_nodes = num_nodes
+        self.num_modules = num_modules
+        self.num_levels = num_levels
         if seed is not None:
             np.random.seed(seed)
-            
-        # Generate topology using Holme-Kim algorithm
-        # m must be <= m_edges in original paper, here networkx uses m as number of random edges
-        self.nx_graph = nx.powerlaw_cluster_graph(n=num_nodes, m=m_edges, p=p_triad, seed=seed)
-        
-        # --- 1. Spatial Embedding (Section 2.2) ---
-        # Assign random 3D coordinates in [0,1]^3
-        self.pos = np.random.rand(num_nodes, 3)
-        
-        # Wiring Cost / Pruning
-        # We want to minimize long-distance connections.
-        # Simple heuristic: Prune top 20% longest edges and rewire to nearest neighbors?
-        # Or just prune. Let's prune for now to simple enforce "Wiring Cost".
-        # Better: Rewire long edges to closer nodes to maintain connectivity.
-        
-        # Calculate edge lengths
-        edges = list(self.nx_graph.edges())
-        edge_lengths = []
-        for u, v in edges:
-            dist = np.linalg.norm(self.pos[u] - self.pos[v])
-            edge_lengths.append((dist, u, v))
-            
-        # Sort by length
-        edge_lengths.sort(key=lambda x: x[0])
-        
-        # Threshold: Prune edges longer than 0.5 (in unit cube)
-        # This is aggressive. Let's say top 10% are "too expensive" -> rewire.
-        num_prune = int(len(edges) * 0.1)
-        long_edges = edge_lengths[-num_prune:]
-        
-        for _, u, v in long_edges:
-            if self.nx_graph.has_edge(u, v):
-                self.nx_graph.remove_edge(u, v)
-                # Rewire u to a closer node w (that isn't v and not already connected)
-                # Find nearest neighbors of u
-                # This could be slow for large N. Just random re-attach to a spatially close candidate?
-                # Optimization: Just pick a random node w, if dist(u,w) < dist(u,v), connect.
-                for _ in range(5): # Try 5 times
-                    w = np.random.randint(0, num_nodes)
-                    if w != u and not self.nx_graph.has_edge(u, w):
-                         d_new = np.linalg.norm(self.pos[u] - self.pos[w])
-                         if d_new < 0.5: # Arbitrary "close" threshold
-                             self.nx_graph.add_edge(u, w)
-                             break
 
-        # --- 4. Node Classification (Section 2.3) ---
-        # Explicit Roles
-        # Define ratios: 10% Sensory, 10% Motor, 80% Association
-        n_sensory = int(num_nodes * 0.1)
-        n_motor = int(num_nodes * 0.1)
-        n_association = num_nodes - n_sensory - n_motor
-        
+        # --- Node Classification ---
+        # 256 input + 256 output nodes, rest are association nodes in modules
+        n_sensory = 256
+        n_motor = 256
+        n_io = n_sensory + n_motor
+        n_association = num_nodes - n_io
+
         self.sensory_indices = np.arange(0, n_sensory)
-        self.motor_indices = np.arange(n_sensory, n_sensory + n_motor)
-        self.association_indices = np.arange(n_sensory + n_motor, num_nodes)
-        
-        # Initialize Sparse Weight Matrix
-        # W must be symmetric for Equilibrium Propagation energy definition
+        self.motor_indices = np.arange(n_sensory, n_io)
+        self.association_indices = np.arange(n_io, num_nodes)
+
+        # --- Assign modules to hierarchical levels ---
+        # Distribution: more modules at lower levels (pyramid shape)
+        # Level 0: 40%, Level 1: 30%, Level 2: 20%, Level 3: 10%
+        level_fractions = [0.40, 0.30, 0.20, 0.10]
+        level_module_counts = []
+        remaining = num_modules
+        for i in range(num_levels - 1):
+            count = max(1, int(num_modules * level_fractions[i]))
+            level_module_counts.append(count)
+            remaining -= count
+        level_module_counts.append(max(1, remaining))
+
+        # Build module metadata
+        self.modules = []  # List of dicts: {level, start_idx, end_idx, node_indices}
+        self.module_levels = []  # level per module
+        self.level_modules = {l: [] for l in range(num_levels)}  # modules per level
+
+        # Distribute association nodes across modules
+        nodes_per_module = n_association // num_modules
+        extra_nodes = n_association % num_modules
+
+        current_node = n_io  # Start after I/O nodes
+        module_id = 0
+        for level in range(num_levels):
+            for _ in range(level_module_counts[level]):
+                # Distribute extra nodes to first modules
+                n_in_module = nodes_per_module + (1 if module_id < extra_nodes else 0)
+                start = current_node
+                end = current_node + n_in_module
+                node_indices = np.arange(start, end)
+
+                self.modules.append({
+                    'id': module_id,
+                    'level': level,
+                    'start': start,
+                    'end': end,
+                    'indices': node_indices,
+                    'size': n_in_module
+                })
+                self.module_levels.append(level)
+                self.level_modules[level].append(module_id)
+
+                current_node = end
+                module_id += 1
+
+        self.num_actual_modules = module_id
+        self.module_levels = np.array(self.module_levels)
+
+        # --- Spatial Embedding ---
+        self.pos = np.random.rand(num_nodes, 3)
+
+        # --- Build Sparse Weight Matrix ---
+        # We build edge lists directly for efficiency
+        edge_rows = []
+        edge_cols = []
+
+        # 1. Dense INTRA-module connectivity
+        # Target ~200 connections per node within module.
+        # For small modules (n<200), use 60% density.
+        # For large modules, cap at 200 connections per node to keep
+        # total edge count in the 5-10M range at 50K nodes.
+        target_connections_per_node = 200
+        for mod in self.modules:
+            idx = mod['indices']
+            n = len(idx)
+            if n < 2:
+                continue
+            # Adaptive density: min(0.6, target_conn / (n-1))
+            intra_density = min(0.6, target_connections_per_node / max(1, n - 1))
+
+            if n <= 300:
+                # Small module: use dense random matrix
+                conn = np.random.rand(n, n) < intra_density
+                np.fill_diagonal(conn, False)
+                local_rows, local_cols = np.nonzero(conn)
+            else:
+                # Large module: sample edges directly to avoid n*n memory
+                n_edges_target = int(n * target_connections_per_node)
+                local_rows = np.random.randint(0, n, n_edges_target)
+                local_cols = np.random.randint(0, n, n_edges_target)
+                # Remove self-loops
+                valid = local_rows != local_cols
+                local_rows = local_rows[valid]
+                local_cols = local_cols[valid]
+
+            edge_rows.extend(idx[local_rows].tolist())
+            edge_cols.extend(idx[local_cols].tolist())
+
+        # 2. Sparse INTER-module connectivity at same level (~3%)
+        inter_same_density = 0.03
+        for level in range(num_levels):
+            mods_at_level = self.level_modules[level]
+            for i in range(len(mods_at_level)):
+                for j in range(i + 1, len(mods_at_level)):
+                    mod_i = self.modules[mods_at_level[i]]
+                    mod_j = self.modules[mods_at_level[j]]
+                    idx_i = mod_i['indices']
+                    idx_j = mod_j['indices']
+                    # Sparse random connections between module pairs
+                    n_possible = len(idx_i) * len(idx_j)
+                    n_connections = max(1, int(n_possible * inter_same_density))
+                    # Cap to avoid excessive edges between large modules
+                    n_connections = min(n_connections, max(10, len(idx_i) + len(idx_j)))
+                    src_picks = np.random.choice(idx_i, n_connections, replace=True)
+                    dst_picks = np.random.choice(idx_j, n_connections, replace=True)
+                    edge_rows.extend(src_picks.tolist())
+                    edge_cols.extend(dst_picks.tolist())
+                    # Bidirectional
+                    edge_rows.extend(dst_picks.tolist())
+                    edge_cols.extend(src_picks.tolist())
+
+        # 3. Sparse HIERARCHICAL connections between levels (~2%)
+        # Higher levels predict lower levels (top-down)
+        # Lower levels send errors up (bottom-up)
+        hier_density = 0.02
+        for level in range(num_levels - 1):
+            lower_mods = self.level_modules[level]
+            upper_mods = self.level_modules[level + 1]
+            for lm_id in lower_mods:
+                for um_id in upper_mods:
+                    mod_lower = self.modules[lm_id]
+                    mod_upper = self.modules[um_id]
+                    idx_lower = mod_lower['indices']
+                    idx_upper = mod_upper['indices']
+                    n_possible = len(idx_lower) * len(idx_upper)
+                    n_connections = max(1, int(n_possible * hier_density))
+                    n_connections = min(n_connections, max(10, len(idx_lower) + len(idx_upper)))
+                    # Top-down: upper -> lower
+                    src_picks = np.random.choice(idx_upper, n_connections, replace=True)
+                    dst_picks = np.random.choice(idx_lower, n_connections, replace=True)
+                    edge_rows.extend(src_picks.tolist())
+                    edge_cols.extend(dst_picks.tolist())
+                    # Bottom-up: lower -> upper
+                    edge_rows.extend(dst_picks.tolist())
+                    edge_cols.extend(src_picks.tolist())
+
+        # 4. Input projections: sensory nodes -> level-0 modules
+        level0_mods = self.level_modules[0]
+        for mod_id in level0_mods:
+            mod = self.modules[mod_id]
+            idx = mod['indices']
+            # Each sensory node connects to a subset of level-0 module nodes
+            n_proj = max(1, len(idx) // 4)
+            for s in range(n_sensory):
+                targets = np.random.choice(idx, n_proj, replace=False)
+                edge_rows.extend([s] * n_proj)
+                edge_cols.extend(targets.tolist())
+                # Bidirectional for settling
+                edge_rows.extend(targets.tolist())
+                edge_cols.extend([s] * n_proj)
+
+        # 5. Output projections: level-0 modules -> motor nodes
+        for mod_id in level0_mods:
+            mod = self.modules[mod_id]
+            idx = mod['indices']
+            n_proj = max(1, len(idx) // 4)
+            for m in range(n_motor):
+                sources = np.random.choice(idx, n_proj, replace=False)
+                motor_node = n_sensory + m
+                edge_rows.extend(sources.tolist())
+                edge_cols.extend([motor_node] * n_proj)
+                edge_rows.extend([motor_node] * n_proj)
+                edge_cols.extend(sources.tolist())
+
+        # Convert to numpy arrays and remove duplicates
+        edge_rows = np.array(edge_rows, dtype=np.int64)
+        edge_cols = np.array(edge_cols, dtype=np.int64)
+
+        # Remove self-loops
+        valid = edge_rows != edge_cols
+        edge_rows = edge_rows[valid]
+        edge_cols = edge_cols[valid]
+
+        # Deduplicate edges
+        edge_pairs = np.stack([edge_rows, edge_cols], axis=1)
+        edge_pairs = np.unique(edge_pairs, axis=0)
+        edge_rows = edge_pairs[:, 0]
+        edge_cols = edge_pairs[:, 1]
+
+        num_edges = len(edge_rows)
+        print(f"Hierarchical graph: {num_nodes} nodes, {num_edges} edges, "
+              f"{self.num_actual_modules} modules across {num_levels} levels")
+        for level in range(num_levels):
+            n_mods = len(self.level_modules[level])
+            mod_sizes = [self.modules[m]['size'] for m in self.level_modules[level]]
+            print(f"  Level {level}: {n_mods} modules, "
+                  f"avg size {np.mean(mod_sizes):.0f} nodes")
+
+        # Initialize weights
+        # Xavier-like: std = sqrt(2 / (avg_fan_in + avg_fan_out))
+        avg_degree = num_edges / num_nodes
+        std_dev = np.sqrt(2.0 / (avg_degree + avg_degree))
+
+        weight_vals = np.random.normal(0, std_dev, num_edges)
+
+        # Build full sparse weight matrix for spectral analysis
         self.weights = np.zeros((num_nodes, num_nodes))
-        adj = nx.to_numpy_array(self.nx_graph)
-        
-        # Initialize Sparse Weight Matrix
-        # W must be symmetric for Equilibrium Propagation energy definition
-        self.weights = np.zeros((num_nodes, num_nodes))
-        adj = nx.to_numpy_array(self.nx_graph)
-        
-        # Orthogonal Initialization for better gradient flow
-        # We create a random orthogonal matrix and mask it
-        # Since we need symmetry, we can use a symmetric orthogonal matrix or just
-        # stabilize the random normal one.
-        # Let's use standard normal scaled by 1/sqrt(connectivity) for now, then spectral norm.
-        # But to be "Orthogonal-like", we want singular values ~ 1.
-        
-        # Random Normal Initialization (Xavier-like but sparse context)
-        # Variance = 2 / (fan_in + fan_out)? For sparse, just 1/sqrt(k)
-        # Average degree k ~ 2*m_edges
-        k = 2 * m_edges
-        std_dev = 1.0 / np.sqrt(k)
-        
-        random_weights = np.random.normal(0, std_dev, (num_nodes, num_nodes))
-        
-        # Mask with adjacency to maintain sparsity
-        self.weights = adj * random_weights
-        
-        # Enforce Symmetry for EqProp
-        self.weights = (self.weights + self.weights.T) / 2 
-        
+        self.weights[edge_rows, edge_cols] = weight_vals
+
         # Enforce Spectral Radius = 0.95 (Edge of Chaos)
         try:
-            current_radius = np.max(np.abs(np.linalg.eigvals(self.weights)))
+            # Use sparse eigvals for efficiency
+            from scipy.sparse.linalg import eigs as sp_eigs
+            from scipy.sparse import csr_matrix
+            W_sp = csr_matrix(self.weights)
+            eigvals = sp_eigs(W_sp, k=1, which='LM', return_eigenvectors=False)
+            current_radius = np.abs(eigvals[0])
             if current_radius > 0:
                 self.weights *= (0.95 / current_radius)
-        except:
-             # If eigvals fail (too slow?), just normalize by frobenius?
-             # For 2000 nodes, it should be fine.
-             pass
-        
-        # Eligibility Traces Matrix (for RL)
-        self.traces = np.zeros((num_nodes, num_nodes))
-        
-        # Initialize Neuron Parameters (Multi-timescale Tau Hierarchy)
-        # Fast nodes handle bytes/chars, medium handle words, slow handle
-        # sentences, ultra-slow handle topic/context.
-        # Input/output nodes (0-511) are always fast.
-        n_io = min(512, num_nodes)  # I/O nodes are always fast
-        n_remaining = num_nodes - n_io
+                print(f"Spectral radius tuned: {current_radius:.4f} -> 0.95")
+        except Exception as e:
+            print(f"Spectral tuning via sparse eigs failed ({e}), using Frobenius norm fallback")
+            frob = np.sqrt(np.sum(self.weights ** 2))
+            if frob > 0:
+                self.weights *= (0.95 * np.sqrt(num_nodes) / frob)
 
-        # Distribute remaining nodes across timescales (cortical ratios)
-        # Fast: ~30% of remaining, Medium: ~40%, Slow: ~20%, Ultra-slow: ~10%
-        n_fast_extra = int(n_remaining * 0.3)
-        n_medium = int(n_remaining * 0.4)
-        n_slow = int(n_remaining * 0.2)
-        n_ultra = n_remaining - n_fast_extra - n_medium - n_slow
+        # --- Timescale Assignment (per-module, per-level) ---
+        # Level 0: fast (tau=0.1), Level 1: medium (tau=0.75),
+        # Level 2: slow (tau=5.0), Level 3: ultra-slow (tau=25.0)
+        tau_by_level = {0: 0.1, 1: 0.75, 2: 5.0, 3: 25.0}
 
-        self.taus = np.concatenate([
-            np.ones(n_io) * 0.1,              # I/O nodes: τ ≈ 2 steps effective
-            np.ones(n_fast_extra) * 0.1,       # Extra fast association nodes
-            np.ones(n_medium) * 0.75,          # τ ≈ 15 steps
-            np.ones(n_slow) * 5.0,             # τ ≈ 100 steps
-            np.ones(n_ultra) * 25.0,           # τ ≈ 500 steps
-        ])
-        
-        # State Vectors
-        self.states = np.zeros(num_nodes) # Internal potential s
-        # Initialize biases with small noise to break dead states
+        self.taus = np.zeros(num_nodes)
+        # I/O nodes: fast
+        self.taus[:n_io] = 0.1
+        # Association nodes: per-module by level
+        for mod in self.modules:
+            level = mod['level']
+            self.taus[mod['start']:mod['end']] = tau_by_level[level]
+
+        # State and bias initialization
+        self.states = np.zeros(num_nodes)
         self.biases = np.random.uniform(-0.01, 0.01, num_nodes)
-        
+
+        # Eligibility Traces (legacy, kept for compatibility)
+        self.traces = np.zeros((num_nodes, num_nodes))
+
+        # Store hierarchical connection metadata for predictive coding
+        # Top-down weight indices: for each (upper_mod, lower_mod) pair,
+        # store the edge indices in the sparse representation
+        self._build_hierarchical_index(edge_rows, edge_cols)
+
+    def _build_hierarchical_index(self, edge_rows, edge_cols):
+        """
+        Build index structures for predictive coding:
+        - topdown_pairs: list of (upper_mod_id, lower_mod_id) pairs
+        - For each pair, the set of node indices in upper and lower modules
+        """
+        self.hier_pairs = []  # (upper_mod_id, lower_mod_id)
+        for level in range(self.num_levels - 1):
+            lower_mods = self.level_modules[level]
+            upper_mods = self.level_modules[level + 1]
+            for lm_id in lower_mods:
+                for um_id in upper_mods:
+                    self.hier_pairs.append((um_id, lm_id))
+
+    def get_module_ranges(self):
+        """
+        Returns list of (start, end) tuples for each module's node range.
+        Used by the engine for computing per-module prediction errors.
+        """
+        return [(mod['start'], mod['end']) for mod in self.modules]
+
+    def get_module_level(self, module_id):
+        return self.modules[module_id]['level']
+
     def export_sparse_components(self):
         """
         Exports the graph weights as sparse components (indices, values).
@@ -150,7 +317,6 @@ class DynamicGraph:
             indices (np.ndarray): 2xE array of edge indices.
             values (np.ndarray): 1xE array of edge weights.
         """
-        # Get indices of non-zero weights
         rows, cols = np.nonzero(self.weights)
         values = self.weights[rows, cols]
         indices = np.stack([rows, cols])

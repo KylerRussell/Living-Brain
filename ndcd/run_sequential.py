@@ -7,7 +7,7 @@ import argparse
 import scipy.sparse as sp
 from scipy.sparse.linalg import eigs
 from ndcd.graph import DynamicGraph
-from ndcd.engine_torch import DragonEngineTorch
+from ndcd.engine_torch import PredictiveCodingEngine
 from ndcd.curriculum_gen import generate_chars, generate_toddler_words, generate_quotes
 
 def ensure_data(data_path, phase_name):
@@ -18,7 +18,6 @@ def ensure_data(data_path, phase_name):
         elif "level2" in data_path: generate_toddler_words(data_path)
         elif "level3" in data_path: generate_quotes(data_path)
         elif "sherlock" in data_path:
-            # Check if we can download it, otherwise warn
              import urllib.request
              url = "https://www.gutenberg.org/files/1661/1661-0.txt"
              try:
@@ -27,177 +26,136 @@ def ensure_data(data_path, phase_name):
                  print(f"Failed to download Sherlock: {e}")
 
 class SequentialTrainer:
-    def __init__(self, num_nodes=2000, device='cpu'):
+    def __init__(self, num_nodes=50000, device='cpu', num_modules=50):
         self.device = device
         self.num_nodes = num_nodes
         if num_nodes < 512:
             raise ValueError(f"num_nodes ({num_nodes}) must be >= 512 to support 256 input + 256 output nodes.")
-        
-        # 1. Initialize Graph
-        print("Initializing Dynamic Graph...")
-        self.graph = DynamicGraph(num_nodes=num_nodes, m_edges=20, p_triad=0.1, seed=42)
+
+        # 1. Initialize Hierarchical Modular Graph
+        print("Initializing Hierarchical Modular Graph...")
+        self.graph = DynamicGraph(
+            num_nodes=num_nodes,
+            m_edges=20,  # Legacy param, unused in modular topology
+            p_triad=0.1,
+            seed=42,
+            num_modules=num_modules,
+            num_levels=4,
+        )
         indices, values = self.graph.export_sparse_components()
         biases = self.graph.biases
         taus = self.graph.taus
-        
+
         self.indices = indices
         self.initial_values = values
-        
-        # Matched Input Scaling Factor
-        # Maintains REA (Relative Effective Amplitude) when weights are scaled
+
+        # Input scale factor (fixed to 1.0)
         self.input_scale_factor = 1.0
-        
-        
-    # Spectral Radius Tuning
+
+        # Spectral Radius Tuning
         self.tune_spectral_radius(target_radius=0.95)
-        
-        # 2. Initialize Engine
-        # Continuous state is maintained in self.engine.state
-        # dt=0.05: With tau=0.1 and spectral_radius=0.95, the slowest network
-        # mode has effective time constant tau/(1-rho) = 2.0. At 100 steps:
-        #   dt=0.01 → 0.5 slow-mode time constants (40% converged)
-        #   dt=0.05 → 2.5 slow-mode time constants (92% converged)
-        # RK4 is stable up to dt ~ 2.78*tau = 0.278, so dt=0.05 is safe.
-        self.engine = DragonEngineTorch(num_nodes, indices, self.initial_values, biases, taus, positions=self.graph.pos, dt=0.05, device=device)
-        
+
+        # 2. Initialize Predictive Coding Engine
+        # dt=0.5: IMEX is stable for large dt; converges in 10-20 steps
+        module_ranges = self.graph.get_module_ranges()
+        module_levels = self.graph.module_levels
+        hier_pairs = self.graph.hier_pairs
+
+        self.engine = PredictiveCodingEngine(
+            num_nodes,
+            indices,
+            self.initial_values,
+            biases,
+            taus,
+            module_ranges=module_ranges,
+            module_levels=module_levels,
+            hier_pairs=hier_pairs,
+            positions=self.graph.pos,
+            dt=0.5,
+            device=device,
+            temporal_alpha=0.5,
+        )
+
         # 3. Define I/O Masks
-        # Nodes 0-255: Input
-        # Nodes 256-511: Output
         self.input_indices = list(range(0, 256))
         self.output_indices = list(range(256, 512))
-        
-        # Pre-compute One-Hot Identity Matrices for fast I/O
+
+        # Pre-compute One-Hot Identity Matrices
         self.eye = torch.eye(256, device=device)
 
     def tune_spectral_radius(self, target_radius=0.95):
-        """
-        Tunes the spectral radius of the weight matrix to a target value.
-        Updates self.initial_values.
-        If self.engine exists, it also updates self.engine.weight_values.
-        """
-        print(f"Tuning Spectral Radius to {target_radius:.2f} (Strict)...")
-        
+        """Tunes the spectral radius of the weight matrix to a target value."""
+        print(f"Tuning Spectral Radius to {target_radius:.2f}...")
+
         if hasattr(self, 'engine'):
-            # Pull from GPU if needed
             w_tensor = self.engine.weight_values.cpu().numpy()
-            indices = self.engine.indices.cpu().numpy() 
+            indices = self.engine.indices.cpu().numpy()
         else:
-             if not hasattr(self, 'initial_values'):
-                 pass
-             w_tensor = self.initial_values
-             indices = self.indices
-             
+            w_tensor = self.initial_values
+            indices = self.indices
+
         row = indices[0]
         col = indices[1]
         w_sparse = sp.csr_matrix((w_tensor, (row, col)), shape=(self.num_nodes, self.num_nodes))
-        
+
         try:
-            # Calculate largest eigs
             eigvals = eigs(w_sparse, k=1, which='LM', return_eigenvectors=False)
             max_eig = np.abs(eigvals[0])
             print(f"Current Spectral Radius: {max_eig:.4f}")
-            
+
             scale_factor = target_radius / (max_eig + 1e-8)
             w_tensor = w_tensor * scale_factor
             print(f"Scaled weights by {scale_factor:.4f}")
-            
-            # --- REMOVED MATCHED SCALING ---
-            # Input scale fixed to 1.0 to avoid linear collapse
+
             self.input_scale_factor = 1.0
-            print(f"Input Scale Factor fixed to {self.input_scale_factor:.4f}")
-            
+
             if hasattr(self, 'engine'):
                 self.engine.weight_values = torch.tensor(w_tensor, dtype=torch.float32, device=self.device)
-                # Do not scale biases blindly
             else:
                 self.initial_values = w_tensor
 
         except Exception as e:
             print(f"Warning: Spectral tuning failed ({e}). Using default.")
-        
-    def train_babbling(self, iterations=1000, lr=0.01):
-        print(f"\n=== Starting Phase 0: Hebbian Babbling ===")
-        # Input Mask: Clamp inputs
-        input_mask = torch.zeros(self.num_nodes, device=self.device)
-        input_mask[self.input_indices] = 1.0
-        
-        start_time = time.time()
-        
-        for i in range(iterations):
-            # Random Static Input
-            input_vals = torch.rand(len(self.input_indices), device=self.device)
-            input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[self.input_indices] = input_vals * self.input_scale_factor
-            
-            # Settle (Free logic, but inputs clamped)
-            self.engine.state.zero_()
-            self.engine.settle(input_vec, input_mask=input_mask, max_steps=100)
-            
-            # Hebbian Update
-            # CRITICAL FIX 1: Much smaller learning rate to prevent explosion
-            self.engine.update_weights_hebbian(learning_rate=lr * 0.01)
-            
-            # CRITICAL FIX 2: Clip weights after each update
-            self.engine.weight_values.clamp_(-1.0, 1.0)
-            
-            # CRITICAL FIX 3: Monitor spectral radius during training
-            if i % 100 == 0:
-                W_sparse = torch.sparse_coo_tensor(
-                    self.engine.indices, 
-                    self.engine.weight_values,
-                    (self.num_nodes, self.num_nodes)
-                )
-                W_dense = W_sparse.to_dense().cpu().numpy()
-                current_rho = np.max(np.abs(np.linalg.eigvals(W_dense)))
-                print(f"Babbling {i}/{iterations} - Spectral Radius: {current_rho:.4f}")
-                
-                # Emergency brake
-                if current_rho > 1.5:
-                    print(f"WARNING: Spectral radius too high, applying damping")
-                    self.engine.weight_values *= 0.8
-        
-        # RE-TUNE SPECTRAL RADIUS
-        print("\nRe-tuning after Babbling...")
-        self.tune_spectral_radius(target_radius=0.95)
-        
-    def train_phase(self, phase_name, data_path, iterations, steps_per_iter, beta=0.1, lr=0.01, use_rl=False):
+
+    def train_phase(self, phase_name, data_path, iterations, steps_per_iter, lr=0.01):
+        """
+        Predictive Coding training loop.
+
+        For each token:
+        1. Clamp input byte at level-0 input nodes
+        2. Store previous state for temporal prediction
+        3. Settle dynamics (single phase, 10-20 IMEX steps)
+        4. Compute prediction errors (spatial + temporal)
+        5. Update weights using LOCAL Hebbian rule
+        6. Update short-term plasticity (from Phase 1)
+        7. Log metrics
+
+        No nudging, no beta, no three-phase settling.
+        """
         print(f"\n=== Starting Phase: {phase_name} ===")
         print(f"Run started at: {time.ctime()}")
         ensure_data(data_path, phase_name)
-        
+
         if not os.path.exists(data_path):
             print(f"Skipping {phase_name} (Data missing)")
             return
 
         with open(data_path, 'rb') as f:
             data = f.read()
-            
+
         data_len = len(data)
         curr_idx = 0
-        
+
         start_time = time.time()
-        
+
         total_steps = iterations * steps_per_iter
-        
+
         loss_accum = 0.0
-        # Rolling Accuracy Window
+        energy_accum = 0.0
         acc_window = []
         acc_top3_window = []
-        
+
         for step in range(total_steps):
-            
-            # --- Sleep / Remodeling Cycle ---
-            # Disabled: remodeling prunes 5% of edges every 1000 steps and replaces
-            # with zero-weight edges. This systematically destroys learned structure,
-            # causing catastrophic accuracy drops (e.g., 32% → 2% after one remodel).
-            # The spectral radius re-tuning further disrupts weight distribution.
-            # Re-enable once base learning converges reliably.
-            # if step > 0 and step % 1000 == 0:
-            #     print("\n--- Initiating Sleep Phase (Homeostasis & Restructuring) ---")
-            #     protected = self.input_indices + self.output_indices
-            #     self.engine.remodel_structure(turnover_rate=0.05, protected_nodes=protected)
-            #     self.tune_spectral_radius(target_radius=0.95)
-            
             # 1. Get Data Stream
             if curr_idx >= data_len - 1:
                 curr_idx = 0
@@ -205,232 +163,183 @@ class SequentialTrainer:
             input_byte = data[curr_idx]
             target_byte = data[curr_idx + 1]
             curr_idx += 1
-            
+
             # 2. Input Setup
             input_mask = torch.zeros(self.num_nodes, device=self.device)
             input_mask[self.input_indices] = 1.0
 
             input_vec = torch.zeros(self.num_nodes, device=self.device)
             input_vec[input_byte] = 5.0 * self.input_scale_factor
-            
-            # 3. Free Phase (Monitor Only - or use as pivot if doing one-sided)
-            # For Symmetric Nudging, we don't strictly *need* the free phase state for gradient,
-            # but we need it to calculate the prediction loss!
 
-            inhib_mask = torch.zeros(self.num_nodes, device=self.device)
-            inhib_mask[self.output_indices] = 1.0
+            # 3. Store previous state for temporal prediction
+            self.engine.store_previous_state()
 
-            # Only reset fast nodes; slow nodes carry context naturally
-            # with multi-timescale τ values providing working memory.
-            fast_mask = self.engine.taus < 0.5  # fast group
+            # 4. Reset fast nodes; slow nodes carry context
+            fast_mask = self.engine.taus < 0.5
             self.engine.state[fast_mask] *= 0.1
-            # Medium/slow/ultra-slow nodes retain their state between tokens
 
-            # Run Free Phase
-            self.engine.settle(input_vec, input_mask=input_mask, inhibition_mask=inhib_mask, inhibition_beta=0.0, max_steps=100)
-            state_free = self.engine.state.clone()
+            # 5. Single-phase settle (IMEX, ~20 steps)
+            self.engine.settle(
+                input_vec,
+                input_mask=input_mask,
+                max_steps=20,
+                tol=1e-3,
+            )
 
-            # --- VICReg Regularization on Hidden Representations ---
-            # Prevents representational collapse by encouraging variance
-            # and decorrelation among association node activations.
-            hidden_act = torch.tanh(state_free[512:])  # association nodes
+            # 6. Compute prediction errors
+            energy = self.engine.compute_prediction_errors()
+            energy_accum += energy
 
+            # 7. Measure Prediction (before weight update)
+            output_activity = torch.tanh(self.engine.state[256:512])
+            probs = torch.softmax(output_activity * 10.0, dim=0)
+            pred_idx = torch.argmax(probs).item()
+
+            state_norm = torch.norm(self.engine.state) / np.sqrt(self.num_nodes)
+
+            is_correct = (pred_idx == target_byte)
+            acc_window.append(1.0 if is_correct else 0.0)
+
+            _, top3_indices = torch.topk(probs, 3)
+            if target_byte in top3_indices.tolist():
+                acc_top3_window.append(1.0)
+            else:
+                acc_top3_window.append(0.0)
+
+            loss = -torch.log(probs[target_byte] + 1e-8).item()
+            loss_accum += loss
+
+            # 8. Update weights using local predictive coding rule
+            # Cosine LR schedule
+            lr_mult = 0.5 * (1.0 + np.cos(np.pi * step / total_steps))
+            effective_lr = lr * max(lr_mult, 0.1)
+            self.engine.update_weights_predictive(learning_rate=effective_lr)
+
+            # 9. VICReg Regularization on Hidden Representations
+            hidden_act = torch.tanh(self.engine.state[512:])
             if not hasattr(self, '_vicreg_buffer'):
                 self._vicreg_buffer = []
             self._vicreg_buffer.append(hidden_act.detach())
-            if len(self._vicreg_buffer) >= 32:  # mini-batch of 32
-                batch = torch.stack(self._vicreg_buffer)  # [32, num_hidden]
+            if len(self._vicreg_buffer) >= 32:
+                batch = torch.stack(self._vicreg_buffer)
 
-                # Variance loss: hinge at γ=1.0
                 std = torch.sqrt(batch.var(dim=0) + 1e-4)
                 var_loss = torch.relu(1.0 - std).mean()
 
-                # Covariance loss: decorrelate dimensions
                 batch_centered = batch - batch.mean(dim=0)
                 cov = (batch_centered.T @ batch_centered) / (batch.shape[0] - 1)
-                # Zero diagonal (we only penalize off-diagonal)
                 cov_loss = (cov.fill_diagonal_(0).pow(2).sum()) / hidden_act.shape[0]
 
-                # Apply as bias nudge to prevent collapse
                 vicreg_lr = 0.001
                 with torch.no_grad():
                     self.engine.biases[512:] -= vicreg_lr * (var_loss + cov_loss)
 
                 self._vicreg_buffer = []
 
-            # Measure Prediction
-            # Use activated state (tanh) for output probability calculation.
-            # Temperature scaling: with activations ~0.1, raw logit differences
-            # are ~0.01, making softmax nearly uniform (loss ≈ ln(256)) even when
-            # the correct class IS ranked highest. Scaling by 10x amplifies the
-            # differences so softmax produces meaningful probabilities.
-            output_activity = torch.tanh(state_free[256:512])
-            probs = torch.softmax(output_activity * 10.0, dim=0)
-            pred_idx = torch.argmax(probs).item()
-            
-            # Metrics
-            # Check state norm to ensure non-linear regime
-            state_norm = torch.norm(state_free) / np.sqrt(self.num_nodes)
-            
-            is_correct = (pred_idx == target_byte)
-            if is_correct: acc_window.append(1.0)
-            else: acc_window.append(0.0)
-            
-            _, top3_indices = torch.topk(probs, 3)
-            if target_byte in top3_indices.tolist(): acc_top3_window.append(1.0)
-            else: acc_top3_window.append(0.0)
-                
-            loss = -torch.log(probs[target_byte] + 1e-8).item()
-            loss_accum += loss
-            
-            if use_rl:
-                # RL Update
-                reward = 1.0 if is_correct else -0.1
-                # Increase attention on error
-                attention_val = 1.0 + (loss * 0.1) 
-                self.engine.apply_neuromodulators(reward=reward, attention=attention_val, mood=0.0)
-            else:
-                # --- SYMMETRIC EQUILIBRIUM PROPAGATION ---
-                
-                # Nudge Targets
-                nudge_mask = torch.zeros(self.num_nodes, device=self.device)
-                nudge_mask[self.output_indices] = 1.0
-                
-                # Target Vector construction
-                # Contrastive encoding: push correct UP, push all others DOWN.
-                # With activations ~0.1, a target of 0.0 for non-targets barely
-                # nudges them (force = beta*(0.0-0.1) = -0.02). Using -0.5 gives
-                # force = beta*(-0.5-0.1) = -0.12, creating much larger pos/neg
-                # state differences and hence larger EqProp gradients.
-                target_vec = torch.zeros(self.num_nodes, device=self.device)
-                target_vec[256:512] = -0.5
-                target_vec[256 + target_byte] = 1.0
-                
-                # Positive Phase (+beta)
-                # s_pos = settle(x, beta, target)
-                # We start from free state? Or input state? Starting from free state is faster.
-                self.engine.state = state_free.clone()
-                self.engine.settle(input_vec, nudge_target=target_vec, beta=beta, nudge_mask=nudge_mask, input_mask=input_mask, inhibition_mask=inhib_mask, inhibition_beta=0.0, max_steps=100)
-                state_pos = self.engine.state.clone()
-
-                # Negative Phase (-beta)
-                # s_neg = settle(x, -beta, target)
-                # Start from free state again
-                self.engine.state = state_free.clone()
-                self.engine.settle(input_vec, nudge_target=target_vec, beta=-beta, nudge_mask=nudge_mask, input_mask=input_mask, inhibition_mask=inhib_mask, inhibition_beta=0.0, max_steps=100)
-                state_neg = self.engine.state.clone()
-                
-                # Weight Update with cosine LR schedule
-                # Decays from lr to lr*0.1 over training. Once easy bigram
-                # patterns are learned, the full lr causes oscillation.
-                lr_mult = 0.5 * (1.0 + np.cos(np.pi * step / total_steps))
-                effective_lr = lr * max(lr_mult, 0.1)
-                self.engine.update_weights_eq_prop(state_pos, state_neg, beta, effective_lr, decay=0.0)
-            
+            # 10. Logging
             if step % 100 == 0:
-                 # Keep 1000-sample window for milestone prints
-                 if len(acc_window) > 1000: acc_window = acc_window[-1000:]
-                 if len(acc_top3_window) > 1000: acc_top3_window = acc_top3_window[-1000:]
+                if len(acc_window) > 1000: acc_window = acc_window[-1000:]
+                if len(acc_top3_window) > 1000: acc_top3_window = acc_top3_window[-1000:]
 
-                 elapsed = time.time() - start_time
+                elapsed = time.time() - start_time
 
-                 if step % 1000 == 0:
-                     # Milestone: print on NEW LINE with 1000-sample stats
-                     acc_1k = sum(acc_window) / len(acc_window) if acc_window else 0.0
-                     acc3_1k = sum(acc_top3_window) / len(acc_top3_window) if acc_top3_window else 0.0
-                     avg_loss = loss_accum / max(step, 1)
-                     print(f"Step {step}/{total_steps} | Time: {elapsed:.0f}s | AvgLoss: {avg_loss:.4f} | Acc@1k: {acc_1k:.2%} | Top3@1k: {acc3_1k:.2%} | ||s||/√N: {state_norm:.4f}")
-                 else:
-                     # Frequent: overwrite line with recent 100-sample stats
-                     recent_acc = sum(acc_window[-100:]) / min(len(acc_window), 100)
-                     recent_acc3 = sum(acc_top3_window[-100:]) / min(len(acc_top3_window), 100)
-                     print(f"  step {step}/{total_steps} | Loss: {loss:.4f} | Acc: {recent_acc:.2%} | Top3: {recent_acc3:.2%} | ||s||/√N: {state_norm:.4f}        ", end='\r')
-                 
+                if step % 1000 == 0:
+                    acc_1k = sum(acc_window) / len(acc_window) if acc_window else 0.0
+                    acc3_1k = sum(acc_top3_window) / len(acc_top3_window) if acc_top3_window else 0.0
+                    avg_loss = loss_accum / max(step, 1)
+                    avg_energy = energy_accum / max(step, 1)
+
+                    # Per-level error breakdown
+                    level_errors = self.engine.get_prediction_error_by_level()
+                    err_str = " | ".join(
+                        f"L{l}: s={d['spatial']:.4f} t={d['temporal']:.4f}"
+                        for l, d in sorted(level_errors.items())
+                    )
+
+                    print(f"Step {step}/{total_steps} | Time: {elapsed:.0f}s | "
+                          f"AvgLoss: {avg_loss:.4f} | Energy: {avg_energy:.4f} | "
+                          f"Acc@1k: {acc_1k:.2%} | Top3@1k: {acc3_1k:.2%} | "
+                          f"||s||/√N: {state_norm:.4f}")
+                    print(f"  PredErr: {err_str}")
+                else:
+                    recent_acc = sum(acc_window[-100:]) / min(len(acc_window), 100)
+                    recent_acc3 = sum(acc_top3_window[-100:]) / min(len(acc_top3_window), 100)
+                    print(f"  step {step}/{total_steps} | Loss: {loss:.4f} | "
+                          f"Energy: {energy:.4f} | Acc: {recent_acc:.2%} | "
+                          f"Top3: {recent_acc3:.2%} | ||s||/√N: {state_norm:.4f}        ", end='\r')
+
         final_acc = sum(acc_window)/len(acc_window) if len(acc_window) > 0 else 0.0
         final_acc3 = sum(acc_top3_window)/len(acc_top3_window) if len(acc_top3_window) > 0 else 0.0
-        print(f"\nPhase Complete. Avg Loss: {loss_accum/total_steps:.4f} | Final Acc: {final_acc:.2%}")
-        
+        print(f"\nPhase Complete. Avg Loss: {loss_accum/total_steps:.4f} | "
+              f"Avg Energy: {energy_accum/total_steps:.4f} | Final Acc: {final_acc:.2%}")
+
     def generate(self, start_text="The", length=100):
         print(f"\n--- Generating: {start_text} ... ---")
         curr_text = start_text
-        
+
         # Prime
         for char in start_text:
             val = ord(char)
             if val > 255: val = 0
             input_vec = torch.zeros(self.num_nodes, device=self.device)
             input_vec[val] = 1.0 * self.input_scale_factor
-            self.engine.settle(input_vec, max_steps=30)
-            
+            self.engine.settle(input_vec, max_steps=10)
+
         for _ in range(length):
             state = self.engine.state
-            # Use activated state with temperature scaling (matching training)
             out_act = torch.tanh(state[256:512])
             probs = torch.softmax(out_act * 10.0, dim=0)
-            
-            # Sample
+
             next_byte = torch.multinomial(probs, 1).item()
             char = chr(next_byte) if 0 <= next_byte < 128 else '?'
             curr_text += char
-            
-            # Feedback
+
             input_vec = torch.zeros(self.num_nodes, device=self.device)
             input_vec[next_byte] = 1.0 * self.input_scale_factor
-            self.engine.settle(input_vec, max_steps=30)
-            
+            self.engine.settle(input_vec, max_steps=10)
+
         print(curr_text)
         print("--------------------------------------")
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--nodes", type=int, default=10000) # 10K nodes for multi-timescale hierarchy
+    parser.add_argument("--nodes", type=int, default=50000)
+    parser.add_argument("--modules", type=int, default=50)
     args = parser.parse_args()
-    
+
     device = args.device
     if torch.backends.mps.is_available() and device == 'cpu':
         device = 'mps'
     if torch.cuda.is_available() and device == 'cpu':
         device = 'cuda'
-        
-    print(f"Using device: {device}")
-    
-    trainer = SequentialTrainer(num_nodes=args.nodes, device=device)
-    
-    # Curriculum
-    # Learning Rates need to be small for EqProp
-    
-    # Phase 0: Babbling (Warmup)
-    # Disabled: Hebbian babbling creates deep attractors that trap the system.
-    # The spectral radius grows during babbling and the weight structure creates
-    # a single dominant attractor basin. Re-enable once supervised learning works.
-    trainer.train_babbling(iterations=0)
 
-    # Reset state and traces before curriculum begins
+    print(f"Using device: {device}")
+
+    trainer = SequentialTrainer(num_nodes=args.nodes, device=device, num_modules=args.modules)
+
+    # Reset state before curriculum begins
     trainer.engine.state.zero_()
-    trainer.engine.trace_values.zero_()
 
     # Phase 1: Chars
-    # beta=0.2: stronger nudge creates bigger pos/neg state difference → larger gradients
-    # lr=0.05: compensates for tiny activation products (rho~0.1, rho*rho~0.01)
-    trainer.train_phase("Chars", "ndcd/data/level1_chars.txt", iterations=500, steps_per_iter=100, beta=0.2, lr=0.05, use_rl=False)
+    # lr=0.05: compensates for tiny activation products
+    trainer.train_phase("Chars", "ndcd/data/level1_chars.txt",
+                        iterations=500, steps_per_iter=100, lr=0.05)
     trainer.generate(start_text="A")
-    
-    # Phase 2: Words (converted from RL to EqProp — RL pathway uses stale
-    # eligibility traces and has uncontrolled lr, causing loss to INCREASE)
-    trainer.engine.trace_values.zero_()
-    trainer.train_phase("Words", "ndcd/data/level2_words.txt", iterations=200, steps_per_iter=100, beta=0.2, lr=0.05, use_rl=False)
+
+    # Phase 2: Words
+    trainer.train_phase("Words", "ndcd/data/level2_words.txt",
+                        iterations=200, steps_per_iter=100, lr=0.05)
     trainer.generate()
-    
-    # Phase 3: Quotes (converted from RL to EqProp — same reasoning as Phase 2)
-    trainer.engine.trace_values.zero_()
-    trainer.train_phase("Quotes", "ndcd/data/level3_quotes.txt", iterations=200, steps_per_iter=200, beta=0.2, lr=0.05, use_rl=False)
+
+    # Phase 3: Quotes
+    trainer.train_phase("Quotes", "ndcd/data/level3_quotes.txt",
+                        iterations=200, steps_per_iter=200, lr=0.05)
     trainer.generate()
-    
-    # Phase 4: Literature (increased from beta=0.1/lr=0.005 which gave 1/40th
-    # the gradient of Phase 1, causing stagnation at ~20%)
-    trainer.engine.trace_values.zero_()
-    trainer.train_phase("Literature", "ndcd/data/sherlock.txt", iterations=500, steps_per_iter=500, beta=0.2, lr=0.05)
+
+    # Phase 4: Literature
+    trainer.train_phase("Literature", "ndcd/data/sherlock.txt",
+                        iterations=500, steps_per_iter=500, lr=0.05)
     trainer.generate(start_text="Sherlock", length=200)
 
 if __name__ == "__main__":
