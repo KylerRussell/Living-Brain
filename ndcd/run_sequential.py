@@ -215,24 +215,31 @@ class SequentialTrainer:
             effective_lr = lr * max(lr_mult, 0.1)
             self.engine.update_weights_predictive(learning_rate=effective_lr)
 
-            # 9. VICReg Regularization on Hidden Representations
+            # 9. VICReg Regularization — per-module to avoid OOM
+            # Global covariance over ~49K hidden nodes would be 49K×49K ≈ 9GB.
+            # Per-module covariance is ~1000×1000 ≈ 4MB each.
             hidden_act = torch.tanh(self.engine.state[512:])
             if not hasattr(self, '_vicreg_buffer'):
                 self._vicreg_buffer = []
             self._vicreg_buffer.append(hidden_act.detach())
             if len(self._vicreg_buffer) >= 32:
-                batch = torch.stack(self._vicreg_buffer)
-
-                std = torch.sqrt(batch.var(dim=0) + 1e-4)
-                var_loss = torch.relu(1.0 - std).mean()
-
-                batch_centered = batch - batch.mean(dim=0)
-                cov = (batch_centered.T @ batch_centered) / (batch.shape[0] - 1)
-                cov_loss = (cov.fill_diagonal_(0).pow(2).sum()) / hidden_act.shape[0]
-
+                batch = torch.stack(self._vicreg_buffer)  # [32, num_hidden]
                 vicreg_lr = 0.001
-                with torch.no_grad():
-                    self.engine.biases[512:] -= vicreg_lr * (var_loss + cov_loss)
+
+                for mod_idx, (start, end) in enumerate(self.engine.module_ranges):
+                    if end <= 512:
+                        continue
+                    mod_batch = batch[:, start - 512:end - 512]
+
+                    std = torch.sqrt(mod_batch.var(dim=0) + 1e-4)
+                    var_loss = torch.relu(1.0 - std).mean()
+
+                    mod_centered = mod_batch - mod_batch.mean(dim=0)
+                    cov = (mod_centered.T @ mod_centered) / (mod_batch.shape[0] - 1)
+                    cov_loss = cov.fill_diagonal_(0).pow(2).sum() / mod_batch.shape[1]
+
+                    with torch.no_grad():
+                        self.engine.biases[start:end] -= vicreg_lr * (var_loss + cov_loss)
 
                 self._vicreg_buffer = []
 
