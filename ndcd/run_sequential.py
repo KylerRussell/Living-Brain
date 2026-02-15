@@ -213,8 +213,19 @@ class SequentialTrainer:
                 tol=1e-3,
             )
 
-            # 6. Compute prediction errors
+            # 6. Compute prediction errors (top-down only; I/O zeroed)
             energy = self.engine.compute_prediction_errors()
+
+            # 6b. CRITICAL: Inject target as observation error at output nodes.
+            # Without this, the network has zero gradient toward correct
+            # next-byte prediction — it just settles into random attractors.
+            # This is the predictive coding equivalent of EqProp's nudge phase.
+            output_target = self.eye[target_byte]                          # one-hot [256]
+            output_actual = torch.tanh(self.engine.state[256:512])         # current output
+            output_error = output_target - output_actual                   # observation error
+            self.engine.spatial_errors[256:512] = output_error
+
+            energy += 0.5 * torch.sum(output_error ** 2).item()
             energy_accum += energy
 
             # 7. Measure Prediction (before weight update)
