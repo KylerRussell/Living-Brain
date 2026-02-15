@@ -55,8 +55,9 @@ def jit_solve_dynamics_imex(
         # Semi-implicit update: treats -x/tau implicitly, rest explicitly
         current_s = (current_s + dt * nonlinear / taus) / imex_denom
 
-        # State clamping to prevent saturation
-        current_s = current_s.clamp(-3.0, 3.0)
+        # State clamping: ±1.5 keeps tanh ≈ 0.91 (18% gradient headroom)
+        # ±3.0 gave tanh ≈ 0.995 (<1% headroom → total saturation)
+        current_s = current_s.clamp(-1.5, 1.5)
 
         # Hard clamp input nodes after update
         if input_mask is not None:
@@ -131,6 +132,24 @@ class PredictiveCodingEngine:
 
         # Build module-level lookup tensors for fast access
         self._build_module_tensors()
+
+        # --- Top-down edge mask for proper predictive coding ---
+        # In hierarchical predictive coding, the spatial prediction error at
+        # level ℓ is: ε_ℓ = x_ℓ − f(W_topdown * x_{ℓ+1})
+        # We must isolate top-down edges (higher→lower level) from the full
+        # weight matrix. Using all synaptic input (intra-module, lateral,
+        # bottom-up) gives the dynamics residual, not a prediction error.
+        self.node_to_level = torch.zeros(num_nodes, dtype=torch.long, device=device)
+        self.node_to_level[:512] = 0  # I/O nodes at level 0
+        for mod_idx, (start, end) in enumerate(self.module_ranges):
+            self.node_to_level[start:end] = self.module_levels[mod_idx]
+        self.max_level = int(self.node_to_level.max().item())
+
+        # Top-down: source at strictly higher level than destination
+        src_levels = self.node_to_level[self.indices[0]]
+        dst_levels = self.node_to_level[self.indices[1]]
+        self.topdown_edge_mask = src_levels > dst_levels
+        self.topdown_indices = self.indices[:, self.topdown_edge_mask]
 
         # --- Temporal prediction state ---
         # Previous state buffer per module (for temporal prediction errors)
@@ -285,48 +304,47 @@ class PredictiveCodingEngine:
 
     def compute_prediction_errors(self):
         """
-        Compute hierarchical prediction errors for all module pairs.
+        Compute hierarchical prediction errors.
 
         Spatial prediction error at level ℓ:
-            ε_ℓ = x_ℓ − f(W_topdown * x_{ℓ+1})
+            ε_ℓ = x_ℓ − W_topdown * tanh(x_{ℓ+1})
 
-        Since we use a flat weight matrix, the top-down prediction is
-        already implicit in the settled state. We compute per-module errors
-        by comparing each module's state against the top-down prediction
-        from its parent modules.
+        Uses ONLY top-down edges (higher→lower level) for the prediction,
+        not the full weight matrix. The full synaptic input includes
+        intra-module, lateral, and bottom-up contributions which are part
+        of the dynamics, not the hierarchical prediction.
+
+        I/O nodes (0-511) get zero spatial error here — the output target
+        is injected separately by the training loop.
+        Top-level nodes also get zero (no parent to predict them).
 
         Returns total prediction error energy F = 0.5 * sum(||ε||²)
         """
         rho = torch.tanh(self.state)
 
-        # Build the full weight matrix for prediction extraction using cascade weights
+        # Build sparse matrix with ONLY top-down edges
         cascade_weights = self.effective_weights
-        weights = torch.sparse_coo_tensor(
-            self.indices, cascade_weights * self.facilitation * self.depression,
+        td_vals = (cascade_weights[self.topdown_edge_mask] *
+                   self.facilitation[self.topdown_edge_mask] *
+                   self.depression[self.topdown_edge_mask])
+        td_sparse = torch.sparse_coo_tensor(
+            self.topdown_indices, td_vals,
             (self.num_nodes, self.num_nodes))
 
-        # Compute what the network predicts for each node (W * rho)
-        predicted = torch.mv(weights, rho)
+        # Top-down prediction: what higher levels predict for lower levels
+        topdown_pred = torch.mv(td_sparse, rho)
 
-        # --- Spatial prediction errors ---
-        # For each hierarchical pair (upper predicts lower):
-        # ε_lower = x_lower - predicted_lower (from upper's top-down weights)
-        self.spatial_errors.zero_()
-        spatial_energy = 0.0
+        # Spatial error = actual state - top-down prediction
+        self.spatial_errors = self.state - topdown_pred
 
-        for upper_id, lower_id in self.hier_pairs:
-            lower_start, lower_end = self.module_ranges[lower_id]
+        # Zero errors for nodes without meaningful top-down prediction:
+        # - I/O nodes: input is clamped; output target injected by trainer
+        self.spatial_errors[:512] = 0
+        # - Top-level nodes: no parent level predicts them (they are the prior)
+        top_mask = self.node_to_level == self.max_level
+        self.spatial_errors[top_mask] = 0
 
-            # The prediction for lower module nodes comes from the
-            # global synaptic input (which includes top-down from upper)
-            actual = self.state[lower_start:lower_end]
-            pred = predicted[lower_start:lower_end]
-
-            # Prediction error: actual - predicted
-            error = actual - pred
-            self.spatial_errors[lower_start:lower_end] += error
-
-            spatial_energy += 0.5 * torch.sum(error ** 2).item()
+        spatial_energy = 0.5 * torch.sum(self.spatial_errors ** 2).item()
 
         # --- Temporal prediction errors ---
         # ε_temporal_ℓ = x_ℓ(t) - A_ℓ * x_ℓ(t-1)
