@@ -52,8 +52,11 @@ class SequentialTrainer:
         # Input scale factor (fixed to 1.0)
         self.input_scale_factor = 1.0
 
-        # Spectral Radius Tuning
-        self.tune_spectral_radius(target_radius=0.95)
+        # Spectral Radius Tuning — start at 0.80, not 0.95.
+        # At 0.95 with 112M edges, recurrent dynamics overwhelm the input
+        # signal. 0.80 lets the network learn basic representations first;
+        # raise to 0.95 after the chars phase.
+        self.tune_spectral_radius(target_radius=0.80)
 
         # 2. Initialize Predictive Coding Engine
         # dt=0.5: IMEX is stable for large dt; converges in 10-20 steps
@@ -191,12 +194,14 @@ class SequentialTrainer:
             target_byte = data[curr_idx + 1]
             curr_idx += 1
 
-            # 2. Input Setup
+            # 2. Input Setup — full one-hot across all 256 input nodes.
+            # A single node at 5.0 with 255 zeroes wastes input projection
+            # bandwidth and gets drowned by ~500 recurrent neighbors.
             input_mask = torch.zeros(self.num_nodes, device=self.device)
             input_mask[self.input_indices] = 1.0
 
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[input_byte] = 5.0 * self.input_scale_factor
+            input_vec[0:256] = self.eye[input_byte] * 2.0
 
             # 3. Store previous state for temporal prediction
             self.engine.store_previous_state()
@@ -212,6 +217,14 @@ class SequentialTrainer:
                 max_steps=20,
                 tol=1e-3,
             )
+
+            # 5b. State norm control — keep states in the linear regime of
+            # tanh so different inputs produce distinguishable representations.
+            # At ||s||/√N > 0.5, tanh saturates and the attractor dominates.
+            with torch.no_grad():
+                snorm = torch.norm(self.engine.state) / np.sqrt(self.num_nodes)
+                if snorm > 0.5:
+                    self.engine.state *= 0.5 / snorm
 
             # 6. Compute prediction errors (top-down only; I/O zeroed)
             energy = self.engine.compute_prediction_errors()
@@ -261,8 +274,18 @@ class SequentialTrainer:
                 # Hippocampal synapses also decay faster (more forgettable)
                 self.engine.w_surface[self.hippo_edge_mask] *= 0.999
 
-            # 8c. Metaplastic cascade transfer
-            self.engine.cascade_transfer()
+            # 8c. Gated cascade transfer — don't consolidate garbage into
+            # deep weights. The dead attractor gets permanently written in
+            # (surface 0.0024→0.0008, deep 0.06→0.27) unless we gate this.
+            recent_acc = sum(acc_window[-100:]) / max(len(acc_window[-100:]), 1) if acc_window else 0.0
+            if step > 5000 and recent_acc > 0.02:
+                self.engine.cascade_transfer()
+            else:
+                # Surface→mid only (no mid→deep consolidation yet)
+                with torch.no_grad():
+                    transfer_sm = self.engine.w_surface / self.engine.tau_surface_to_mid
+                    self.engine.w_mid += transfer_sm
+                    self.engine.w_surface -= transfer_sm
 
             # 8d. Synaptic intelligence tracking
             self.engine.update_synaptic_intelligence(current_loss=energy)
@@ -453,7 +476,7 @@ class SequentialTrainer:
             target_byte = data[idx + 1]
 
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[input_byte] = 5.0 * self.input_scale_factor
+            input_vec[0:256] = self.eye[input_byte] * 2.0
 
             input_mask = torch.zeros(self.num_nodes, device=self.device)
             input_mask[self.input_indices] = 1.0
@@ -487,7 +510,7 @@ class SequentialTrainer:
             val = ord(char)
             if val > 255: val = 0
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[val] = 1.0 * self.input_scale_factor
+            input_vec[0:256] = self.eye[val] * 2.0
             self.engine.settle(input_vec, max_steps=10)
 
         for _ in range(length):
@@ -500,7 +523,7 @@ class SequentialTrainer:
             curr_text += char
 
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[next_byte] = 1.0 * self.input_scale_factor
+            input_vec[0:256] = self.eye[next_byte] * 2.0
             self.engine.settle(input_vec, max_steps=10)
 
         print(curr_text)
@@ -531,6 +554,9 @@ def main():
     trainer.train_phase("Chars", "ndcd/data/level1_chars.txt",
                         iterations=500, steps_per_iter=100, lr=0.05)
     trainer.generate(start_text="A")
+
+    # Raise spectral radius now that basic char representations are learned
+    trainer.tune_spectral_radius(target_radius=0.95)
 
     # Phase 2: Words — evaluate retention on Chars after training
     trainer.train_phase("Words", "ndcd/data/level2_words.txt",
