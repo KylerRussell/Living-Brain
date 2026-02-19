@@ -116,10 +116,11 @@ class SequentialTrainer:
             s, e = module_ranges[mod_id]
             self.level0_indices.extend(range(s, e))
         self.level0_indices = torch.tensor(self.level0_indices, dtype=torch.long, device=device)
-        n_readout = len(self.level0_indices)
+        n_reservoir = len(self.level0_indices)
+        n_readout = n_reservoir + 256  # reservoir state + raw input one-hot
         self.readout_W = torch.randn(256, n_readout, device=device) * (1.0 / np.sqrt(n_readout))
         self.readout_b = torch.zeros(256, device=device)
-        print(f"Linear readout: {n_readout} level-0 features → 256 classes")
+        print(f"Linear readout: {n_reservoir} level-0 + 256 input = {n_readout} features → 256 classes")
 
         # --- Complementary Learning Systems setup ---
         # Store module classification and connectivity on engine for access during training
@@ -182,7 +183,8 @@ class SequentialTrainer:
         except Exception as e:
             print(f"Warning: Spectral tuning failed ({e}). Using default.")
 
-    def train_phase(self, phase_name, data_path, iterations, steps_per_iter, lr=0.01):
+    def train_phase(self, phase_name, data_path, iterations, steps_per_iter, lr=0.01,
+                    settle_steps=20, input_gain=2.0):
         """
         Predictive Coding training loop.
 
@@ -236,7 +238,7 @@ class SequentialTrainer:
             input_mask[self.input_indices] = 1.0
 
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[0:256] = self.eye[input_byte] * 2.0
+            input_vec[0:256] = self.eye[input_byte] * input_gain
 
             # 3. Store previous state for temporal prediction
             self.engine.store_previous_state()
@@ -245,21 +247,17 @@ class SequentialTrainer:
             fast_mask = self.engine.taus < 0.5
             self.engine.state[fast_mask] *= 0.1
 
-            # 5. Single-phase settle (IMEX, ~20 steps)
+            # 5. Single-phase settle (IMEX)
             self.engine.settle(
                 input_vec,
                 input_mask=input_mask,
-                max_steps=20,
+                max_steps=settle_steps,
                 tol=1e-3,
             )
 
-            # 5b. State norm control — keep states in the linear regime of
-            # tanh so different inputs produce distinguishable representations.
-            # At ||s||/√N > 0.5, tanh saturates and the attractor dominates.
-            with torch.no_grad():
-                snorm = torch.norm(self.engine.state) / np.sqrt(self.num_nodes)
-                if snorm > 0.5:
-                    self.engine.state *= 0.5 / snorm
+            # 5b. State norm control removed — the global rescaling projected
+            # all states to the same sphere, destroying input-dependent signal.
+            # The ±1.5 clamp in the IMEX solver already prevents saturation.
 
             # 6. Compute prediction errors (top-down only; I/O zeroed)
             energy = self.engine.compute_prediction_errors()
@@ -277,11 +275,13 @@ class SequentialTrainer:
             energy_accum += energy
 
             # 7. Measure Prediction via linear readout (not output nodes).
-            # The readout tests whether representations are input-dependent.
-            # If even the readout can't learn, representations are degenerate.
+            # Readout sees reservoir state + raw input (standard ESN practice).
+            # This gives a direct linear path from input to prediction even if
+            # reservoir representations are degenerate.
             with torch.no_grad():
                 level0_acts = torch.tanh(self.engine.state[self.level0_indices])
-                logits = self.readout_W @ level0_acts + self.readout_b
+                features = torch.cat([level0_acts, self.eye[input_byte]])
+                logits = self.readout_W @ features + self.readout_b
                 probs = torch.softmax(logits, dim=0)
                 pred_idx = torch.argmax(probs).item()
 
@@ -307,7 +307,7 @@ class SequentialTrainer:
             with torch.no_grad():
                 target_one_hot = self.eye[target_byte]
                 readout_grad = probs - target_one_hot  # softmax CE gradient
-                self.readout_W -= effective_lr * torch.outer(readout_grad, level0_acts)
+                self.readout_W -= effective_lr * torch.outer(readout_grad, features)
                 self.readout_b -= effective_lr * readout_grad
 
             # 8b. Update recurrent weights using local predictive coding rule
@@ -531,7 +531,8 @@ class SequentialTrainer:
             self.engine.settle(input_vec, input_mask=input_mask, max_steps=10)
 
             level0_acts = torch.tanh(self.engine.state[self.level0_indices])
-            logits = self.readout_W @ level0_acts + self.readout_b
+            features = torch.cat([level0_acts, self.eye[input_byte]])
+            logits = self.readout_W @ features + self.readout_b
             probs = torch.softmax(logits, dim=0)
             pred_idx = torch.argmax(probs).item()
 
@@ -554,19 +555,23 @@ class SequentialTrainer:
         curr_text = start_text
 
         # Prime
+        last_byte = ord(start_text[-1]) if start_text else 0
         for char in start_text:
             val = ord(char)
             if val > 255: val = 0
+            last_byte = val
             input_vec = torch.zeros(self.num_nodes, device=self.device)
             input_vec[0:256] = self.eye[val] * 2.0
             self.engine.settle(input_vec, max_steps=10)
 
         for _ in range(length):
             level0_acts = torch.tanh(self.engine.state[self.level0_indices])
-            logits = self.readout_W @ level0_acts + self.readout_b
+            features = torch.cat([level0_acts, self.eye[last_byte]])
+            logits = self.readout_W @ features + self.readout_b
             probs = torch.softmax(logits, dim=0)
 
             next_byte = torch.multinomial(probs, 1).item()
+            last_byte = next_byte
             char = chr(next_byte) if 0 <= next_byte < 128 else '?'
             curr_text += char
 
@@ -599,8 +604,11 @@ def main():
 
     # Phase 1: Chars
     # lr=0.05: compensates for tiny activation products
+    # settle_steps=8: fewer steps preserves more input signal in level-0 nodes
+    # input_gain=5.0: stronger input to overcome recurrent attractor
     trainer.train_phase("Chars", "ndcd/data/level1_chars.txt",
-                        iterations=500, steps_per_iter=100, lr=0.05)
+                        iterations=500, steps_per_iter=100, lr=0.05,
+                        settle_steps=8, input_gain=5.0)
     trainer.generate(start_text="A")
 
     # Raise spectral radius now that basic char representations are learned
