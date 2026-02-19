@@ -86,6 +86,41 @@ class SequentialTrainer:
         # Pre-compute One-Hot Identity Matrices
         self.eye = torch.eye(256, device=device)
 
+        # --- Scale input/output projections to dominate recurrence ---
+        # Input contributes ~0.002 per target node, recurrence ~0.092.
+        # Input projections need to be 10-50x stronger so the input can
+        # actually influence level-0 representations.
+        with torch.no_grad():
+            edge_src = self.engine.indices[0]
+            edge_dst = self.engine.indices[1]
+            input_proj_mask = (edge_src < 256) | (edge_dst < 256)
+            output_proj_mask = (
+                ((edge_src >= 256) & (edge_src < 512)) |
+                ((edge_dst >= 256) & (edge_dst < 512))
+            )
+            self.engine.w_deep[input_proj_mask] *= 20.0
+            self.engine.w_deep[output_proj_mask] *= 10.0
+            n_input_edges = input_proj_mask.sum().item()
+            n_output_edges = output_proj_mask.sum().item()
+            print(f"Scaled {n_input_edges} input projection edges by 20x, "
+                  f"{n_output_edges} output projection edges by 10x")
+
+        # --- Linear readout from level-0 module activations ---
+        # The recurrent network produces representations; a separate readout
+        # maps them to predictions. This is standard reservoir computing /
+        # echo state network practice and decouples representation from
+        # prediction, giving an immediate credit assignment path.
+        self.level0_indices = []
+        module_ranges = self.graph.get_module_ranges()
+        for mod_id in self.graph.level_modules[0]:
+            s, e = module_ranges[mod_id]
+            self.level0_indices.extend(range(s, e))
+        self.level0_indices = torch.tensor(self.level0_indices, dtype=torch.long, device=device)
+        n_readout = len(self.level0_indices)
+        self.readout_W = torch.randn(256, n_readout, device=device) * (1.0 / np.sqrt(n_readout))
+        self.readout_b = torch.zeros(256, device=device)
+        print(f"Linear readout: {n_readout} level-0 features → 256 classes")
+
         # --- Complementary Learning Systems setup ---
         # Store module classification and connectivity on engine for access during training
         self.hippocampal_modules = self.graph.hippocampal_modules
@@ -241,10 +276,14 @@ class SequentialTrainer:
             energy += 0.5 * torch.sum(output_error ** 2).item()
             energy_accum += energy
 
-            # 7. Measure Prediction (before weight update)
-            output_activity = torch.tanh(self.engine.state[256:512])
-            probs = torch.softmax(output_activity * 10.0, dim=0)
-            pred_idx = torch.argmax(probs).item()
+            # 7. Measure Prediction via linear readout (not output nodes).
+            # The readout tests whether representations are input-dependent.
+            # If even the readout can't learn, representations are degenerate.
+            with torch.no_grad():
+                level0_acts = torch.tanh(self.engine.state[self.level0_indices])
+                logits = self.readout_W @ level0_acts + self.readout_b
+                probs = torch.softmax(logits, dim=0)
+                pred_idx = torch.argmax(probs).item()
 
             state_norm = torch.norm(self.engine.state) / np.sqrt(self.num_nodes)
 
@@ -260,13 +299,21 @@ class SequentialTrainer:
             loss = -torch.log(probs[target_byte] + 1e-8).item()
             loss_accum += loss
 
-            # 8. Update weights using local predictive coding rule
-            # Cosine LR schedule
+            # 8. Cosine LR schedule (used by readout, recurrent update, CLS)
             lr_mult = 0.5 * (1.0 + np.cos(np.pi * step / total_steps))
             effective_lr = lr * max(lr_mult, 0.1)
+
+            # 8a. Train readout with cross-entropy gradient descent
+            with torch.no_grad():
+                target_one_hot = self.eye[target_byte]
+                readout_grad = probs - target_one_hot  # softmax CE gradient
+                self.readout_W -= effective_lr * torch.outer(readout_grad, level0_acts)
+                self.readout_b -= effective_lr * readout_grad
+
+            # 8b. Update recurrent weights using local predictive coding rule
             self.engine.update_weights_predictive(learning_rate=effective_lr)
 
-            # 8b. CLS: boost hippocampal synapse updates (10x), decay them faster
+            # 8c. CLS: boost hippocampal synapse updates (10x), decay them faster
             with torch.no_grad():
                 # Hippocampal synapses get extra surface boost
                 hippo_boost = self.engine.w_surface[self.hippo_edge_mask] * 9.0  # 9x extra = 10x total
@@ -274,7 +321,7 @@ class SequentialTrainer:
                 # Hippocampal synapses also decay faster (more forgettable)
                 self.engine.w_surface[self.hippo_edge_mask] *= 0.999
 
-            # 8c. Gated cascade transfer — don't consolidate garbage into
+            # 8d. Gated cascade transfer — don't consolidate garbage into
             # deep weights. The dead attractor gets permanently written in
             # (surface 0.0024→0.0008, deep 0.06→0.27) unless we gate this.
             recent_acc = sum(acc_window[-100:]) / max(len(acc_window[-100:]), 1) if acc_window else 0.0
@@ -287,14 +334,14 @@ class SequentialTrainer:
                     self.engine.w_mid += transfer_sm
                     self.engine.w_surface -= transfer_sm
 
-            # 8d. Synaptic intelligence tracking
+            # 8e. Synaptic intelligence tracking
             self.engine.update_synaptic_intelligence(current_loss=energy)
 
-            # 8e. Periodic synaptic intelligence consolidation
+            # 8f. Periodic synaptic intelligence consolidation
             if step > 0 and step % self.si_consolidation_interval == 0:
                 self.engine.consolidate_importance()
 
-            # 8f. Sleep replay phase for memory consolidation
+            # 8g. Sleep replay phase for memory consolidation
             if step > 0 and step % self.sleep_interval == 0:
                 self.sleep_phase(num_replay_cycles=200, replay_lr_mult=0.1)
 
@@ -483,8 +530,9 @@ class SequentialTrainer:
 
             self.engine.settle(input_vec, input_mask=input_mask, max_steps=10)
 
-            output_activity = torch.tanh(self.engine.state[256:512])
-            probs = torch.softmax(output_activity * 10.0, dim=0)
+            level0_acts = torch.tanh(self.engine.state[self.level0_indices])
+            logits = self.readout_W @ level0_acts + self.readout_b
+            probs = torch.softmax(logits, dim=0)
             pred_idx = torch.argmax(probs).item()
 
             if pred_idx == target_byte:
@@ -514,9 +562,9 @@ class SequentialTrainer:
             self.engine.settle(input_vec, max_steps=10)
 
         for _ in range(length):
-            state = self.engine.state
-            out_act = torch.tanh(state[256:512])
-            probs = torch.softmax(out_act * 10.0, dim=0)
+            level0_acts = torch.tanh(self.engine.state[self.level0_indices])
+            logits = self.readout_W @ level0_acts + self.readout_b
+            probs = torch.softmax(logits, dim=0)
 
             next_byte = torch.multinomial(probs, 1).item()
             char = chr(next_byte) if 0 <= next_byte < 128 else '?'
@@ -532,8 +580,8 @@ class SequentialTrainer:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--nodes", type=int, default=200000)
-    parser.add_argument("--modules", type=int, default=200)
+    parser.add_argument("--nodes", type=int, default=2000)
+    parser.add_argument("--modules", type=int, default=20)
     args = parser.parse_args()
 
     device = args.device
