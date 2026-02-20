@@ -303,12 +303,18 @@ class SequentialTrainer:
             lr_mult = 0.5 * (1.0 + np.cos(np.pi * step / total_steps))
             effective_lr = lr * max(lr_mult, 0.1)
 
-            # 8a. Train readout with cross-entropy gradient descent
+            # 8a. Train readout with cross-entropy gradient descent.
+            # Use 10x slower LR than recurrent updates. If the readout learns
+            # too fast, it solves the "easy" bigram problem from raw input
+            # alone, and the recurrent network has no pressure to develop
+            # useful representations. Slowing the readout forces the reservoir
+            # to carry context that helps prediction.
             with torch.no_grad():
                 target_one_hot = self.eye[target_byte]
                 readout_grad = probs - target_one_hot  # softmax CE gradient
-                self.readout_W -= effective_lr * torch.outer(readout_grad, features)
-                self.readout_b -= effective_lr * readout_grad
+                readout_lr = effective_lr * 0.1
+                self.readout_W -= readout_lr * torch.outer(readout_grad, features)
+                self.readout_b -= readout_lr * readout_grad
 
             # 8b. Update recurrent weights using local predictive coding rule
             self.engine.update_weights_predictive(learning_rate=effective_lr)
@@ -321,13 +327,17 @@ class SequentialTrainer:
                 # Hippocampal synapses also decay faster (more forgettable)
                 self.engine.w_surface[self.hippo_edge_mask] *= 0.999
 
-            # 8d. Gated cascade transfer — don't consolidate garbage into
-            # deep weights. The dead attractor gets permanently written in
-            # (surface 0.0024→0.0008, deep 0.06→0.27) unless we gate this.
-            # Gate at 10% accuracy (was 2%) to prevent premature mid→deep
-            # consolidation of noisy early weights that inflates spectral radius.
+            # 8d. Gated cascade transfer — three stages:
+            # 1) First 5K steps: NO transfer at all. Let surface weights
+            #    accumulate phase-specific patterns before any consolidation.
+            #    This is critical at phase boundaries (e.g., Chars→Words) where
+            #    the network needs time to adapt to new statistics.
+            # 2) Steps 5K-10K: Surface→mid only (no deep consolidation).
+            # 3) After 10K steps + acc > 10%: Full cascade including mid→deep.
             recent_acc = sum(acc_window[-100:]) / max(len(acc_window[-100:]), 1) if acc_window else 0.0
-            if step > 10000 and recent_acc > 0.10:
+            if step < 5000:
+                pass  # No cascade transfer — let surface accumulate
+            elif step > 10000 and recent_acc > 0.10:
                 self.engine.cascade_transfer()
             else:
                 # Surface→mid only (no mid→deep consolidation yet)
@@ -613,11 +623,13 @@ def main():
                         settle_steps=8, input_gain=5.0)
     trainer.generate(start_text="A")
 
-    # No spectral radius rescaling between phases — the previous call
-    # (tune to 0.95) computed scale_factor = 0.95/85.07 = 0.0112, which
-    # multiplied ALL cascade weights by 0.0112 (dividing by 89x),
-    # destroying all learned char representations. The IMEX solver is
-    # unconditionally stable regardless of spectral radius.
+    # --- Phase boundary: reset synaptic intelligence ---
+    # After Chars, omega ≈ 100 per synapse, which with meta_scale reduces
+    # effective LR by ~10x. The metaplastic cascade (w_deep) already protects
+    # important weights via inertia — omega double-counts protection and
+    # freezes the recurrent network during subsequent phases.
+    trainer.engine.omega.zero_()
+    trainer.engine.running_contribution.zero_()
 
     # Phase 2: Words — evaluate retention on Chars after training
     trainer.train_phase("Words", "ndcd/data/level2_words.txt",
@@ -626,6 +638,10 @@ def main():
     trainer.evaluate_retention("ndcd/data/level1_chars.txt")
     trainer.generate()
 
+    # --- Phase boundary: reset synaptic intelligence ---
+    trainer.engine.omega.zero_()
+    trainer.engine.running_contribution.zero_()
+
     # Phase 3: Quotes — evaluate retention on Chars and Words
     trainer.train_phase("Quotes", "ndcd/data/level3_quotes.txt",
                         iterations=200, steps_per_iter=200, lr=0.05,
@@ -633,6 +649,10 @@ def main():
     trainer.evaluate_retention("ndcd/data/level1_chars.txt")
     trainer.evaluate_retention("ndcd/data/level2_words.txt")
     trainer.generate()
+
+    # --- Phase boundary: reset synaptic intelligence ---
+    trainer.engine.omega.zero_()
+    trainer.engine.running_contribution.zero_()
 
     # Phase 4: Literature — evaluate retention on all prior phases
     trainer.train_phase("Literature", "ndcd/data/sherlock.txt",
