@@ -501,3 +501,28 @@ class PredictiveCodingEngine:
                 'temporal': np.mean(data['temporal']),
             }
         return result
+
+    def get_topdown_weight_stats(self):
+        """
+        Returns mean and std of top-down weights grouped by (src_level, dst_level).
+
+        If L1 spatial error is stuck high, these stats reveal whether
+        top-down weights are actually updating or frozen.
+        """
+        with torch.no_grad():
+            td_weights = self.effective_weights[self.topdown_edge_mask]
+            src_levels = self.node_to_level[self.topdown_indices[0]]
+            dst_levels = self.node_to_level[self.topdown_indices[1]]
+
+            stats = {}
+            # Group by (src_level, dst_level) pair
+            for src_l in range(self.max_level + 1):
+                for dst_l in range(src_l):
+                    mask = (src_levels == src_l) & (dst_levels == dst_l)
+                    if mask.any():
+                        vals = td_weights[mask]
+                        stats[(src_l, dst_l)] = {
+                            'mean': vals.mean().item(),
+                            'std': vals.std().item(),
+                        }
+            return stats
