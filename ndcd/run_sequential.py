@@ -324,8 +324,10 @@ class SequentialTrainer:
             # 8d. Gated cascade transfer — don't consolidate garbage into
             # deep weights. The dead attractor gets permanently written in
             # (surface 0.0024→0.0008, deep 0.06→0.27) unless we gate this.
+            # Gate at 10% accuracy (was 2%) to prevent premature mid→deep
+            # consolidation of noisy early weights that inflates spectral radius.
             recent_acc = sum(acc_window[-100:]) / max(len(acc_window[-100:]), 1) if acc_window else 0.0
-            if step > 5000 and recent_acc > 0.02:
+            if step > 10000 and recent_acc > 0.10:
                 self.engine.cascade_transfer()
             else:
                 # Surface→mid only (no mid→deep consolidation yet)
@@ -611,25 +613,31 @@ def main():
                         settle_steps=8, input_gain=5.0)
     trainer.generate(start_text="A")
 
-    # Raise spectral radius now that basic char representations are learned
-    trainer.tune_spectral_radius(target_radius=0.95)
+    # No spectral radius rescaling between phases — the previous call
+    # (tune to 0.95) computed scale_factor = 0.95/85.07 = 0.0112, which
+    # multiplied ALL cascade weights by 0.0112 (dividing by 89x),
+    # destroying all learned char representations. The IMEX solver is
+    # unconditionally stable regardless of spectral radius.
 
     # Phase 2: Words — evaluate retention on Chars after training
     trainer.train_phase("Words", "ndcd/data/level2_words.txt",
-                        iterations=200, steps_per_iter=100, lr=0.05)
+                        iterations=200, steps_per_iter=100, lr=0.05,
+                        settle_steps=8, input_gain=5.0)
     trainer.evaluate_retention("ndcd/data/level1_chars.txt")
     trainer.generate()
 
     # Phase 3: Quotes — evaluate retention on Chars and Words
     trainer.train_phase("Quotes", "ndcd/data/level3_quotes.txt",
-                        iterations=200, steps_per_iter=200, lr=0.05)
+                        iterations=200, steps_per_iter=200, lr=0.05,
+                        settle_steps=8, input_gain=5.0)
     trainer.evaluate_retention("ndcd/data/level1_chars.txt")
     trainer.evaluate_retention("ndcd/data/level2_words.txt")
     trainer.generate()
 
     # Phase 4: Literature — evaluate retention on all prior phases
     trainer.train_phase("Literature", "ndcd/data/sherlock.txt",
-                        iterations=500, steps_per_iter=500, lr=0.05)
+                        iterations=500, steps_per_iter=500, lr=0.05,
+                        settle_steps=8, input_gain=5.0)
     trainer.evaluate_retention("ndcd/data/level1_chars.txt")
     trainer.evaluate_retention("ndcd/data/level2_words.txt")
     trainer.evaluate_retention("ndcd/data/level3_quotes.txt")
