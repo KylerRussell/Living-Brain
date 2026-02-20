@@ -175,9 +175,13 @@ class PredictiveCodingEngine:
         self.w_surface = torch.zeros_like(self.weight_values)
         self.w_mid = torch.zeros_like(self.weight_values)
 
-        # Cascade transfer rates
-        self.tau_surface_to_mid = 100.0
-        self.tau_mid_to_deep = 10000.0
+        # Cascade transfer rates — reduced from 100/10000.
+        # At tau_mid_to_deep=10000, w_mid≈0.02 transfers only 2e-6 per step.
+        # Over 40K steps that accumulates ~0.08 in w_deep — far too slow for
+        # meaningful consolidation. At 1000, the same w_mid transfers 2e-5/step
+        # → ~0.8 over 40K steps, giving w_deep real content to preserve.
+        self.tau_surface_to_mid = 50.0    # was 100
+        self.tau_mid_to_deep = 1000.0     # was 10000
 
         # Metaplastic scaling: how much accumulated deep weight
         # reduces surface learning rate. Reduced from 1.0 to 0.1 because
@@ -422,18 +426,19 @@ class PredictiveCodingEngine:
             # Redistribute clamped values back
             self.w_surface = effective - self.w_mid - self.w_deep
 
-            # Frobenius norm soft control — much cheaper than power iteration.
-            # The cascade lets weights accumulate unconstrained; the ±3.0
-            # per-edge clamp doesn't prevent the spectral radius from reaching
-            # 50-100+. This intervenes only when clearly too large (1.5x target),
-            # gently scaling all cascade levels to keep dynamics stable.
-            frob = effective.norm().item()
+            # Frobenius norm soft control on transient weights only.
+            # The previous version scaled all cascade levels (including w_deep),
+            # which destroyed long-term memory: w_deep went from 0.053 to 0.0001
+            # over 50K steps because the norm control fired every step and
+            # repeatedly eroded deep weights. w_deep is long-term memory and
+            # must NEVER be scaled by runtime norm control.
+            transient_frob = (self.w_surface + self.w_mid).norm().item()
             target_frob = 0.95 * np.sqrt(self.num_nodes)
-            if frob > target_frob * 1.5:
-                scale = target_frob / frob
-                self.w_deep *= scale
-                self.w_mid *= scale
+            if transient_frob > target_frob * 2.0:  # More lenient threshold
+                scale = target_frob / transient_frob
                 self.w_surface *= scale
+                self.w_mid *= scale
+                # w_deep is NEVER scaled — it is long-term memory
 
             # --- Top-down weight diversity regularization ---
             # Prevents mode collapse where all outgoing top-down weights from
