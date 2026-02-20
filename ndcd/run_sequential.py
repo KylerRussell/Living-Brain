@@ -184,23 +184,31 @@ class SequentialTrainer:
             print(f"Warning: Spectral tuning failed ({e}). Using default.")
 
     def train_phase(self, phase_name, data_path, iterations, steps_per_iter, lr=0.01,
-                    settle_steps=20, input_gain=2.0):
+                    settle_steps=20, input_gain=2.0, warmup_steps=0):
         """
         Predictive Coding training loop.
 
         For each token:
         1. Clamp input byte at level-0 input nodes
         2. Store previous state for temporal prediction
-        3. Settle dynamics (single phase, 10-20 IMEX steps)
+        3. Settle dynamics (single phase, IMEX steps)
         4. Compute prediction errors (spatial + temporal)
         5. Update weights using LOCAL Hebbian rule
         6. Update short-term plasticity (from Phase 1)
         7. Log metrics
 
         No nudging, no beta, no three-phase settling.
+
+        warmup_steps: Number of initial steps where only the readout is
+            trained and recurrent weight updates are frozen. This lets the
+            readout adapt to the new task's distribution before the reservoir
+            starts shifting, preventing the reservoir from being pulled in
+            random directions by a misaligned readout gradient.
         """
         print(f"\n=== Starting Phase: {phase_name} ===")
         print(f"Run started at: {time.ctime()}")
+        if warmup_steps > 0:
+            print(f"Readout-only warmup for first {warmup_steps} steps (recurrent weights frozen)")
         ensure_data(data_path, phase_name)
 
         if not os.path.exists(data_path):
@@ -243,9 +251,14 @@ class SequentialTrainer:
             # 3. Store previous state for temporal prediction
             self.engine.store_previous_state()
 
-            # 4. Reset fast nodes; slow nodes carry context
-            fast_mask = self.engine.taus < 0.5
-            self.engine.state[fast_mask] *= 0.1
+            # 4. Reset fast nodes only at word boundaries (space/newline/tab).
+            # Previously reset every step, destroying intra-word context that
+            # word-level and sentence-level tasks depend on. For chars (same
+            # repeating sequence) this didn't matter, but for words/quotes the
+            # accumulated context within a word is critical for prediction.
+            if input_byte in (32, 10, 13, 9):  # space, LF, CR, tab
+                fast_mask = self.engine.taus < 0.5
+                self.engine.state[fast_mask] *= 0.1
 
             # 5. Single-phase settle (IMEX)
             self.engine.settle(
@@ -310,38 +323,43 @@ class SequentialTrainer:
                 self.readout_W -= effective_lr * torch.outer(readout_grad, features)
                 self.readout_b -= effective_lr * readout_grad
 
-            # 8b. Update recurrent weights using local predictive coding rule
-            self.engine.update_weights_predictive(learning_rate=effective_lr)
+            # 8b-8e: Skip recurrent weight updates during warmup period.
+            # During warmup, only the readout adapts to the new task distribution.
+            # This prevents the reservoir from being pulled in random directions
+            # before the readout has calibrated to the new data statistics.
+            if step >= warmup_steps:
+                # 8b. Update recurrent weights using local predictive coding rule
+                self.engine.update_weights_predictive(learning_rate=effective_lr)
 
-            # 8c. CLS: boost hippocampal synapse updates (10x), decay them faster
-            with torch.no_grad():
-                # Hippocampal synapses get extra surface boost
-                hippo_boost = self.engine.w_surface[self.hippo_edge_mask] * 9.0  # 9x extra = 10x total
-                self.engine.w_surface[self.hippo_edge_mask] += effective_lr * hippo_boost.clamp(-0.1, 0.1)
-                # Hippocampal synapses also decay faster (more forgettable)
-                self.engine.w_surface[self.hippo_edge_mask] *= 0.999
-
-            # 8d. Gated cascade transfer — three stages:
-            # 1) First 5K steps: NO transfer at all. Let surface weights
-            #    accumulate phase-specific patterns before any consolidation.
-            #    This is critical at phase boundaries (e.g., Chars→Words) where
-            #    the network needs time to adapt to new statistics.
-            # 2) Steps 5K-10K: Surface→mid only (no deep consolidation).
-            # 3) After 10K steps + acc > 10%: Full cascade including mid→deep.
-            recent_acc = sum(acc_window[-100:]) / max(len(acc_window[-100:]), 1) if acc_window else 0.0
-            if step < 5000:
-                pass  # No cascade transfer — let surface accumulate
-            elif step > 10000 and recent_acc > 0.10:
-                self.engine.cascade_transfer()
-            else:
-                # Surface→mid only (no mid→deep consolidation yet)
+                # 8c. CLS: boost hippocampal synapse updates (10x), decay them faster
                 with torch.no_grad():
-                    transfer_sm = self.engine.w_surface / self.engine.tau_surface_to_mid
-                    self.engine.w_mid += transfer_sm
-                    self.engine.w_surface -= transfer_sm
+                    # Hippocampal synapses get extra surface boost
+                    hippo_boost = self.engine.w_surface[self.hippo_edge_mask] * 9.0  # 9x extra = 10x total
+                    self.engine.w_surface[self.hippo_edge_mask] += effective_lr * hippo_boost.clamp(-0.1, 0.1)
+                    # Hippocampal synapses also decay faster (more forgettable)
+                    self.engine.w_surface[self.hippo_edge_mask] *= 0.999
 
-            # 8e. Synaptic intelligence tracking
-            self.engine.update_synaptic_intelligence(current_loss=energy)
+                # 8d. Gated cascade transfer — three stages:
+                # 1) First 5K steps: NO transfer at all. Let surface weights
+                #    accumulate phase-specific patterns before any consolidation.
+                #    This is critical at phase boundaries (e.g., Chars→Words) where
+                #    the network needs time to adapt to new statistics.
+                # 2) Steps 5K-10K: Surface→mid only (no deep consolidation).
+                # 3) After 10K steps + acc > 10%: Full cascade including mid→deep.
+                recent_acc = sum(acc_window[-100:]) / max(len(acc_window[-100:]), 1) if acc_window else 0.0
+                if step < 5000:
+                    pass  # No cascade transfer — let surface accumulate
+                elif step > 10000 and recent_acc > 0.10:
+                    self.engine.cascade_transfer()
+                else:
+                    # Surface→mid only (no mid→deep consolidation yet)
+                    with torch.no_grad():
+                        transfer_sm = self.engine.w_surface / self.engine.tau_surface_to_mid
+                        self.engine.w_mid += transfer_sm
+                        self.engine.w_surface -= transfer_sm
+
+                # 8e. Synaptic intelligence tracking
+                self.engine.update_synaptic_intelligence(current_loss=energy)
 
             # 8f. Periodic synaptic intelligence consolidation
             if step > 0 and step % self.si_consolidation_interval == 0:
@@ -409,6 +427,15 @@ class SequentialTrainer:
                     cstats = self.engine.cascade_stats()
                     print(f"  Cascade: surface={cstats['surface']:.4f} "
                           f"mid={cstats['mid']:.4f} deep={cstats['deep']:.4f}")
+
+                    # Diagnostic: top-down weight stats per level pair.
+                    # If L1 spatial error is stuck high (~5.4), check whether
+                    # top-down weights from L1→L0 are actually updating.
+                    td_stats = self.engine.get_topdown_weight_stats()
+                    td_parts = [f"L{s}→L{d}: μ={v['mean']:.4f} σ={v['std']:.4f}"
+                                for (s, d), v in sorted(td_stats.items())]
+                    if td_parts:
+                        print(f"  TopDown: {' | '.join(td_parts)}")
                 else:
                     recent_acc = sum(acc_window[-100:]) / min(len(acc_window), 100)
                     recent_acc3 = sum(acc_top3_window[-100:]) / min(len(acc_top3_window), 100)
@@ -617,41 +644,65 @@ def main():
                         settle_steps=8, input_gain=5.0)
     trainer.generate(start_text="A")
 
-    # --- Phase boundary: reset synaptic intelligence ---
-    # After Chars, omega ≈ 100 per synapse, which with meta_scale reduces
-    # effective LR by ~10x. The metaplastic cascade (w_deep) already protects
-    # important weights via inertia — omega double-counts protection and
-    # freezes the recurrent network during subsequent phases.
+    # --- Phase boundary: Chars → Words ---
+    # 1. Reset synaptic intelligence: After Chars, omega ≈ 100 per synapse,
+    #    which with meta_scale reduces effective LR by ~10x. The metaplastic
+    #    cascade (w_deep) already protects via inertia — omega double-counts.
     trainer.engine.omega.zero_()
     trainer.engine.running_contribution.zero_()
+    # 2. Partially reset w_deep: The chars w_deep (~0.46 mean magnitude)
+    #    encodes deterministic char-cycle position (a→b→c...), not reusable
+    #    features. Keep 50% as inductive bias (letter representations) while
+    #    freeing capacity for stochastic word patterns.
+    trainer.engine.w_deep *= 0.5
+    trainer.engine.w_mid.zero_()
+    trainer.engine.w_surface.zero_()
+    # 3. Retune spectral radius: After chars consolidation, the effective
+    #    spectral radius may have drifted above 1.0. Retune to 0.80.
+    trainer.tune_spectral_radius(target_radius=0.80)
 
     # Phase 2: Words — evaluate retention on Chars after training
+    # settle_steps=30: L1 (tau=0.75) and L2 (tau=5.0) need more time
+    # to participate. With dt=0.5 and 8 steps, only 4 effective time units
+    # elapse — L2 barely moves. 30 steps = 15 time units, enough for L1/L2.
     trainer.train_phase("Words", "ndcd/data/level2_words.txt",
                         iterations=200, steps_per_iter=100, lr=0.05,
-                        settle_steps=8, input_gain=5.0)
+                        settle_steps=30, input_gain=5.0, warmup_steps=2000)
     trainer.evaluate_retention("ndcd/data/level1_chars.txt")
     trainer.generate()
 
-    # --- Phase boundary: reset synaptic intelligence ---
+    # --- Phase boundary: Words → Quotes ---
     trainer.engine.omega.zero_()
     trainer.engine.running_contribution.zero_()
+    trainer.engine.w_deep *= 0.5
+    trainer.engine.w_mid.zero_()
+    trainer.engine.w_surface.zero_()
+    trainer.tune_spectral_radius(target_radius=0.80)
 
     # Phase 3: Quotes — evaluate retention on Chars and Words
+    # settle_steps=50: Quotes need L2 (tau=5.0) and L3 (tau=25.0) to
+    # participate. 50 steps = 25 time units, enough for L2 to fully settle
+    # and L3 to begin contributing sentence-level context.
     trainer.train_phase("Quotes", "ndcd/data/level3_quotes.txt",
                         iterations=200, steps_per_iter=200, lr=0.05,
-                        settle_steps=8, input_gain=5.0)
+                        settle_steps=50, input_gain=5.0, warmup_steps=2000)
     trainer.evaluate_retention("ndcd/data/level1_chars.txt")
     trainer.evaluate_retention("ndcd/data/level2_words.txt")
     trainer.generate()
 
-    # --- Phase boundary: reset synaptic intelligence ---
+    # --- Phase boundary: Quotes → Literature ---
     trainer.engine.omega.zero_()
     trainer.engine.running_contribution.zero_()
+    trainer.engine.w_deep *= 0.5
+    trainer.engine.w_mid.zero_()
+    trainer.engine.w_surface.zero_()
+    trainer.tune_spectral_radius(target_radius=0.80)
 
     # Phase 4: Literature — evaluate retention on all prior phases
+    # settle_steps=50: Same as quotes — full hierarchy participation needed.
     trainer.train_phase("Literature", "ndcd/data/sherlock.txt",
                         iterations=500, steps_per_iter=500, lr=0.05,
-                        settle_steps=8, input_gain=5.0)
+                        settle_steps=50, input_gain=5.0, warmup_steps=2000)
     trainer.evaluate_retention("ndcd/data/level1_chars.txt")
     trainer.evaluate_retention("ndcd/data/level2_words.txt")
     trainer.evaluate_retention("ndcd/data/level3_quotes.txt")
