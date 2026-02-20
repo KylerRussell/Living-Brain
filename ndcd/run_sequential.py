@@ -382,24 +382,23 @@ class SequentialTrainer:
                     # Hippocampal synapses also decay faster (more forgettable)
                     self.engine.w_surface[self.hippo_edge_mask] *= 0.999
 
-                # 8d. Gated cascade transfer — three stages:
-                # 1) First 5K steps: NO transfer at all. Let surface weights
-                #    accumulate phase-specific patterns before any consolidation.
-                #    This is critical at phase boundaries (e.g., Chars→Words) where
-                #    the network needs time to adapt to new statistics.
-                # 2) Steps 5K-10K: Surface→mid only (no deep consolidation).
-                # 3) After 10K steps + acc > 10%: Full cascade including mid→deep.
-                recent_acc = sum(acc_window[-100:]) / max(len(acc_window[-100:]), 1) if acc_window else 0.0
-                if step < 5000:
-                    pass  # No cascade transfer — let surface accumulate
-                elif step > 10000 and recent_acc > 0.10:
-                    self.engine.cascade_transfer()
-                else:
-                    # Surface→mid only (no mid→deep consolidation yet)
+                # 8d. Cascade transfer — step-count gated, no accuracy gate.
+                # The old accuracy gate (acc > 10%) delayed mid→deep transfer
+                # until step 13K+ because accuracy stays at 0% until then —
+                # wasting 26% of chars training with no deep consolidation.
+                # With tau_mid_to_deep=1000 (was 10000), earlier transfer is
+                # critical for w_deep to accumulate meaningful content.
+                if step < 2000:
+                    pass  # No transfer — let surface accumulate first
+                elif step < 5000:
+                    # Surface→mid only
                     with torch.no_grad():
                         transfer_sm = self.engine.w_surface / self.engine.tau_surface_to_mid
                         self.engine.w_mid += transfer_sm
                         self.engine.w_surface -= transfer_sm
+                else:
+                    # Full cascade — mid→deep starts early
+                    self.engine.cascade_transfer()
 
                 # 8e. Synaptic intelligence tracking
                 self.engine.update_synaptic_intelligence(current_loss=energy)
