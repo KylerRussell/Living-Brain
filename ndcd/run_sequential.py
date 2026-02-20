@@ -304,17 +304,11 @@ class SequentialTrainer:
             effective_lr = lr * max(lr_mult, 0.1)
 
             # 8a. Train readout with cross-entropy gradient descent.
-            # Use 10x slower LR than recurrent updates. If the readout learns
-            # too fast, it solves the "easy" bigram problem from raw input
-            # alone, and the recurrent network has no pressure to develop
-            # useful representations. Slowing the readout forces the reservoir
-            # to carry context that helps prediction.
             with torch.no_grad():
                 target_one_hot = self.eye[target_byte]
                 readout_grad = probs - target_one_hot  # softmax CE gradient
-                readout_lr = effective_lr * 0.1
-                self.readout_W -= readout_lr * torch.outer(readout_grad, features)
-                self.readout_b -= readout_lr * readout_grad
+                self.readout_W -= effective_lr * torch.outer(readout_grad, features)
+                self.readout_b -= effective_lr * readout_grad
 
             # 8b. Update recurrent weights using local predictive coding rule
             self.engine.update_weights_predictive(learning_rate=effective_lr)
