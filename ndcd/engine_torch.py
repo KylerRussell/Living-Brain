@@ -180,8 +180,12 @@ class PredictiveCodingEngine:
         self.tau_mid_to_deep = 10000.0
 
         # Metaplastic scaling: how much accumulated deep weight
-        # reduces surface learning rate
-        self.meta_scale = 1.0  # tunable
+        # reduces surface learning rate. Reduced from 1.0 to 0.1 because
+        # w_deep ≈ 0.83 after chars was causing 1.83x LR reduction (with
+        # omega adding another ~10x). At 0.1, the cascade inertia of
+        # w_deep already protects important weights without also killing
+        # the effective learning rate.
+        self.meta_scale = 0.1  # was 1.0
 
         # --- Synaptic intelligence (Zenke et al., 2017) ---
         self.omega = torch.zeros_like(self.weight_values)       # accumulated importance
