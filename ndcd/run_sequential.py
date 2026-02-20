@@ -147,7 +147,12 @@ class SequentialTrainer:
         self.sleep_interval = 5000
 
     def tune_spectral_radius(self, target_radius=0.95):
-        """Tunes the spectral radius of the weight matrix to a target value."""
+        """Tunes the spectral radius of the weight matrix to a target value.
+
+        Only meaningful at initialization (random weights). After training,
+        cascade weights accumulate to spectral radii of 50-100+, and rescaling
+        by 0.006x lobotomizes the network. Use phase_boundary_reset() instead.
+        """
         print(f"Tuning Spectral Radius to {target_radius:.2f}...")
 
         if hasattr(self, 'engine'):
@@ -182,6 +187,44 @@ class SequentialTrainer:
 
         except Exception as e:
             print(f"Warning: Spectral tuning failed ({e}). Using default.")
+
+    def phase_boundary_reset(self, phase_from, phase_to):
+        """Reset fast-timescale weights at phase boundaries; preserve w_deep.
+
+        Unlike tune_spectral_radius(), this does NOT rescale w_deep.
+        After 50K chars steps, w_deep reaches spectral radius ~124 —
+        rescaling to 0.80 multiplies all weights by 0.006x, destroying
+        everything the network learned. Instead we:
+        - Keep w_deep intact (long-term memory / inductive bias)
+        - Zero w_surface and w_mid (transient learning from prior phase)
+        - Zero network state (avoid prior-phase attractor lock-in)
+        - Zero SI accumulators (omega was double-counting protection)
+        - Re-initialize readout from scratch (old readout is calibrated
+          to the prior phase's distribution and misleads early learning)
+        """
+        print(f"\n--- Phase boundary: {phase_from} → {phase_to} ---")
+
+        with torch.no_grad():
+            # Preserve w_deep (long-term memory), reset transients
+            deep_mag = self.engine.w_deep.abs().mean().item()
+            self.engine.w_surface.zero_()
+            self.engine.w_mid.zero_()
+
+            # Reset network state to avoid prior-phase attractors
+            self.engine.state.zero_()
+            self.engine.previous_state.zero_()
+
+            # Reset synaptic intelligence — omega double-counts with cascade
+            self.engine.omega.zero_()
+            self.engine.running_contribution.zero_()
+
+            # Re-initialize readout from scratch for the new task
+            n_readout = len(self.level0_indices) + 256
+            self.readout_W = torch.randn(256, n_readout, device=self.device) * (1.0 / np.sqrt(n_readout))
+            self.readout_b.zero_()
+
+        print(f"  w_deep preserved (|w_deep|={deep_mag:.4f}), "
+              f"w_surface/w_mid zeroed, state reset, readout re-initialized")
 
     def train_phase(self, phase_name, data_path, iterations, steps_per_iter, lr=0.01,
                     settle_steps=20, input_gain=2.0, warmup_steps=0):
@@ -645,21 +688,12 @@ def main():
     trainer.generate(start_text="A")
 
     # --- Phase boundary: Chars → Words ---
-    # 1. Reset synaptic intelligence: After Chars, omega ≈ 100 per synapse,
-    #    which with meta_scale reduces effective LR by ~10x. The metaplastic
-    #    cascade (w_deep) already protects via inertia — omega double-counts.
-    trainer.engine.omega.zero_()
-    trainer.engine.running_contribution.zero_()
-    # 2. Partially reset w_deep: The chars w_deep (~0.46 mean magnitude)
-    #    encodes deterministic char-cycle position (a→b→c...), not reusable
-    #    features. Keep 50% as inductive bias (letter representations) while
-    #    freeing capacity for stochastic word patterns.
-    trainer.engine.w_deep *= 0.5
-    trainer.engine.w_mid.zero_()
-    trainer.engine.w_surface.zero_()
-    # 3. Retune spectral radius: After chars consolidation, the effective
-    #    spectral radius may have drifted above 1.0. Retune to 0.80.
-    trainer.tune_spectral_radius(target_radius=0.80)
+    # Chars w_deep encodes deterministic cycle positions (a→b→c...) which
+    # don't transfer to stochastic word tasks. Keep w_deep intact as
+    # inductive bias (letter representations) but reset transients.
+    # DO NOT call tune_spectral_radius() here — after 50K steps the spectral
+    # radius is ~124, and rescaling by 0.006x destroys all learned weights.
+    trainer.phase_boundary_reset("Chars", "Words")
 
     # Phase 2: Words — evaluate retention on Chars after training
     # settle_steps=30: L1 (tau=0.75) and L2 (tau=5.0) need more time
@@ -667,17 +701,12 @@ def main():
     # elapse — L2 barely moves. 30 steps = 15 time units, enough for L1/L2.
     trainer.train_phase("Words", "ndcd/data/level2_words.txt",
                         iterations=200, steps_per_iter=100, lr=0.05,
-                        settle_steps=30, input_gain=5.0, warmup_steps=2000)
+                        settle_steps=30, input_gain=5.0, warmup_steps=5000)
     trainer.evaluate_retention("ndcd/data/level1_chars.txt")
     trainer.generate()
 
     # --- Phase boundary: Words → Quotes ---
-    trainer.engine.omega.zero_()
-    trainer.engine.running_contribution.zero_()
-    trainer.engine.w_deep *= 0.5
-    trainer.engine.w_mid.zero_()
-    trainer.engine.w_surface.zero_()
-    trainer.tune_spectral_radius(target_radius=0.80)
+    trainer.phase_boundary_reset("Words", "Quotes")
 
     # Phase 3: Quotes — evaluate retention on Chars and Words
     # settle_steps=50: Quotes need L2 (tau=5.0) and L3 (tau=25.0) to
@@ -685,24 +714,19 @@ def main():
     # and L3 to begin contributing sentence-level context.
     trainer.train_phase("Quotes", "ndcd/data/level3_quotes.txt",
                         iterations=200, steps_per_iter=200, lr=0.05,
-                        settle_steps=50, input_gain=5.0, warmup_steps=2000)
+                        settle_steps=50, input_gain=5.0, warmup_steps=5000)
     trainer.evaluate_retention("ndcd/data/level1_chars.txt")
     trainer.evaluate_retention("ndcd/data/level2_words.txt")
     trainer.generate()
 
     # --- Phase boundary: Quotes → Literature ---
-    trainer.engine.omega.zero_()
-    trainer.engine.running_contribution.zero_()
-    trainer.engine.w_deep *= 0.5
-    trainer.engine.w_mid.zero_()
-    trainer.engine.w_surface.zero_()
-    trainer.tune_spectral_radius(target_radius=0.80)
+    trainer.phase_boundary_reset("Quotes", "Literature")
 
     # Phase 4: Literature — evaluate retention on all prior phases
     # settle_steps=50: Same as quotes — full hierarchy participation needed.
     trainer.train_phase("Literature", "ndcd/data/sherlock.txt",
                         iterations=500, steps_per_iter=500, lr=0.05,
-                        settle_steps=50, input_gain=5.0, warmup_steps=2000)
+                        settle_steps=50, input_gain=5.0, warmup_steps=5000)
     trainer.evaluate_retention("ndcd/data/level1_chars.txt")
     trainer.evaluate_retention("ndcd/data/level2_words.txt")
     trainer.evaluate_retention("ndcd/data/level3_quotes.txt")

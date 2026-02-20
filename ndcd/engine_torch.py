@@ -422,6 +422,41 @@ class PredictiveCodingEngine:
             # Redistribute clamped values back
             self.w_surface = effective - self.w_mid - self.w_deep
 
+            # Frobenius norm soft control — much cheaper than power iteration.
+            # The cascade lets weights accumulate unconstrained; the ±3.0
+            # per-edge clamp doesn't prevent the spectral radius from reaching
+            # 50-100+. This intervenes only when clearly too large (1.5x target),
+            # gently scaling all cascade levels to keep dynamics stable.
+            frob = effective.norm().item()
+            target_frob = 0.95 * np.sqrt(self.num_nodes)
+            if frob > target_frob * 1.5:
+                scale = target_frob / frob
+                self.w_deep *= scale
+                self.w_mid *= scale
+                self.w_surface *= scale
+
+            # --- Top-down weight diversity regularization ---
+            # Prevents mode collapse where all outgoing top-down weights from
+            # a source node converge to the same value (σ→0). After spectral
+            # retuning nukes everything, surface weights re-grow fast and
+            # collapse to a low-diversity attractor. This nudges each source
+            # node's top-down weights toward zero mean (1% per step).
+            td_idx = torch.where(self.topdown_edge_mask)[0]
+            td_src = self.topdown_indices[0]
+            td_vals = self.w_deep[td_idx]
+
+            # Vectorized per-source-node mean via scatter
+            unique_src, inverse = torch.unique(td_src, return_inverse=True)
+            src_sums = torch.zeros(len(unique_src), device=self.device)
+            src_counts = torch.zeros(len(unique_src), device=self.device)
+            src_sums.scatter_add_(0, inverse, td_vals)
+            src_counts.scatter_add_(0, inverse, torch.ones_like(td_vals))
+            src_means = src_sums / src_counts.clamp(min=1)
+
+            # Subtract 1% of each source node's mean from its outgoing weights
+            correction = src_means[inverse] * 0.01
+            self.w_deep[td_idx] -= correction
+
             # --- Bias update from prediction errors ---
             # Biases absorb mean prediction errors
             bias_grad = self.spatial_errors + self.temporal_alpha * self.temporal_errors
