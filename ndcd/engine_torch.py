@@ -15,7 +15,7 @@ def jit_solve_dynamics_imex(
     max_steps: int,
     tol: float,
     input_mask: Optional[torch.Tensor],
-) -> torch.Tensor:
+) -> Tuple[torch.Tensor, float]:
     """
     Semi-implicit (IMEX) dynamics solver for predictive coding.
 
@@ -28,6 +28,9 @@ def jit_solve_dynamics_imex(
 
     This is unconditionally stable on the linear part, allowing dt=0.5-1.0
     and convergence in 10-20 steps instead of 100 RK4 steps.
+
+    Returns (settled_state, final_diff) where final_diff indicates convergence.
+    Includes adaptive dt: halves timestep when diff increases (diverging).
     """
     num_nodes = initial_state.size(0)
     current_s = initial_state.clone()
@@ -35,10 +38,13 @@ def jit_solve_dynamics_imex(
     weights = torch.sparse_coo_tensor(indices, weight_values, (num_nodes, num_nodes))
 
     # Pre-compute IMEX denominator: (1 + dt / tau) per node
-    imex_denom = 1.0 + dt / taus
+    current_dt = dt
+    imex_denom = 1.0 + current_dt / taus
+    min_dt: float = 0.01
 
     step_count = 0
     diff = tol + 1.0  # Ensure at least one step
+    prev_diff: float = 1e6  # Large initial for adaptive dt
 
     while step_count < max_steps and diff > tol:
         # Hard clamp input nodes
@@ -53,7 +59,7 @@ def jit_solve_dynamics_imex(
         nonlinear = synaptic + biases + input_vector
 
         # Semi-implicit update: treats -x/tau implicitly, rest explicitly
-        current_s = (current_s + dt * nonlinear / taus) / imex_denom
+        current_s = (current_s + current_dt * nonlinear / taus) / imex_denom
 
         # State clamping: ±1.5 keeps tanh ≈ 0.91 (18% gradient headroom)
         # ±3.0 gave tanh ≈ 0.995 (<1% headroom → total saturation)
@@ -65,9 +71,16 @@ def jit_solve_dynamics_imex(
 
         # Convergence check
         diff = torch.norm(current_s - old_state).item()
+
+        # Adaptive dt: halve timestep if diverging
+        if diff > prev_diff and current_dt > min_dt:
+            current_dt = current_dt * 0.5
+            imex_denom = 1.0 + current_dt / taus
+
+        prev_diff = diff
         step_count += 1
 
-    return current_s
+    return current_s, diff
 
 
 class PredictiveCodingEngine:
@@ -207,6 +220,10 @@ class PredictiveCodingEngine:
         self.spatial_errors = torch.zeros(num_nodes, dtype=torch.float32, device=device)
         self.temporal_errors = torch.zeros(num_nodes, dtype=torch.float32, device=device)
 
+        # Convergence tracking for training gate (Fix 4)
+        self.last_settle_diff = 0.0
+        self.topdown_pred_var = 0.0
+
     def _build_module_tensors(self):
         """Pre-build tensors for module start/end ranges for fast slicing."""
         self.mod_starts = torch.tensor(
@@ -292,7 +309,7 @@ class PredictiveCodingEngine:
         effective_weights = cascade_weights * self.facilitation * self.depression
 
         # Single-phase IMEX settling
-        self.state = jit_solve_dynamics_imex(
+        self.state, self.last_settle_diff = jit_solve_dynamics_imex(
             self.state,
             self.indices,
             effective_weights,
@@ -345,6 +362,9 @@ class PredictiveCodingEngine:
         # Spatial error = actual state - top-down prediction
         self.spatial_errors = self.state - topdown_pred
 
+        # Store top-down prediction variance for diagnostics
+        self.topdown_pred_var = topdown_pred[512:].var().item()
+
         # Zero errors for nodes without meaningful top-down prediction:
         # - I/O nodes: input is clamped; output target injected by trainer
         self.spatial_errors[:512] = 0
@@ -393,16 +413,19 @@ class PredictiveCodingEngine:
         with torch.no_grad():
             rho = torch.tanh(self.state)
 
-            # --- Spatial weight update ---
+            # --- Spatial weight update (top-down edges only) ---
+            # Only top-down edges receive spatial error gradients.
+            # Non-top-down edges (intra-module, lateral, bottom-up) are governed
+            # by cascade/STP/VICReg — applying prediction error gradients to them
+            # produces noise since spatial_errors are computed from top-down
+            # predictions only.
             idx_i = self.indices[0]
             idx_j = self.indices[1]
 
-            # Prediction error at target node * activation at source node
-            error_j = self.spatial_errors[idx_j]
-            rho_i = rho[idx_i]
-
-            # Weight gradient: reduce prediction errors
-            grad = error_j * rho_i
+            grad = torch.zeros_like(self.weight_values)
+            td_error_j = self.spatial_errors[idx_j[self.topdown_edge_mask]]
+            td_rho_i = rho[idx_i[self.topdown_edge_mask]]
+            grad[self.topdown_edge_mask] = td_error_j * td_rho_i
 
             # Gradient clipping
             grad = grad.clamp(-1.0, 1.0)

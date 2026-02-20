@@ -88,8 +88,9 @@ class SequentialTrainer:
 
         # --- Scale input/output projections to dominate recurrence ---
         # Input contributes ~0.002 per target node, recurrence ~0.092.
-        # Input projections need to be 10-50x stronger so the input can
-        # actually influence level-0 representations.
+        # Modest 5x/3x scaling (was 20x/10x) boosts input signal without
+        # pushing spectral radius beyond IMEX convergence threshold.
+        # Spectral radius is re-tuned after scaling to ensure stability.
         with torch.no_grad():
             edge_src = self.engine.indices[0]
             edge_dst = self.engine.indices[1]
@@ -98,12 +99,19 @@ class SequentialTrainer:
                 ((edge_src >= 256) & (edge_src < 512)) |
                 ((edge_dst >= 256) & (edge_dst < 512))
             )
-            self.engine.w_deep[input_proj_mask] *= 20.0
-            self.engine.w_deep[output_proj_mask] *= 10.0
+            self.engine.w_deep[input_proj_mask] *= 5.0
+            self.engine.w_deep[output_proj_mask] *= 3.0
             n_input_edges = input_proj_mask.sum().item()
             n_output_edges = output_proj_mask.sum().item()
-            print(f"Scaled {n_input_edges} input projection edges by 20x, "
-                  f"{n_output_edges} output projection edges by 10x")
+            print(f"Scaled {n_input_edges} input projection edges by 5x, "
+                  f"{n_output_edges} output projection edges by 3x")
+
+        # Re-tune spectral radius AFTER I/O projection scaling.
+        # The scaling pushes effective SR well above the initial 0.80 target,
+        # causing the IMEX solver to oscillate rather than converge.
+        # Re-tuning to 0.95 keeps dynamics stable while preserving the
+        # relative input/output projection boost.
+        self.tune_spectral_radius(target_radius=0.95)
 
         # --- Linear readout from level-0 module activations ---
         # The recurrent network produces representations; a separate readout
@@ -371,16 +379,22 @@ class SequentialTrainer:
             # This prevents the reservoir from being pulled in random directions
             # before the readout has calibrated to the new data statistics.
             if step >= warmup_steps:
-                # 8b. Update recurrent weights using local predictive coding rule
-                self.engine.update_weights_predictive(learning_rate=effective_lr)
+                # Gate prediction-error-driven updates on IMEX convergence.
+                # If the solver didn't converge, prediction errors are from an
+                # unsettled state and weight updates would be noise.
+                settled_ok = self.engine.last_settle_diff <= 0.1
 
-                # 8c. CLS: boost hippocampal synapse updates (10x), decay them faster
-                with torch.no_grad():
-                    # Hippocampal synapses get extra surface boost
-                    hippo_boost = self.engine.w_surface[self.hippo_edge_mask] * 9.0  # 9x extra = 10x total
-                    self.engine.w_surface[self.hippo_edge_mask] += effective_lr * hippo_boost.clamp(-0.1, 0.1)
-                    # Hippocampal synapses also decay faster (more forgettable)
-                    self.engine.w_surface[self.hippo_edge_mask] *= 0.999
+                if settled_ok:
+                    # 8b. Update recurrent weights using local predictive coding rule
+                    self.engine.update_weights_predictive(learning_rate=effective_lr)
+
+                    # 8c. CLS: boost hippocampal synapse updates (10x), decay them faster
+                    with torch.no_grad():
+                        # Hippocampal synapses get extra surface boost
+                        hippo_boost = self.engine.w_surface[self.hippo_edge_mask] * 9.0  # 9x extra = 10x total
+                        self.engine.w_surface[self.hippo_edge_mask] += effective_lr * hippo_boost.clamp(-0.1, 0.1)
+                        # Hippocampal synapses also decay faster (more forgettable)
+                        self.engine.w_surface[self.hippo_edge_mask] *= 0.999
 
                 # 8d. Cascade transfer — step-count gated, no accuracy gate.
                 # The old accuracy gate (acc > 10%) delayed mid→deep transfer
@@ -478,6 +492,18 @@ class SequentialTrainer:
                                 for (s, d), v in sorted(td_stats.items())]
                     if td_parts:
                         print(f"  TopDown: {' | '.join(td_parts)}")
+
+                    # Convergence and top-down prediction diagnostics
+                    print(f"  Settle: last_diff={self.engine.last_settle_diff:.6f} | "
+                          f"TD pred var: {self.engine.topdown_pred_var:.6f}")
+
+                    # Per-level state variance after settling
+                    level_vars = []
+                    for level in range(self.engine.max_level + 1):
+                        lmask = self.engine.node_to_level == level
+                        lvar = self.engine.state[lmask].var().item()
+                        level_vars.append(f"L{level}={lvar:.6f}")
+                    print(f"  State var: {' | '.join(level_vars)}")
                 else:
                     recent_acc = sum(acc_window[-100:]) / min(len(acc_window), 100)
                     recent_acc3 = sum(acc_top3_window[-100:]) / min(len(acc_top3_window), 100)
