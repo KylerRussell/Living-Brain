@@ -410,9 +410,15 @@ class PredictiveCodingEngine:
 
             # Apply update only to surface level
             self.w_surface += meta_lr * grad
-            # Keep total effective weight in bounds
+            # Keep total effective weight in bounds.
+            # ±3.0 gives 3.0 - 0.93 = 2.07 headroom for surface weights.
+            # The old ±1.0 clamp left only 0.07 headroom (w_deep=0.83 +
+            # w_mid=0.10 = 0.93), causing every surface update to be
+            # immediately clipped — the reservoir was physically unable to
+            # change. The ±1.5 state clamp in IMEX prevents activation
+            # saturation regardless of weight magnitude.
             effective = self.effective_weights
-            effective.clamp_(-1.0, 1.0)
+            effective.clamp_(-3.0, 3.0)
             # Redistribute clamped values back
             self.w_surface = effective - self.w_mid - self.w_deep
 
