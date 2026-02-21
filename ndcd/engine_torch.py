@@ -15,6 +15,10 @@ def jit_solve_dynamics_imex(
     max_steps: int,
     tol: float,
     input_mask: Optional[torch.Tensor],
+    # FIX 3: Sparsity parameters for soft WTA during settling
+    module_starts: torch.Tensor,
+    module_ends: torch.Tensor,
+    sparsity_alpha: float,  # 0.0 = no sparsity, 0.3 = moderate
 ) -> Tuple[torch.Tensor, float]:
     """
     Semi-implicit (IMEX) dynamics solver for predictive coding.
@@ -62,12 +66,32 @@ def jit_solve_dynamics_imex(
         current_s = (current_s + current_dt * nonlinear / taus) / imex_denom
 
         # State clamping: ±1.5 keeps tanh ≈ 0.91 (18% gradient headroom)
-        # ±3.0 gave tanh ≈ 0.995 (<1% headroom → total saturation)
         current_s = current_s.clamp(-1.5, 1.5)
 
         # Hard clamp input nodes after update
         if input_mask is not None:
             current_s = current_s * (1.0 - input_mask) + input_vector * input_mask
+
+        # FIX 3: Soft within-module lateral inhibition every 5 steps.
+        # Without this, all nodes in a module drift to similar magnitudes
+        # → dense attractor (77% active at |tanh|>0.5, Test 4A).
+        # Biological lateral inhibition: active nodes suppress less-active
+        # neighbors, creating sparse, input-dependent codes.
+        if sparsity_alpha > 0.0 and step_count % 5 == 4:
+            for m in range(module_starts.size(0)):
+                ms = module_starts[m].item()
+                me = module_ends[m].item()
+                mod_s = current_s[ms:me]
+                mod_abs = mod_s.abs()
+                # Mean-field inhibition: subtract module mean magnitude
+                # This pushes weakly-active nodes toward zero while preserving
+                # strongly-active ones, creating competitive dynamics
+                mean_mag = mod_abs.mean()
+                inhibition = sparsity_alpha * (mod_abs - mean_mag)
+                # Nodes below mean get pushed toward zero; above mean get boosted
+                current_s[ms:me] = mod_s * (1.0 + inhibition.sign() * sparsity_alpha * 0.1)
+                # Re-clamp
+                current_s[ms:me] = current_s[ms:me].clamp(-1.5, 1.5)
 
         # Convergence check
         diff = torch.norm(current_s - old_state).item()
@@ -217,6 +241,11 @@ class PredictiveCodingEngine:
         # the effective learning rate.
         self.meta_scale = 0.1  # was 1.0
 
+        # FIX 1: Track the initial w_deep Frobenius norm as a target.
+        # This is the SR-tuned initialization; effective weights should
+        # never exceed ~2x this norm during training.
+        self._initial_deep_frob = self.w_deep.norm().item()
+
         # --- Synaptic intelligence (Zenke et al., 2017) ---
         self.omega = torch.zeros_like(self.weight_values)       # accumulated importance
         self.prev_weights = self.effective_weights.clone()       # for computing Δw
@@ -236,6 +265,9 @@ class PredictiveCodingEngine:
         # Convergence tracking for training gate (Fix 4)
         self.last_settle_diff = 0.0
         self.topdown_pred_var = 0.0
+
+        # FIX 3: Sparsity parameter (controllable from trainer)
+        self.sparsity_alpha = 0.3
 
     def _build_module_tensors(self):
         """Pre-build tensors for module start/end ranges for fast slicing."""
@@ -269,6 +301,24 @@ class PredictiveCodingEngine:
         transfer_md = self.w_mid / self.tau_mid_to_deep
         self.w_deep += transfer_md
         self.w_mid -= transfer_md
+
+        # FIX 1: Gentle w_deep norm control — prevent SR explosion.
+        #
+        # The old code never scaled w_deep ("it is long-term memory"),
+        # causing SR to grow 0.95 → 27.78 over 20K steps. The network
+        # becomes a fixed-point attractor that ignores input (Test 5B:
+        # L1-L3 cos_sim=1.0, Test 4B: single attractor, Test 1A: output
+        # nodes at chance).
+        #
+        # This is NOT the same as the old "scale all levels by 0.006x"
+        # that destroyed memory. This is a soft ceiling: w_deep can grow
+        # up to 2x its initial norm (to encode learned structure) but no
+        # further. The proportional scaling preserves relative weight
+        # patterns (the actual "memory") while preventing magnitude blow-up.
+        deep_frob = self.w_deep.norm().item()
+        max_deep_frob = self._initial_deep_frob * 2.0
+        if deep_frob > max_deep_frob:
+            self.w_deep *= max_deep_frob / deep_frob
 
     def update_synaptic_intelligence(self, current_loss):
         """Call after each weight update with the current prediction error.
@@ -322,6 +372,7 @@ class PredictiveCodingEngine:
         effective_weights = cascade_weights * self.facilitation * self.depression
 
         # Single-phase IMEX settling
+        # FIX 3: Pass module ranges and sparsity parameter to JIT solver
         self.state, self.last_settle_diff = jit_solve_dynamics_imex(
             self.state,
             self.indices,
@@ -333,6 +384,9 @@ class PredictiveCodingEngine:
             max_steps,
             tol,
             input_m,
+            self.mod_starts,
+            self.mod_ends,
+            self.sparsity_alpha,
         )
 
         # Update short-term plasticity after settling
@@ -446,17 +500,45 @@ class PredictiveCodingEngine:
             bu_rho_i = rho[idx_i[self.bottomup_edge_mask]]
             grad[self.bottomup_edge_mask] = bu_error_j * bu_rho_i
 
-            # Lateral edges: Oja's rule (Hebbian with self-normalizing decay).
-            # Pure Hebbian (rho_i * rho_j) always strengthens co-active
-            # connections. With L1 saturation (all nodes at +1.5), every
-            # lateral pair has rho_i*rho_j ≈ 0.81 every step, driving all
-            # lateral weights uniformly positive → single attractor (Test
-            # 4B: sim=0.994). Oja's rule adds -w * rho_j^2 decay that
-            # self-normalizes weights and prevents uniform growth.
-            lat_rho_i = rho[idx_i[self.lateral_edge_mask]]
-            lat_rho_j = rho[idx_j[self.lateral_edge_mask]]
+            # FIX 4: Lateral edges — anti-Hebbian inhibitory + Oja excitatory.
+            #
+            # The old pure Oja (0.1 * (rho_i*rho_j - w*rho_j^2)) still drove
+            # all lateral weights uniformly positive because with L1 saturation,
+            # rho_i*rho_j ≈ constant for all pairs. The self-normalizing -w*rho_j^2
+            # term balances each weight individually but doesn't create
+            # competition between nodes.
+            #
+            # Fix: Add an inhibitory component that depends on MODULE-LEVEL
+            # mean activity. When the module mean is high (all nodes active),
+            # inhibition dominates and lateral weights decrease. When the
+            # module mean is moderate (sparse code), Oja excitation dominates
+            # for co-active pairs. This creates genuine competition.
+            lat_i = idx_i[self.lateral_edge_mask]
+            lat_j = idx_j[self.lateral_edge_mask]
+            lat_rho_i = rho[lat_i]
+            lat_rho_j = rho[lat_j]
             lat_w = self.effective_weights[self.lateral_edge_mask]
-            grad[self.lateral_edge_mask] = 0.1 * (lat_rho_i * lat_rho_j - lat_w * lat_rho_j.pow(2))
+
+            # Per-module mean activity for inhibition scaling
+            module_mean_act = torch.zeros(self.num_modules, device=self.device)
+            for mod_idx, (start, end) in enumerate(self.module_ranges):
+                module_mean_act[mod_idx] = rho[start:end].abs().mean()
+
+            # Map each lateral edge to its source module's mean activity
+            lat_src_mod = torch.zeros(lat_i.size(0), dtype=torch.long, device=self.device)
+            for mod_idx, (start, end) in enumerate(self.module_ranges):
+                mask = (lat_i >= start) & (lat_i < end)
+                lat_src_mod[mask] = mod_idx
+            mod_act = module_mean_act[lat_src_mod]
+
+            # Inhibition strength increases with module mean activity.
+            # At mod_act=0.2 (sparse): inhibition ≈ 0, Oja dominates
+            # At mod_act=0.7 (dense): inhibition ≈ 0.5, suppresses co-activation
+            inhibition_strength = torch.clamp(mod_act - 0.3, min=0.0)
+
+            oja_excitatory = lat_rho_i * lat_rho_j - lat_w * lat_rho_j.pow(2)
+            inhibitory = -inhibition_strength * lat_rho_i.abs() * lat_rho_j.abs()
+            grad[self.lateral_edge_mask] = 0.1 * (oja_excitatory + inhibitory)
 
             # Gradient clipping
             grad = grad.clamp(-1.0, 1.0)
@@ -475,36 +557,60 @@ class PredictiveCodingEngine:
             # immediately clipped — the reservoir was physically unable to
             # change. The ±1.5 state clamp in IMEX prevents activation
             # saturation regardless of weight magnitude.
+            # FIX 2: Per-destination-node effective weight norm control.
+            #
+            # Replaces the old approach of:
+            # a) Frobenius norm on transient only (w_deep exempt → SR explosion)
+            # b) Separate TD and BU norm constraints (didn't catch lateral growth)
+            #
+            # This single constraint bounds the total incoming effective weight
+            # RMS for EVERY destination node across ALL edge types. It directly
+            # controls what matters: per-node input magnitude, which determines
+            # whether the network is input-driven or attractor-dominated.
+            #
+            # The cascade structure is preserved: we scale all three levels
+            # proportionally, so the relative importance ordering (deep > mid >
+            # surface) is maintained. w_deep IS scaled here, but only when
+            # a specific node's incoming weights are over threshold — not
+            # globally. This is much gentler than the old global SR rescaling
+            # that multiplied everything by 0.006x.
             effective = self.effective_weights
             effective.clamp_(-3.0, 3.0)
-            # Redistribute clamped values back
             self.w_surface = effective - self.w_mid - self.w_deep
 
-            # Frobenius norm soft control on transient weights only.
-            # The previous version scaled all cascade levels (including w_deep),
-            # which destroyed long-term memory: w_deep went from 0.053 to 0.0001
-            # over 50K steps because the norm control fired every step and
-            # repeatedly eroded deep weights. w_deep is long-term memory and
-            # must NEVER be scaled by runtime norm control.
-            transient_frob = (self.w_surface + self.w_mid).norm().item()
-            target_frob = 0.95 * np.sqrt(self.num_nodes)
-            if transient_frob > target_frob * 2.0:  # More lenient threshold
-                scale = target_frob / transient_frob
-                self.w_surface *= scale
-                self.w_mid *= scale
-                # w_deep is NEVER scaled — it is long-term memory
+            dst_nodes = self.indices[1]
+            unique_dst, inverse_dst = torch.unique(dst_nodes, return_inverse=True)
+            n_unique = len(unique_dst)
+
+            dst_sq_sums = torch.zeros(n_unique, device=self.device)
+            dst_counts = torch.zeros(n_unique, device=self.device)
+            dst_sq_sums.scatter_add_(0, inverse_dst, effective.pow(2))
+            dst_counts.scatter_add_(0, inverse_dst, torch.ones_like(effective))
+            dst_rms = torch.sqrt(dst_sq_sums / dst_counts.clamp(min=1))
+
+            # Target RMS per destination node.
+            # With avg fan-in ~150, RMS=0.15 gives total input magnitude
+            # ≈ sqrt(150) * 0.15 ≈ 1.84 — well within the ±1.5 clamp range
+            # when multiplied by tanh activations (which are ≤1).
+            max_rms = 0.15
+            scale_per_dst = torch.where(
+                dst_rms > max_rms,
+                max_rms / dst_rms,
+                torch.ones_like(dst_rms)
+            )
+            weight_scale = scale_per_dst[inverse_dst]
+
+            # Apply to ALL cascade levels proportionally (preserves structure)
+            self.w_surface *= weight_scale
+            self.w_mid *= weight_scale
+            self.w_deep *= weight_scale
 
             # --- Top-down weight diversity regularization ---
-            # Prevents mode collapse where all outgoing top-down weights from
-            # a source node converge to the same value (σ→0). After spectral
-            # retuning nukes everything, surface weights re-grow fast and
-            # collapse to a low-diversity attractor. This nudges each source
-            # node's top-down weights toward zero mean (1% per step).
+            # (Kept from original — prevents mode collapse)
             td_idx = torch.where(self.topdown_edge_mask)[0]
             td_src = self.topdown_indices[0]
             td_vals = self.w_deep[td_idx]
 
-            # Vectorized per-source-node mean via scatter
             unique_src, inverse = torch.unique(td_src, return_inverse=True)
             src_sums = torch.zeros(len(unique_src), device=self.device)
             src_counts = torch.zeros(len(unique_src), device=self.device)
@@ -512,60 +618,8 @@ class PredictiveCodingEngine:
             src_counts.scatter_add_(0, inverse, torch.ones_like(td_vals))
             src_means = src_sums / src_counts.clamp(min=1)
 
-            # Subtract 1% of each source node's mean from its outgoing weights
             correction = src_means[inverse] * 0.01
             self.w_deep[td_idx] -= correction
-
-            # --- Top-down weight norm constraint ---
-            # Prevent TD weight divergence when lower levels are saturated.
-            # Without this, L1→L0 σ grows 0.076 → 1.49 in 20K steps because
-            # saturated L1 gives constant tanh ≈ ±0.9 and errors never decrease.
-            td_effective = self.effective_weights[self.topdown_edge_mask]
-            td_dst = self.topdown_indices[1]
-
-            # Per-destination-node: compute RMS of incoming TD weights
-            unique_dst_td, inverse_td = torch.unique(td_dst, return_inverse=True)
-            dst_sq_sums = torch.zeros(len(unique_dst_td), device=self.device)
-            dst_counts_td = torch.zeros(len(unique_dst_td), device=self.device)
-            dst_sq_sums.scatter_add_(0, inverse_td, td_effective.pow(2))
-            dst_counts_td.scatter_add_(0, inverse_td, torch.ones_like(td_effective))
-            dst_rms = torch.sqrt(dst_sq_sums / dst_counts_td.clamp(min=1))
-
-            # Soft clip: scale down weights for nodes where RMS > 1.0
-            max_rms = 1.0
-            scale_per_dst = torch.where(dst_rms > max_rms, max_rms / dst_rms, torch.ones_like(dst_rms))
-            weight_scale = scale_per_dst[inverse_td]
-
-            # Apply to all cascade levels proportionally
-            self.w_surface[self.topdown_edge_mask] *= weight_scale
-            self.w_mid[self.topdown_edge_mask] *= weight_scale
-            self.w_deep[self.topdown_edge_mask] *= weight_scale
-
-            # --- Bottom-up weight norm constraint ---
-            # Same logic as TD constraint. BU weights grow without bound because
-            # saturated higher-level nodes produce large, consistently-signed errors
-            # that drive BU weights monotonically positive. BU SNR (0.51) exceeds
-            # TD SNR (0.39), making BU the primary driver of L1 saturation.
-            bu_effective = self.effective_weights[self.bottomup_edge_mask]
-            bu_dst = self.indices[1, self.bottomup_edge_mask]
-
-            unique_dst_bu, inverse_bu = torch.unique(bu_dst, return_inverse=True)
-            dst_sq_sums_bu = torch.zeros(len(unique_dst_bu), device=self.device)
-            dst_counts_bu = torch.zeros(len(unique_dst_bu), device=self.device)
-            dst_sq_sums_bu.scatter_add_(0, inverse_bu, bu_effective.pow(2))
-            dst_counts_bu.scatter_add_(0, inverse_bu, torch.ones_like(bu_effective))
-            dst_rms_bu = torch.sqrt(dst_sq_sums_bu / dst_counts_bu.clamp(min=1))
-
-            # Tighter than TD (1.0) because BU drives saturation directly —
-            # total BU input to each L1 node must stay well below ±1.5 clamp
-            # to preserve gradient flow and input sensitivity.
-            max_rms_bu = 0.5
-            scale_per_dst_bu = torch.where(dst_rms_bu > max_rms_bu, max_rms_bu / dst_rms_bu, torch.ones_like(dst_rms_bu))
-            weight_scale_bu = scale_per_dst_bu[inverse_bu]
-
-            self.w_surface[self.bottomup_edge_mask] *= weight_scale_bu
-            self.w_mid[self.bottomup_edge_mask] *= weight_scale_bu
-            self.w_deep[self.bottomup_edge_mask] *= weight_scale_bu
 
             # --- Bias update from prediction errors ---
             # Biases absorb mean prediction errors
