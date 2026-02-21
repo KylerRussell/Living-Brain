@@ -541,6 +541,32 @@ class PredictiveCodingEngine:
             self.w_mid[self.topdown_edge_mask] *= weight_scale
             self.w_deep[self.topdown_edge_mask] *= weight_scale
 
+            # --- Bottom-up weight norm constraint ---
+            # Same logic as TD constraint. BU weights grow without bound because
+            # saturated higher-level nodes produce large, consistently-signed errors
+            # that drive BU weights monotonically positive. BU SNR (0.51) exceeds
+            # TD SNR (0.39), making BU the primary driver of L1 saturation.
+            bu_effective = self.effective_weights[self.bottomup_edge_mask]
+            bu_dst = self.indices[1, self.bottomup_edge_mask]
+
+            unique_dst_bu, inverse_bu = torch.unique(bu_dst, return_inverse=True)
+            dst_sq_sums_bu = torch.zeros(len(unique_dst_bu), device=self.device)
+            dst_counts_bu = torch.zeros(len(unique_dst_bu), device=self.device)
+            dst_sq_sums_bu.scatter_add_(0, inverse_bu, bu_effective.pow(2))
+            dst_counts_bu.scatter_add_(0, inverse_bu, torch.ones_like(bu_effective))
+            dst_rms_bu = torch.sqrt(dst_sq_sums_bu / dst_counts_bu.clamp(min=1))
+
+            # Tighter than TD (1.0) because BU drives saturation directly —
+            # total BU input to each L1 node must stay well below ±1.5 clamp
+            # to preserve gradient flow and input sensitivity.
+            max_rms_bu = 0.5
+            scale_per_dst_bu = torch.where(dst_rms_bu > max_rms_bu, max_rms_bu / dst_rms_bu, torch.ones_like(dst_rms_bu))
+            weight_scale_bu = scale_per_dst_bu[inverse_bu]
+
+            self.w_surface[self.bottomup_edge_mask] *= weight_scale_bu
+            self.w_mid[self.bottomup_edge_mask] *= weight_scale_bu
+            self.w_deep[self.bottomup_edge_mask] *= weight_scale_bu
+
             # --- Bias update from prediction errors ---
             # Biases absorb mean prediction errors
             bias_grad = self.spatial_errors + self.temporal_alpha * self.temporal_errors
