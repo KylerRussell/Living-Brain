@@ -349,12 +349,14 @@ class SequentialTrainer:
             # This prevents the reservoir from being pulled in random directions
             # before the readout has calibrated to the new data statistics.
             if step >= warmup_steps:
-                # Gate prediction-error-driven updates on IMEX convergence.
-                # If the solver didn't converge, prediction errors are from an
-                # unsettled state and weight updates would be noise.
+                # Gate prediction-error-driven updates on IMEX convergence
+                # AND top-down prediction quality. If the solver didn't converge
+                # or the hierarchy isn't generating real predictions yet,
+                # weight updates would be noise.
                 settled_ok = self.engine.last_settle_diff <= 0.1
+                td_pred_active = self.engine.topdown_pred_var > 1e-6
 
-                if settled_ok:
+                if settled_ok and td_pred_active:
                     # 8b. Update recurrent weights using local predictive coding rule
                     self.engine.update_weights_predictive(learning_rate=effective_lr)
 
@@ -366,23 +368,19 @@ class SequentialTrainer:
                         # Hippocampal synapses also decay faster (more forgettable)
                         self.engine.w_surface[self.hippo_edge_mask] *= 0.999
 
-                # 8d. Cascade transfer — step-count gated, no accuracy gate.
-                # The old accuracy gate (acc > 10%) delayed mid→deep transfer
-                # until step 13K+ because accuracy stays at 0% until then —
-                # wasting 26% of chars training with no deep consolidation.
-                # With tau_mid_to_deep=1000 (was 10000), earlier transfer is
-                # critical for w_deep to accumulate meaningful content.
-                if step < 2000:
-                    pass  # No transfer — let surface accumulate first
-                elif step < 5000:
-                    # Surface→mid only
+                # 8d. Cascade transfer — quality-gated.
+                # Only transfer to mid/deep when the hierarchy is actually
+                # generating predictions (td_pred_var > 0). Transferring
+                # noise gradients to long-term memory is harmful.
+                if td_pred_active and step >= 2000:
+                    self.engine.cascade_transfer()
+                elif step >= 2000 and step < 5000:
+                    # Even without predictions, do surface→mid to prevent
+                    # surface from saturating (but don't push to deep)
                     with torch.no_grad():
                         transfer_sm = self.engine.w_surface / self.engine.tau_surface_to_mid
                         self.engine.w_mid += transfer_sm
                         self.engine.w_surface -= transfer_sm
-                else:
-                    # Full cascade — mid→deep starts early
-                    self.engine.cascade_transfer()
 
                 # 8e. Synaptic intelligence tracking
                 self.engine.update_synaptic_intelligence(current_loss=energy)
@@ -675,11 +673,13 @@ def main():
 
     # Phase 1: Chars
     # lr=0.05: compensates for tiny activation products
-    # settle_steps=8: fewer steps preserves more input signal in level-0 nodes
+    # settle_steps=30: L1 (tau=0.5) and L2 (tau=2.0) need time to respond.
+    #   With dt=0.5 and 8 steps, only 4 time units elapsed — L2 barely moved.
+    #   30 steps = 15 time units, enough for L1/L2 to participate.
     # input_gain=5.0: stronger input to overcome recurrent attractor
     trainer.train_phase("Chars", "ndcd/data/level1_chars.txt",
                         iterations=500, steps_per_iter=100, lr=0.05,
-                        settle_steps=8, input_gain=5.0)
+                        settle_steps=30, input_gain=5.0)
     trainer.generate(start_text="A")
 
     # --- Phase boundary: Chars → Words ---

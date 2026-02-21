@@ -141,7 +141,7 @@ class ModelDiagnostics:
             input_vec[0:256] = self.trainer.eye[input_byte] * 5.0
             input_mask = torch.zeros(self.num_nodes, device=self.device)
             input_mask[list(range(256))] = 1.0
-            self.engine.settle(input_vec, input_mask=input_mask, max_steps=20)
+            self.engine.settle(input_vec, input_mask=input_mask, max_steps=50)
 
             # Output node prediction (raw network)
             output_state = self.engine.state[256:512]
@@ -405,7 +405,7 @@ class ModelDiagnostics:
             input_mask[list(range(256))] = 1.0
 
             self.engine.store_previous_state()
-            self.engine.settle(input_vec, input_mask=input_mask, max_steps=8)
+            self.engine.settle(input_vec, input_mask=input_mask, max_steps=50)
             self.engine.compute_prediction_errors()
 
             # Inject target
@@ -694,7 +694,7 @@ class ModelDiagnostics:
             input_vec[0:256] = self.trainer.eye[b] * 5.0
             input_mask = torch.zeros(self.num_nodes, device=self.device)
             input_mask[list(range(256))] = 1.0
-            self.engine.settle(input_vec, input_mask=input_mask, max_steps=20)
+            self.engine.settle(input_vec, input_mask=input_mask, max_steps=50)
             states[b] = self.engine.state.clone()
 
         comparisons = []
@@ -927,7 +927,7 @@ class ModelDiagnostics:
             input_vec[0:256] = self.trainer.eye[input_byte] * 5.0
             input_mask = torch.zeros(self.num_nodes, device=self.device)
             input_mask[list(range(256))] = 1.0
-            self.engine.settle(input_vec, input_mask=input_mask, max_steps=10)
+            self.engine.settle(input_vec, input_mask=input_mask, max_steps=50)
 
             with torch.no_grad():
                 level0_acts = torch.tanh(self.engine.state[self.trainer.level0_indices])
@@ -951,7 +951,7 @@ class ModelDiagnostics:
             input_vec[0:256] = self.trainer.eye[input_byte] * 5.0
             input_mask = torch.zeros(self.num_nodes, device=self.device)
             input_mask[list(range(256))] = 1.0
-            self.engine.settle(input_vec, input_mask=input_mask, max_steps=10)
+            self.engine.settle(input_vec, input_mask=input_mask, max_steps=50)
 
             with torch.no_grad():
                 level0_acts = torch.tanh(self.engine.state[self.trainer.level0_indices])
