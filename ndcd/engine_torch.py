@@ -446,12 +446,17 @@ class PredictiveCodingEngine:
             bu_rho_i = rho[idx_i[self.bottomup_edge_mask]]
             grad[self.bottomup_edge_mask] = bu_error_j * bu_rho_i
 
-            # Lateral edges: weak Hebbian signal (no error term).
-            # Helps modules develop internal representations. 10x smaller
-            # learning rate than error-driven updates.
+            # Lateral edges: Oja's rule (Hebbian with self-normalizing decay).
+            # Pure Hebbian (rho_i * rho_j) always strengthens co-active
+            # connections. With L1 saturation (all nodes at +1.5), every
+            # lateral pair has rho_i*rho_j ≈ 0.81 every step, driving all
+            # lateral weights uniformly positive → single attractor (Test
+            # 4B: sim=0.994). Oja's rule adds -w * rho_j^2 decay that
+            # self-normalizes weights and prevents uniform growth.
             lat_rho_i = rho[idx_i[self.lateral_edge_mask]]
             lat_rho_j = rho[idx_j[self.lateral_edge_mask]]
-            grad[self.lateral_edge_mask] = 0.1 * lat_rho_i * lat_rho_j
+            lat_w = self.effective_weights[self.lateral_edge_mask]
+            grad[self.lateral_edge_mask] = 0.1 * (lat_rho_i * lat_rho_j - lat_w * lat_rho_j.pow(2))
 
             # Gradient clipping
             grad = grad.clamp(-1.0, 1.0)
@@ -510,6 +515,31 @@ class PredictiveCodingEngine:
             # Subtract 1% of each source node's mean from its outgoing weights
             correction = src_means[inverse] * 0.01
             self.w_deep[td_idx] -= correction
+
+            # --- Top-down weight norm constraint ---
+            # Prevent TD weight divergence when lower levels are saturated.
+            # Without this, L1→L0 σ grows 0.076 → 1.49 in 20K steps because
+            # saturated L1 gives constant tanh ≈ ±0.9 and errors never decrease.
+            td_effective = self.effective_weights[self.topdown_edge_mask]
+            td_dst = self.topdown_indices[1]
+
+            # Per-destination-node: compute RMS of incoming TD weights
+            unique_dst_td, inverse_td = torch.unique(td_dst, return_inverse=True)
+            dst_sq_sums = torch.zeros(len(unique_dst_td), device=self.device)
+            dst_counts_td = torch.zeros(len(unique_dst_td), device=self.device)
+            dst_sq_sums.scatter_add_(0, inverse_td, td_effective.pow(2))
+            dst_counts_td.scatter_add_(0, inverse_td, torch.ones_like(td_effective))
+            dst_rms = torch.sqrt(dst_sq_sums / dst_counts_td.clamp(min=1))
+
+            # Soft clip: scale down weights for nodes where RMS > 1.0
+            max_rms = 1.0
+            scale_per_dst = torch.where(dst_rms > max_rms, max_rms / dst_rms, torch.ones_like(dst_rms))
+            weight_scale = scale_per_dst[inverse_td]
+
+            # Apply to all cascade levels proportionally
+            self.w_surface[self.topdown_edge_mask] *= weight_scale
+            self.w_mid[self.topdown_edge_mask] *= weight_scale
+            self.w_deep[self.topdown_edge_mask] *= weight_scale
 
             # --- Bias update from prediction errors ---
             # Biases absorb mean prediction errors
