@@ -52,11 +52,28 @@ class SequentialTrainer:
         # Input scale factor (fixed to 1.0)
         self.input_scale_factor = 1.0
 
-        # Spectral Radius Tuning — start at 0.80, not 0.95.
-        # At 0.95 with 112M edges, recurrent dynamics overwhelm the input
-        # signal. 0.80 lets the network learn basic representations first;
-        # raise to 0.95 after the chars phase.
-        self.tune_spectral_radius(target_radius=0.80)
+        # --- Scale I/O projection edges BEFORE spectral tuning ---
+        # Apply I/O boost to raw weights so the single spectral tuning
+        # pass accounts for their increased magnitude. This avoids the
+        # uniform re-scaling problem where a post-engine tune_spectral_radius
+        # call crushes all non-I/O recurrent weights to ~29% strength.
+        input_proj_mask = (indices[0] < 256) | (indices[1] < 256)
+        output_proj_mask = (
+            ((indices[0] >= 256) & (indices[0] < 512)) |
+            ((indices[1] >= 256) & (indices[1] < 512))
+        )
+        self.initial_values[input_proj_mask] *= 5.0
+        self.initial_values[output_proj_mask] *= 3.0
+        n_input_edges = int(input_proj_mask.sum())
+        n_output_edges = int(output_proj_mask.sum())
+        print(f"Scaled {n_input_edges} input projection edges by 5x, "
+              f"{n_output_edges} output projection edges by 3x")
+
+        # Spectral Radius Tuning to 0.95 (single pass, includes I/O boost).
+        # With I/O edges already boosted, tuning naturally preserves their
+        # relative strength vs recurrent edges. SR=0.95 with STP modulation
+        # gives effective SR_STP ≈ 0.3–0.5, healthy for IMEX convergence.
+        self.tune_spectral_radius(target_radius=0.95)
 
         # 2. Initialize Predictive Coding Engine
         # dt=0.5: IMEX is stable for large dt; converges in 10-20 steps
@@ -85,33 +102,6 @@ class SequentialTrainer:
 
         # Pre-compute One-Hot Identity Matrices
         self.eye = torch.eye(256, device=device)
-
-        # --- Scale input/output projections to dominate recurrence ---
-        # Input contributes ~0.002 per target node, recurrence ~0.092.
-        # Modest 5x/3x scaling (was 20x/10x) boosts input signal without
-        # pushing spectral radius beyond IMEX convergence threshold.
-        # Spectral radius is re-tuned after scaling to ensure stability.
-        with torch.no_grad():
-            edge_src = self.engine.indices[0]
-            edge_dst = self.engine.indices[1]
-            input_proj_mask = (edge_src < 256) | (edge_dst < 256)
-            output_proj_mask = (
-                ((edge_src >= 256) & (edge_src < 512)) |
-                ((edge_dst >= 256) & (edge_dst < 512))
-            )
-            self.engine.w_deep[input_proj_mask] *= 5.0
-            self.engine.w_deep[output_proj_mask] *= 3.0
-            n_input_edges = input_proj_mask.sum().item()
-            n_output_edges = output_proj_mask.sum().item()
-            print(f"Scaled {n_input_edges} input projection edges by 5x, "
-                  f"{n_output_edges} output projection edges by 3x")
-
-        # Re-tune spectral radius AFTER I/O projection scaling.
-        # The scaling pushes effective SR well above the initial 0.80 target,
-        # causing the IMEX solver to oscillate rather than converge.
-        # Re-tuning to 0.95 keeps dynamics stable while preserving the
-        # relative input/output projection boost.
-        self.tune_spectral_radius(target_radius=0.95)
 
         # --- Linear readout from level-0 module activations ---
         # The recurrent network produces representations; a separate readout
