@@ -158,11 +158,24 @@ class PredictiveCodingEngine:
             self.node_to_level[start:end] = self.module_levels[mod_idx]
         self.max_level = int(self.node_to_level.max().item())
 
-        # Top-down: source at strictly higher level than destination
+        # Per-edge level lookups for top-down, bottom-up, and lateral masks
         src_levels = self.node_to_level[self.indices[0]]
         dst_levels = self.node_to_level[self.indices[1]]
+
+        # Top-down: source at strictly higher level than destination
         self.topdown_edge_mask = src_levels > dst_levels
         self.topdown_indices = self.indices[:, self.topdown_edge_mask]
+
+        # Bottom-up: source at strictly lower level than destination
+        self.bottomup_edge_mask = src_levels < dst_levels
+
+        # Lateral: same level, excluding I/O nodes (which are at level 0
+        # but aren't association nodes)
+        self.lateral_edge_mask = (
+            (src_levels == dst_levels) &
+            (self.indices[0] >= 512) &
+            (self.indices[1] >= 512)
+        )
 
         # --- Temporal prediction state ---
         # Previous state buffer per module (for temporal prediction errors)
@@ -413,19 +426,32 @@ class PredictiveCodingEngine:
         with torch.no_grad():
             rho = torch.tanh(self.state)
 
-            # --- Spatial weight update (top-down edges only) ---
-            # Only top-down edges receive spatial error gradients.
-            # Non-top-down edges (intra-module, lateral, bottom-up) are governed
-            # by cascade/STP/VICReg — applying prediction error gradients to them
-            # produces noise since spatial_errors are computed from top-down
-            # predictions only.
+            # --- Spatial weight update (top-down + bottom-up + lateral) ---
             idx_i = self.indices[0]
             idx_j = self.indices[1]
 
             grad = torch.zeros_like(self.weight_values)
+
+            # Top-down edges: learn to predict lower-level states
+            # ΔW_td ∝ ε_lower × tanh(x_upper)
             td_error_j = self.spatial_errors[idx_j[self.topdown_edge_mask]]
             td_rho_i = rho[idx_i[self.topdown_edge_mask]]
             grad[self.topdown_edge_mask] = td_error_j * td_rho_i
+
+            # Bottom-up edges: learn to propagate prediction errors upward.
+            # Without this, BU weights stay at random init and higher levels
+            # never receive structured input from lower levels.
+            # ΔW_bu ∝ ε_higher × tanh(x_lower)
+            bu_error_j = self.spatial_errors[idx_j[self.bottomup_edge_mask]]
+            bu_rho_i = rho[idx_i[self.bottomup_edge_mask]]
+            grad[self.bottomup_edge_mask] = bu_error_j * bu_rho_i
+
+            # Lateral edges: weak Hebbian signal (no error term).
+            # Helps modules develop internal representations. 10x smaller
+            # learning rate than error-driven updates.
+            lat_rho_i = rho[idx_i[self.lateral_edge_mask]]
+            lat_rho_j = rho[idx_j[self.lateral_edge_mask]]
+            grad[self.lateral_edge_mask] = 0.1 * lat_rho_i * lat_rho_j
 
             # Gradient clipping
             grad = grad.clamp(-1.0, 1.0)
