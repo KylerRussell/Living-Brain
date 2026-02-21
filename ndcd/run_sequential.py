@@ -52,28 +52,8 @@ class SequentialTrainer:
         # Input scale factor (fixed to 1.0)
         self.input_scale_factor = 1.0
 
-        # --- Scale I/O projection edges BEFORE spectral tuning ---
-        # Apply I/O boost to raw weights so the single spectral tuning
-        # pass accounts for their increased magnitude. This avoids the
-        # uniform re-scaling problem where a post-engine tune_spectral_radius
-        # call crushes all non-I/O recurrent weights to ~29% strength.
-        input_proj_mask = (indices[0] < 256) | (indices[1] < 256)
-        output_proj_mask = (
-            ((indices[0] >= 256) & (indices[0] < 512)) |
-            ((indices[1] >= 256) & (indices[1] < 512))
-        )
-        self.initial_values[input_proj_mask] *= 5.0
-        self.initial_values[output_proj_mask] *= 3.0
-        n_input_edges = int(input_proj_mask.sum())
-        n_output_edges = int(output_proj_mask.sum())
-        print(f"Scaled {n_input_edges} input projection edges by 5x, "
-              f"{n_output_edges} output projection edges by 3x")
-
-        # Spectral Radius Tuning to 0.95 (single pass, includes I/O boost).
-        # With I/O edges already boosted, tuning naturally preserves their
-        # relative strength vs recurrent edges. SR=0.95 with STP modulation
-        # gives effective SR_STP ≈ 0.3–0.5, healthy for IMEX convergence.
-        self.tune_spectral_radius(target_radius=0.95)
+        # I/O projection scaling and spectral tuning are handled in
+        # graph.py (single pass). No second tuning needed here.
 
         # 2. Initialize Predictive Coding Engine
         # dt=0.5: IMEX is stable for large dt; converges in 10-20 steps

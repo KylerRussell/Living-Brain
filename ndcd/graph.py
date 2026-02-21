@@ -241,6 +241,23 @@ class DynamicGraph:
 
         weight_vals = np.random.normal(0, std_dev, num_edges).astype(np.float32)
 
+        # --- Scale I/O projection edges BEFORE spectral tuning ---
+        # Boost input/output projection weights so the single spectral tuning
+        # pass naturally preserves their relative strength vs recurrent edges.
+        # Previously this was done in run_sequential.py AFTER tuning, causing
+        # a second uniform re-scale that crushed all non-I/O weights to ~25%.
+        input_proj_mask = (edge_rows < 256) | (edge_cols < 256)
+        output_proj_mask = (
+            ((edge_rows >= 256) & (edge_rows < 512)) |
+            ((edge_cols >= 256) & (edge_cols < 512))
+        )
+        weight_vals[input_proj_mask] *= 5.0
+        weight_vals[output_proj_mask] *= 3.0
+        n_input_scaled = int(input_proj_mask.sum())
+        n_output_scaled = int(output_proj_mask.sum())
+        print(f"Scaled {n_input_scaled} input projection edges by 5x, "
+              f"{n_output_scaled} output projection edges by 3x")
+
         # Build sparse CSR weight matrix directly from edge lists
         self.weight_sparse = sp.csr_matrix(
             (weight_vals, (edge_rows, edge_cols)),
