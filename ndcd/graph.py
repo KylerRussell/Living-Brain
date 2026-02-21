@@ -283,6 +283,22 @@ class DynamicGraph:
         print(f"Weight magnitudes: input={np.abs(weight_vals[input_proj_mask]).mean():.4f}, "
               f"free={np.abs(weight_vals[free_mask]).mean():.4f}")
 
+        # Make bottom-up weights positive to break zero-mean cancellation.
+        # With zero-mean BU weights and large fan-in (~100+ connections),
+        # input-specific signal cancels out: Σ w_ij × Δs_i ≈ 0.
+        # Using abs() keeps magnitude distribution but ensures consistent
+        # sign so lower-level activity reliably excites higher levels.
+        node_levels = np.zeros(num_nodes, dtype=int)
+        node_levels[:n_io] = 0
+        for mod in self.modules:
+            node_levels[mod['start']:mod['end']] = mod['level']
+        src_levels_arr = node_levels[edge_rows]
+        dst_levels_arr = node_levels[edge_cols]
+        bu_mask = src_levels_arr < dst_levels_arr  # lower → higher
+        weight_vals[bu_mask] = np.abs(weight_vals[bu_mask])
+        n_bu = int(bu_mask.sum())
+        print(f"Bottom-up edges: {n_bu} made positive (abs)")
+
         # Build final sparse matrix
         self.weight_sparse = sp.csr_matrix(
             (weight_vals, (edge_rows, edge_cols)),

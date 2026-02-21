@@ -349,14 +349,15 @@ class SequentialTrainer:
             # This prevents the reservoir from being pulled in random directions
             # before the readout has calibrated to the new data statistics.
             if step >= warmup_steps:
-                # Gate prediction-error-driven updates on IMEX convergence
-                # AND top-down prediction quality. If the solver didn't converge
-                # or the hierarchy isn't generating real predictions yet,
-                # weight updates would be noise.
+                # Gate weight updates on IMEX convergence only.
+                # If the solver didn't converge, prediction errors are from an
+                # unsettled state and weight updates would be noise.
+                # NOTE: Do NOT gate on td_pred_active — that creates a deadlock
+                # where learning waits for predictions that can't exist without
+                # learning. The hierarchy must bootstrap from random weights.
                 settled_ok = self.engine.last_settle_diff <= 0.1
-                td_pred_active = self.engine.topdown_pred_var > 1e-6
 
-                if settled_ok and td_pred_active:
+                if settled_ok:
                     # 8b. Update recurrent weights using local predictive coding rule
                     self.engine.update_weights_predictive(learning_rate=effective_lr)
 
@@ -368,19 +369,18 @@ class SequentialTrainer:
                         # Hippocampal synapses also decay faster (more forgettable)
                         self.engine.w_surface[self.hippo_edge_mask] *= 0.999
 
-                # 8d. Cascade transfer — quality-gated.
-                # Only transfer to mid/deep when the hierarchy is actually
-                # generating predictions (td_pred_var > 0). Transferring
-                # noise gradients to long-term memory is harmful.
-                if td_pred_active and step >= 2000:
-                    self.engine.cascade_transfer()
-                elif step >= 2000 and step < 5000:
-                    # Even without predictions, do surface→mid to prevent
-                    # surface from saturating (but don't push to deep)
+                # 8d. Cascade transfer — step-count gated.
+                if step < 2000:
+                    pass  # No transfer — let surface accumulate first
+                elif step < 5000:
+                    # Surface→mid only
                     with torch.no_grad():
                         transfer_sm = self.engine.w_surface / self.engine.tau_surface_to_mid
                         self.engine.w_mid += transfer_sm
                         self.engine.w_surface -= transfer_sm
+                else:
+                    # Full cascade
+                    self.engine.cascade_transfer()
 
                 # 8e. Synaptic intelligence tracking
                 self.engine.update_synaptic_intelligence(current_loss=energy)
