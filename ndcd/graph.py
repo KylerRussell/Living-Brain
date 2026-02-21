@@ -102,19 +102,19 @@ class DynamicGraph:
         edge_rows = []
         edge_cols = []
 
-        # 1. Dense INTRA-module connectivity
-        # Target ~200 connections per node within module.
-        # For small modules (n<200), use 60% density.
-        # For large modules, cap at 200 connections per node to keep
-        # total edge count in the 5-10M range at 50K nodes.
-        target_connections_per_node = 200
+        # 1. INTRA-module connectivity
+        # Reduced from 200 connections/node (60% density) to 50 (25%).
+        # At 200, lateral recurrence outnumbered inter-level edges 25:1,
+        # making the hierarchy structurally disconnected — higher levels
+        # were completely input-invariant. Target ~3:1 lateral:hierarchical.
+        target_connections_per_node = 50
         for mod in self.modules:
             idx = mod['indices']
             n = len(idx)
             if n < 2:
                 continue
-            # Adaptive density: min(0.6, target_conn / (n-1))
-            intra_density = min(0.6, target_connections_per_node / max(1, n - 1))
+            # Adaptive density: min(0.25, target_conn / (n-1))
+            intra_density = min(0.25, target_connections_per_node / max(1, n - 1))
 
             if n <= 300:
                 # Small module: use dense random matrix
@@ -157,10 +157,12 @@ class DynamicGraph:
                     edge_rows.extend(dst_picks.tolist())
                     edge_cols.extend(src_picks.tolist())
 
-        # 3. Sparse HIERARCHICAL connections between levels (~2%)
-        # Higher levels predict lower levels (top-down)
-        # Lower levels send errors up (bottom-up)
-        hier_density = 0.02
+        # 3. Hierarchical connections between levels — MUCH denser than lateral.
+        # At 2% density with aggressive capping, each module pair had only
+        # ~2-3 inter-level edges, making the hierarchy structurally disconnected.
+        # L1-L3 settled to input-invariant states (cos_sim=1.0) because signal
+        # couldn't climb or descend. 15% density gives real pathways.
+        hier_density = 0.15
         for level in range(num_levels - 1):
             lower_mods = self.level_modules[level]
             upper_mods = self.level_modules[level + 1]
@@ -171,8 +173,9 @@ class DynamicGraph:
                     idx_lower = mod_lower['indices']
                     idx_upper = mod_upper['indices']
                     n_possible = len(idx_lower) * len(idx_upper)
-                    n_connections = max(1, int(n_possible * hier_density))
-                    n_connections = min(n_connections, max(10, len(idx_lower) + len(idx_upper)))
+                    n_connections = max(5, int(n_possible * hier_density))
+                    # Let density control the count — no aggressive cap
+                    n_connections = min(n_connections, n_possible)
                     # Top-down: upper -> lower
                     src_picks = np.random.choice(idx_upper, n_connections, replace=True)
                     dst_picks = np.random.choice(idx_lower, n_connections, replace=True)
@@ -287,9 +290,12 @@ class DynamicGraph:
         )
 
         # --- Timescale Assignment (per-module, per-level) ---
-        # Level 0: fast (tau=0.1), Level 1: medium (tau=0.75),
-        # Level 2: slow (tau=5.0), Level 3: ultra-slow (tau=25.0)
-        tau_by_level = {0: 0.1, 1: 0.75, 2: 5.0, 3: 25.0}
+        # Reduced from {0.1, 0.75, 5.0, 25.0} to {0.1, 0.5, 2.0, 8.0}.
+        # With dt=0.5 and tau=25.0, each IMEX step moves L3 by only
+        # 0.02× its input signal — after 20 steps L3 integrates just 0.4×.
+        # Tau ratio 80:1 still gives meaningful timescale separation while
+        # letting L3 respond within reasonable settle step counts.
+        tau_by_level = {0: 0.1, 1: 0.5, 2: 2.0, 3: 8.0}
 
         self.taus = np.zeros(num_nodes)
         # I/O nodes: fast
