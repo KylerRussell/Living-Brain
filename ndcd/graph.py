@@ -283,11 +283,15 @@ class DynamicGraph:
         print(f"Weight magnitudes: input={np.abs(weight_vals[input_proj_mask]).mean():.4f}, "
               f"free={np.abs(weight_vals[free_mask]).mean():.4f}")
 
-        # Make bottom-up weights positive to break zero-mean cancellation.
+        # Make bottom-up weights positive with fan-in normalization.
         # With zero-mean BU weights and large fan-in (~100+ connections),
         # input-specific signal cancels out: Σ w_ij × Δs_i ≈ 0.
-        # Using abs() keeps magnitude distribution but ensures consistent
-        # sign so lower-level activity reliably excites higher levels.
+        # Plain abs() fixed zero-mean but caused L1 saturation: each L1
+        # node received total BU drive ≈ fan_in × |w| ≈ 100 × 0.06 = 6.0,
+        # far exceeding the ±1.5 state clamp. Nodes pinned at ±1.5 become
+        # input-invariant (tanh(1.5)≈0.905 regardless of input), killing
+        # hierarchical sensitivity. Fan-in normalization scales each BU
+        # weight by 1/sqrt(fan_in) so total drive ≈ sqrt(fan_in) × |w|/sqrt(fan_in) = |w| ≈ 0.06.
         node_levels = np.zeros(num_nodes, dtype=int)
         node_levels[:n_io] = 0
         for mod in self.modules:
@@ -295,9 +299,19 @@ class DynamicGraph:
         src_levels_arr = node_levels[edge_rows]
         dst_levels_arr = node_levels[edge_cols]
         bu_mask = src_levels_arr < dst_levels_arr  # lower → higher
-        weight_vals[bu_mask] = np.abs(weight_vals[bu_mask])
+
+        # Fan-in normalized positive BU weights
+        # Count how many BU edges each destination node receives
+        bu_dst_nodes = edge_cols[bu_mask]
+        unique_dst, dst_counts = np.unique(bu_dst_nodes, return_counts=True)
+        fan_in_map = dict(zip(unique_dst, dst_counts))
+
+        # Scale each BU edge by 1/sqrt(fan_in) of its destination node
+        bu_fan_in = np.array([fan_in_map.get(d, 1) for d in bu_dst_nodes], dtype=np.float32)
+        weight_vals[bu_mask] = np.abs(weight_vals[bu_mask]) / np.sqrt(bu_fan_in)
         n_bu = int(bu_mask.sum())
-        print(f"Bottom-up edges: {n_bu} made positive (abs)")
+        avg_fan_in = np.mean(list(fan_in_map.values()))
+        print(f"Bottom-up edges: {n_bu} made positive, fan-in normalized (avg fan-in={avg_fan_in:.0f})")
 
         # Build final sparse matrix
         self.weight_sparse = sp.csr_matrix(
