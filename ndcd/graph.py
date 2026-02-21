@@ -241,43 +241,50 @@ class DynamicGraph:
 
         weight_vals = np.random.normal(0, std_dev, num_edges).astype(np.float32)
 
-        # --- Scale I/O projection edges BEFORE spectral tuning ---
-        # Boost input/output projection weights so the single spectral tuning
-        # pass naturally preserves their relative strength vs recurrent edges.
-        # Previously this was done in run_sequential.py AFTER tuning, causing
-        # a second uniform re-scale that crushed all non-I/O weights to ~25%.
+        # Input nodes (0-255) are CLAMPED during settling — edges from/to
+        # them are external forcing, not autonomous recurrence. Tuning
+        # SR uniformly across all edges lets I/O edges (~60% of total)
+        # dominate the spectrum, crushing recurrent weights to ~20%.
         input_proj_mask = (edge_rows < 256) | (edge_cols < 256)
-        output_proj_mask = (
-            ((edge_rows >= 256) & (edge_rows < 512)) |
-            ((edge_cols >= 256) & (edge_cols < 512))
-        )
-        weight_vals[input_proj_mask] *= 5.0
-        weight_vals[output_proj_mask] *= 3.0
-        n_input_scaled = int(input_proj_mask.sum())
-        n_output_scaled = int(output_proj_mask.sum())
-        print(f"Scaled {n_input_scaled} input projection edges by 5x, "
-              f"{n_output_scaled} output projection edges by 3x")
+        free_mask = ~input_proj_mask
 
-        # Build sparse CSR weight matrix directly from edge lists
+        # Tune spectral radius of FREE edges only (non-input-projection)
+        free_sparse = sp.csr_matrix(
+            (weight_vals[free_mask], (edge_rows[free_mask], edge_cols[free_mask])),
+            shape=(num_nodes, num_nodes)
+        )
+
+        target_sr = 0.95
+        try:
+            from scipy.sparse.linalg import eigs as sp_eigs
+            eigvals = sp_eigs(free_sparse.astype(np.float64),
+                              k=1, which='LM', return_eigenvectors=False)
+            free_radius = np.abs(eigvals[0])
+            if free_radius > 0:
+                scale = np.float32(target_sr / free_radius)
+                weight_vals[free_mask] *= scale
+                print(f"Free-edge spectral radius tuned: {free_radius:.4f} -> {target_sr}")
+        except Exception as e:
+            print(f"Spectral tuning failed ({e}), using Frobenius fallback")
+            frob = sp.linalg.norm(free_sparse, 'fro')
+            if frob > 0:
+                weight_vals[free_mask] *= np.float32(target_sr * np.sqrt(num_nodes) / frob)
+
+        # Set input projection edges independently (5x Xavier).
+        # These are external forcing (clamped nodes), not recurrence.
+        weight_vals[input_proj_mask] *= 5.0
+
+        n_input = int(input_proj_mask.sum())
+        n_free = int(free_mask.sum())
+        print(f"Edges: {n_input} input-proj (5x, outside SR), {n_free} free (SR-tuned to {target_sr})")
+        print(f"Weight magnitudes: input={np.abs(weight_vals[input_proj_mask]).mean():.4f}, "
+              f"free={np.abs(weight_vals[free_mask]).mean():.4f}")
+
+        # Build final sparse matrix
         self.weight_sparse = sp.csr_matrix(
             (weight_vals, (edge_rows, edge_cols)),
             shape=(num_nodes, num_nodes)
         )
-
-        # Enforce Spectral Radius = 0.95 (Edge of Chaos)
-        try:
-            from scipy.sparse.linalg import eigs as sp_eigs
-            eigvals = sp_eigs(self.weight_sparse.astype(np.float64),
-                              k=1, which='LM', return_eigenvectors=False)
-            current_radius = np.abs(eigvals[0])
-            if current_radius > 0:
-                self.weight_sparse *= np.float32(0.95 / current_radius)
-                print(f"Spectral radius tuned: {current_radius:.4f} -> 0.95")
-        except Exception as e:
-            print(f"Spectral tuning via sparse eigs failed ({e}), using Frobenius norm fallback")
-            frob = sp.linalg.norm(self.weight_sparse, 'fro')
-            if frob > 0:
-                self.weight_sparse *= np.float32(0.95 * np.sqrt(num_nodes) / frob)
 
         # --- Timescale Assignment (per-module, per-level) ---
         # Level 0: fast (tau=0.1), Level 1: medium (tau=0.75),
