@@ -205,7 +205,7 @@ class SequentialTrainer:
               f"w_surface/w_mid zeroed, state reset, readout re-initialized")
 
     def train_phase(self, phase_name, data_path, iterations, steps_per_iter, lr=0.01,
-                    settle_steps=20, input_gain=2.0, warmup_steps=0):
+                    settle_steps=20, input_gain=0.5, warmup_steps=0):
         """
         Predictive Coding training loop.
 
@@ -286,7 +286,7 @@ class SequentialTrainer:
                 input_vec,
                 input_mask=input_mask,
                 max_steps=settle_steps,
-                tol=1e-3,
+                tol=5e-3,
             )
 
             # 5b. State norm control removed — the global rescaling projected
@@ -359,15 +359,10 @@ class SequentialTrainer:
 
                 if settled_ok:
                     # 8b. Update recurrent weights using local predictive coding rule
-                    self.engine.update_weights_predictive(learning_rate=effective_lr)
-
-                    # 8c. CLS: boost hippocampal synapse updates (10x), decay them faster
-                    with torch.no_grad():
-                        # Hippocampal synapses get extra surface boost
-                        hippo_boost = self.engine.w_surface[self.hippo_edge_mask] * 9.0  # 9x extra = 10x total
-                        self.engine.w_surface[self.hippo_edge_mask] += effective_lr * hippo_boost.clamp(-0.1, 0.1)
-                        # Hippocampal synapses also decay faster (more forgettable)
-                        self.engine.w_surface[self.hippo_edge_mask] *= 0.999
+                    # CLS differentiation is handled inside the engine via hippo_edge_mask
+                    self.engine.update_weights_predictive(
+                        learning_rate=effective_lr,
+                        hippo_edge_mask=self.hippo_edge_mask)
 
                 # 8d. Cascade transfer — step-count gated.
                 if step < 2000:
@@ -686,7 +681,7 @@ def main():
     # input_gain=5.0: stronger input to overcome recurrent attractor
     trainer.train_phase("Chars", "ndcd/data/level1_chars.txt",
                         iterations=500, steps_per_iter=100, lr=0.05,
-                        settle_steps=30, input_gain=1.0)
+                        settle_steps=30, input_gain=0.5)
     trainer.generate(start_text="A")
 
     # --- Phase boundary: Chars → Words ---
@@ -703,7 +698,7 @@ def main():
     # elapse — L2 barely moves. 30 steps = 15 time units, enough for L1/L2.
     trainer.train_phase("Words", "ndcd/data/level2_words.txt",
                         iterations=200, steps_per_iter=100, lr=0.05,
-                        settle_steps=30, input_gain=1.0, warmup_steps=5000)
+                        settle_steps=30, input_gain=0.5, warmup_steps=5000)
     trainer.evaluate_retention("ndcd/data/level1_chars.txt")
     trainer.generate()
 
@@ -716,7 +711,7 @@ def main():
     # and L3 to begin contributing sentence-level context.
     trainer.train_phase("Quotes", "ndcd/data/level3_quotes.txt",
                         iterations=200, steps_per_iter=200, lr=0.05,
-                        settle_steps=50, input_gain=1.0, warmup_steps=5000)
+                        settle_steps=50, input_gain=0.5, warmup_steps=5000)
     trainer.evaluate_retention("ndcd/data/level1_chars.txt")
     trainer.evaluate_retention("ndcd/data/level2_words.txt")
     trainer.generate()
@@ -728,7 +723,7 @@ def main():
     # settle_steps=50: Same as quotes — full hierarchy participation needed.
     trainer.train_phase("Literature", "ndcd/data/sherlock.txt",
                         iterations=500, steps_per_iter=500, lr=0.05,
-                        settle_steps=50, input_gain=1.0, warmup_steps=5000)
+                        settle_steps=50, input_gain=0.5, warmup_steps=5000)
     trainer.evaluate_retention("ndcd/data/level1_chars.txt")
     trainer.evaluate_retention("ndcd/data/level2_words.txt")
     trainer.evaluate_retention("ndcd/data/level3_quotes.txt")
