@@ -20,6 +20,7 @@ def jit_solve_dynamics_imex(
     module_ends: torch.Tensor,
     sparsity_alpha: float,  # 0.0 = no sparsity, 0.3 = moderate
     damping: float = 0.15,
+    implicit_damping: float = 1.2,
 ) -> Tuple[torch.Tensor, float]:
     """
     Semi-implicit (IMEX) dynamics solver for predictive coding.
@@ -42,9 +43,12 @@ def jit_solve_dynamics_imex(
 
     weights = torch.sparse_coo_tensor(indices, weight_values, (num_nodes, num_nodes))
 
-    # Pre-compute IMEX denominator: (1 + dt / tau) per node
+    # Pre-compute IMEX denominator: (1 + implicit_damping * dt / tau) per node
+    # The implicit_damping coefficient (>1.0) strengthens the implicit decay
+    # term, widening the basin of attraction against explicit overshoots
+    # from high-energy input projections.
     current_dt = dt
-    imex_denom = 1.0 + current_dt / taus
+    imex_denom = 1.0 + implicit_damping * current_dt / taus
     min_dt: float = 0.01
 
     step_count = 0
@@ -66,10 +70,13 @@ def jit_solve_dynamics_imex(
         # Semi-implicit update: treats -x/tau implicitly, rest explicitly
         current_s = ((current_s + current_dt * nonlinear / taus) / imex_denom) * (1.0 - damping)
 
-        # Homeostatic sparsity (L1 penalty) to push global density to ~10-20%
-        # sparsity_alpha is used for local within-module sparsity, but we also apply
-        # a global L1 penalty to break the dense mode-collapsed attractors.
-        current_s -= 0.01 * current_s.sign() * current_dt
+        # Homeostatic sparsity (L1 penalty) — reduced from 0.01 to 0.001.
+        # The old 0.01 coefficient was excessively punitive, driving 33% of
+        # nodes into the linear regime of tanh and suppressing distinct
+        # attractors. At 0.001, nodes can utilize the full dynamic range
+        # of tanh, pushing activations into the saturated extremes required
+        # to distinctly separate representations for different inputs.
+        current_s -= 0.001 * current_s.sign() * current_dt
 
         # State clamping: ±1.5 keeps tanh ≈ 0.91 (18% gradient headroom)
         current_s = current_s.clamp(-1.5, 1.5)
@@ -78,26 +85,27 @@ def jit_solve_dynamics_imex(
         if input_mask is not None:
             current_s = current_s * (1.0 - input_mask) + input_vector * input_mask
 
-        # FIX 3: Soft within-module lateral inhibition every 5 steps.
-        # Without this, all nodes in a module drift to similar magnitudes
-        # → dense attractor (77% active at |tanh|>0.5, Test 4A).
-        # Biological lateral inhibition: active nodes suppress less-active
-        # neighbors, creating sparse, input-dependent codes.
+        # k-Winner-Take-All (k-WTA) lateral inhibition every 5 steps.
+        # Replaces the old soft mean-field approach that was insufficient
+        # to break representational singularity (cosine similarity ~0.98).
+        # Strict k-WTA forces modules to explicitly select disparate
+        # sub-populations of active nodes for differing sensory inputs,
+        # generating the orthogonal state vectors needed to separate
+        # representations. Top 20% by magnitude win; losers are suppressed
+        # to 5% residual (not hard zero, to avoid settling oscillation).
         if sparsity_alpha > 0.0 and step_count % 5 == 4:
             for m in range(module_starts.size(0)):
                 ms = module_starts[m].item()
                 me = module_ends[m].item()
                 mod_s = current_s[ms:me]
-                mod_abs = mod_s.abs()
-                # Mean-field inhibition: subtract module mean magnitude
-                # This pushes weakly-active nodes toward zero while preserving
-                # strongly-active ones, creating competitive dynamics
-                mean_mag = mod_abs.mean()
-                inhibition = sparsity_alpha * (mod_abs - mean_mag)
-                # Nodes below mean get pushed toward zero; above mean get boosted
-                current_s[ms:me] = mod_s * (1.0 + inhibition.sign() * sparsity_alpha * 0.1)
-                # Re-clamp
-                current_s[ms:me] = current_s[ms:me].clamp(-1.5, 1.5)
+                mod_size = me - ms
+                k = max(1, mod_size // 5)  # 20% winners
+                if mod_size > k:
+                    topk_vals = torch.topk(mod_s.abs(), k).values
+                    threshold = topk_vals[-1]
+                    below = mod_s.abs() < threshold
+                    current_s[ms:me] = torch.where(below, mod_s * 0.05, mod_s)
+                    current_s[ms:me] = current_s[ms:me].clamp(-1.5, 1.5)
 
         # Convergence check
         diff = torch.norm(current_s - old_state).item()
@@ -105,7 +113,7 @@ def jit_solve_dynamics_imex(
         # Adaptive dt: halve timestep if diverging
         if diff > prev_diff and current_dt > min_dt:
             current_dt = current_dt * 0.5
-            imex_denom = 1.0 + current_dt / taus
+            imex_denom = 1.0 + implicit_damping * current_dt / taus
 
         prev_diff = diff
         step_count += 1
@@ -292,35 +300,41 @@ class PredictiveCodingEngine:
         """Effective weight is always the sum of all three cascade levels."""
         return self.w_surface + self.w_mid + self.w_deep
 
-    def cascade_transfer(self):
+    def cascade_transfer(self, include_deep=True):
         """Call once per training step after weight update.
 
         Transfers weight magnitude downward through the cascade:
-        surface → mid (fast) and mid → deep (slow).
+        surface → mid (fast) and optionally mid → deep (slow).
+
+        Magnitude-gated: transfers only occur when the source level has
+        accumulated sufficient structural magnitude (> 0.02), ensuring
+        the surface layer integrates gradients autonomously before any
+        content bleeds into deeper timescales.
+
+        Args:
+            include_deep: If False, only surface→mid transfer occurs
+                (used during early training steps 500-5000).
         """
-        # Surface → Mid (fast transfer)
-        transfer_sm = self.w_surface / self.tau_surface_to_mid
-        self.w_mid += transfer_sm
-        self.w_surface -= transfer_sm
+        # Surface → Mid: only if surface has accumulated enough
+        surface_mag = self.w_surface.abs().mean().item()
+        if surface_mag > 0.02:
+            transfer_sm = self.w_surface / self.tau_surface_to_mid
+            self.w_mid += transfer_sm
+            self.w_surface -= transfer_sm
 
-        # Mid → Deep (slow transfer)
-        transfer_md = self.w_mid / self.tau_mid_to_deep
-        self.w_deep += transfer_md
-        self.w_mid -= transfer_md
+        # Mid → Deep: only if enabled and mid has accumulated enough
+        if include_deep:
+            mid_mag = self.w_mid.abs().mean().item()
+            if mid_mag > 0.02:
+                transfer_md = self.w_mid / self.tau_mid_to_deep
+                self.w_deep += transfer_md
+                self.w_mid -= transfer_md
 
-        # FIX 1: Gentle w_deep norm control — prevent SR explosion.
-        #
-        # The old code never scaled w_deep ("it is long-term memory"),
-        # causing SR to grow 0.95 → 27.78 over 20K steps. The network
-        # becomes a fixed-point attractor that ignores input (Test 5B:
-        # L1-L3 cos_sim=1.0, Test 4B: single attractor, Test 1A: output
-        # nodes at chance).
-        #
-        # This is NOT the same as the old "scale all levels by 0.006x"
-        # that destroyed memory. This is a soft ceiling: w_deep can grow
-        # up to 2x its initial norm (to encode learned structure) but no
-        # further. The proportional scaling preserves relative weight
-        # patterns (the actual "memory") while preventing magnitude blow-up.
+        # Gentle w_deep norm control — prevent SR explosion.
+        # Soft ceiling: w_deep can grow up to 2x its initial norm
+        # (to encode learned structure) but no further. Proportional
+        # scaling preserves relative weight patterns (the actual
+        # "memory") while preventing magnitude blow-up.
         deep_frob = self.w_deep.norm().item()
         max_deep_frob = self._initial_deep_frob * 2.0
         if deep_frob > max_deep_frob:
@@ -356,7 +370,7 @@ class PredictiveCodingEngine:
         self.running_contribution.zero_()
 
     def settle(self, input_vector, max_steps=20, tol=5e-3,
-               input_mask=None, damping=0.15):
+               input_mask=None, damping=0.15, implicit_damping=1.2):
         """
         Single-phase settling using IMEX integration.
 
@@ -394,6 +408,7 @@ class PredictiveCodingEngine:
             self.mod_ends,
             self.sparsity_alpha,
             damping,
+            implicit_damping,
         )
 
         # Update short-term plasticity after settling
@@ -507,14 +522,17 @@ class PredictiveCodingEngine:
             td_rho_i = rho[idx_i[self.topdown_edge_mask]]
             grad[self.topdown_edge_mask] = td_error_j * td_rho_i
 
-            # Bottom-up edges: propagate lower-level prediction errors upward.
-            # ΔW_bu ∝ ε_lower(source) × tanh(x_higher(destination))
-            # Uses error at the source (lower-level) node, not destination,
-            # so BU weights are not penalized for higher-level prediction
-            # residuals they have no control over.
-            bu_error_i = self.spatial_errors[idx_i[self.bottomup_edge_mask]]
+            # Bottom-up edges: pure associative Oja rule (no spatial error).
+            # The spatial prediction error must be gated strictly through
+            # topdown_edge_mask. Bottom-up edges build structural feature
+            # representations via co-occurrence, not generative modeling.
+            # Using spatial error here caused destructive interference
+            # between generative (TD) and associative (BU) pathways.
+            bu_rho_i = rho[idx_i[self.bottomup_edge_mask]]
             bu_rho_j = rho[idx_j[self.bottomup_edge_mask]]
-            grad[self.bottomup_edge_mask] = bu_error_i * bu_rho_j
+            bu_w = self.effective_weights[self.bottomup_edge_mask]
+            # Pure associative Oja rule: co-occurrence with self-normalization
+            grad[self.bottomup_edge_mask] = 0.1 * (bu_rho_i * bu_rho_j - bu_w * bu_rho_j.pow(2))
 
             # FIX 4: Lateral edges — anti-Hebbian inhibitory + Oja excitatory.
             #

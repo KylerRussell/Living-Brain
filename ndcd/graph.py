@@ -257,7 +257,7 @@ class DynamicGraph:
             shape=(num_nodes, num_nodes)
         )
 
-        target_sr = 0.95
+        target_sr = 0.85
         try:
             from scipy.sparse.linalg import eigs as sp_eigs
             eigvals = sp_eigs(free_sparse.astype(np.float64),
@@ -273,13 +273,18 @@ class DynamicGraph:
             if frob > 0:
                 weight_vals[free_mask] *= np.float32(target_sr * np.sqrt(num_nodes) / frob)
 
-        # Set input projection edges independently (5x Xavier).
+        # Set input projection edges independently (2x Xavier).
         # These are external forcing (clamped nodes), not recurrence.
-        weight_vals[input_proj_mask] *= 5.0
+        # Reduced from 5.0x to 2.0x: the 5x scaling shattered the
+        # dynamical stability of the IMEX integration step, causing
+        # high-frequency limit cycles. At 2.0x with input_gain=0.5,
+        # effective drive is sufficient to overcome recurrent dynamics
+        # without destabilizing the solver.
+        weight_vals[input_proj_mask] *= 2.0
 
         n_input = int(input_proj_mask.sum())
         n_free = int(free_mask.sum())
-        print(f"Edges: {n_input} input-proj (5x, outside SR), {n_free} free (SR-tuned to {target_sr})")
+        print(f"Edges: {n_input} input-proj (2x, outside SR), {n_free} free (SR-tuned to {target_sr})")
         print(f"Weight magnitudes: input={np.abs(weight_vals[input_proj_mask]).mean():.4f}, "
               f"free={np.abs(weight_vals[free_mask]).mean():.4f}")
 
