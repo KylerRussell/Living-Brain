@@ -19,7 +19,7 @@ def jit_solve_dynamics_imex(
     module_starts: torch.Tensor,
     module_ends: torch.Tensor,
     sparsity_alpha: float,  # 0.0 = no sparsity, 0.3 = moderate
-    damping: float = 0.05,
+    damping: float = 0.15,
 ) -> Tuple[torch.Tensor, float]:
     """
     Semi-implicit (IMEX) dynamics solver for predictive coding.
@@ -236,7 +236,7 @@ class PredictiveCodingEngine:
         # Over 40K steps that accumulates ~0.08 in w_deep — far too slow for
         # meaningful consolidation. At 1000, the same w_mid transfers 2e-5/step
         # → ~0.8 over 40K steps, giving w_deep real content to preserve.
-        self.tau_surface_to_mid = 50.0    # was 100
+        self.tau_surface_to_mid = 150.0   # was 50; at 50 surface drains before accumulating
         self.tau_mid_to_deep = 1000.0     # was 10000
 
         # Metaplastic scaling: how much accumulated deep weight
@@ -273,7 +273,7 @@ class PredictiveCodingEngine:
         self.topdown_pred_var = 0.0
 
         # FIX 3: Sparsity parameter (controllable from trainer)
-        self.sparsity_alpha = 0.3
+        self.sparsity_alpha = 0.05
 
     def _build_module_tensors(self):
         """Pre-build tensors for module start/end ranges for fast slicing."""
@@ -355,8 +355,8 @@ class PredictiveCodingEngine:
         # Reset accumulator
         self.running_contribution.zero_()
 
-    def settle(self, input_vector, max_steps=20, tol=1e-3,
-               input_mask=None, damping=0.05):
+    def settle(self, input_vector, max_steps=20, tol=5e-3,
+               input_mask=None, damping=0.15):
         """
         Single-phase settling using IMEX integration.
 
@@ -478,7 +478,7 @@ class PredictiveCodingEngine:
 
         return total_energy
 
-    def update_weights_predictive(self, learning_rate=0.01):
+    def update_weights_predictive(self, learning_rate=0.01, hippo_edge_mask=None):
         """
         Local Hebbian weight update based on prediction errors.
 
@@ -507,13 +507,14 @@ class PredictiveCodingEngine:
             td_rho_i = rho[idx_i[self.topdown_edge_mask]]
             grad[self.topdown_edge_mask] = td_error_j * td_rho_i
 
-            # Bottom-up edges: learn to propagate prediction errors upward.
-            # Without this, BU weights stay at random init and higher levels
-            # never receive structured input from lower levels.
-            # ΔW_bu ∝ ε_higher × tanh(x_lower)
-            bu_error_j = self.spatial_errors[idx_j[self.bottomup_edge_mask]]
-            bu_rho_i = rho[idx_i[self.bottomup_edge_mask]]
-            grad[self.bottomup_edge_mask] = bu_error_j * bu_rho_i
+            # Bottom-up edges: propagate lower-level prediction errors upward.
+            # ΔW_bu ∝ ε_lower(source) × tanh(x_higher(destination))
+            # Uses error at the source (lower-level) node, not destination,
+            # so BU weights are not penalized for higher-level prediction
+            # residuals they have no control over.
+            bu_error_i = self.spatial_errors[idx_i[self.bottomup_edge_mask]]
+            bu_rho_j = rho[idx_j[self.bottomup_edge_mask]]
+            grad[self.bottomup_edge_mask] = bu_error_i * bu_rho_j
 
             # FIX 4: Lateral edges — anti-Hebbian inhibitory + Oja excitatory.
             #
@@ -563,6 +564,12 @@ class PredictiveCodingEngine:
             importance = self.omega
             meta_lr = learning_rate / (1.0 + self.meta_scale * consolidation + 0.1 * importance)
 
+            # CLS: hippocampal synapses get 10x learning rate for rapid
+            # acquisition of episodic patterns, restoring the intended
+            # biological asymmetry of the Complementary Learning System.
+            if hippo_edge_mask is not None:
+                meta_lr = meta_lr * (1.0 + hippo_edge_mask.float() * 9.0)
+
             # Apply update only to surface level
             self.w_surface += meta_lr * grad
             # Keep total effective weight in bounds.
@@ -591,10 +598,10 @@ class PredictiveCodingEngine:
                 spectral_radius = norm_v.item()
                 if spectral_radius > 0.99:
                     # Top down exponential decay to constrain radius bounds
+                    # w_deep is shielded — preserve spectrally-tuned structure
                     decay_factor = 0.95 / spectral_radius
                     self.w_surface *= decay_factor
                     self.w_mid *= decay_factor
-                    self.w_deep *= decay_factor
                     
             # Then, apply per-destination-node effective weight norm control.
             #
@@ -639,10 +646,11 @@ class PredictiveCodingEngine:
             )
             weight_scale = scale_per_dst[inverse_dst]
 
-            # Apply to ALL cascade levels proportionally (preserves structure)
+            # Apply to transient cascade levels only; w_deep is shielded
+            # from per-step RMS normalization (cascade_transfer enforces
+            # a soft 2x norm ceiling on w_deep separately)
             self.w_surface *= weight_scale
             self.w_mid *= weight_scale
-            self.w_deep *= weight_scale
 
             # --- Top-down weight diversity regularization ---
             # (Kept from original — prevents mode collapse)
