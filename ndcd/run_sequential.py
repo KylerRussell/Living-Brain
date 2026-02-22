@@ -282,11 +282,15 @@ class SequentialTrainer:
                 self.engine.state[fast_mask] *= 0.1
 
             # 5. Single-phase settle (IMEX)
+            # Dynamic tolerance: relax to 1e-2 during the first 2000 steps
+            # of each phase, preventing the solver from fruitlessly exhausting
+            # max_steps during transient reorganization after phase boundaries.
+            settle_tol = 1e-2 if step < 2000 else 5e-3
             self.engine.settle(
                 input_vec,
                 input_mask=input_mask,
                 max_steps=settle_steps,
-                tol=5e-3,
+                tol=settle_tol,
             )
 
             # 5b. State norm control removed — the global rescaling projected
@@ -364,17 +368,19 @@ class SequentialTrainer:
                         learning_rate=effective_lr,
                         hippo_edge_mask=self.hippo_edge_mask)
 
-                # 8d. Cascade transfer — step-count gated.
-                if step < 2000:
+                # 8d. Cascade transfer — step-count + magnitude gated.
+                # Surface must integrate gradients autonomously for at least
+                # 500 steps before any magnitude bleeds into mid-layer.
+                # Magnitude gating (>0.02 threshold) is handled inside
+                # cascade_transfer() to ensure w_surface accumulates a
+                # substantial structural representation before transfer.
+                if step < 500:
                     pass  # No transfer — let surface accumulate first
                 elif step < 5000:
-                    # Surface→mid only
-                    with torch.no_grad():
-                        transfer_sm = self.engine.w_surface / self.engine.tau_surface_to_mid
-                        self.engine.w_mid += transfer_sm
-                        self.engine.w_surface -= transfer_sm
+                    # Surface→mid only (magnitude-gated inside)
+                    self.engine.cascade_transfer(include_deep=False)
                 else:
-                    # Full cascade
+                    # Full cascade (magnitude-gated inside)
                     self.engine.cascade_transfer()
 
                 # 8e. Synaptic intelligence tracking
