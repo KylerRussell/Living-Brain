@@ -138,7 +138,7 @@ class ModelDiagnostics:
 
             # Settle
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[0:256] = self.trainer.eye[input_byte] * 5.0
+            input_vec[0:256] = self.trainer.eye[input_byte] * 1.0
             input_mask = torch.zeros(self.num_nodes, device=self.device)
             input_mask[list(range(256))] = 1.0
             self.engine.settle(input_vec, input_mask=input_mask, max_steps=50)
@@ -151,7 +151,7 @@ class ModelDiagnostics:
 
             # Readout prediction
             level0_acts = torch.tanh(self.engine.state[self.trainer.level0_indices])
-            features = torch.cat([level0_acts, self.trainer.eye[input_byte]])
+            features = level0_acts
             logits = self.trainer.readout_W @ features + self.trainer.readout_b
             probs = torch.softmax(logits, dim=0)
             if torch.argmax(probs).item() == target_byte:
@@ -400,7 +400,7 @@ class ModelDiagnostics:
             target_byte = data[idx + 1]
 
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[0:256] = self.trainer.eye[input_byte] * 5.0
+            input_vec[0:256] = self.trainer.eye[input_byte] * 1.0
             input_mask = torch.zeros(self.num_nodes, device=self.device)
             input_mask[list(range(256))] = 1.0
 
@@ -691,7 +691,7 @@ class ModelDiagnostics:
         for b in test_bytes:
             self.engine.state.zero_()
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[0:256] = self.trainer.eye[b] * 5.0
+            input_vec[0:256] = self.trainer.eye[b] * 1.0
             input_mask = torch.zeros(self.num_nodes, device=self.device)
             input_mask[list(range(256))] = 1.0
             self.engine.settle(input_vec, input_mask=input_mask, max_steps=50)
@@ -910,7 +910,7 @@ class ModelDiagnostics:
 
         # Get feature dimensions
         n_reservoir = len(self.trainer.level0_indices)
-        n_features = n_reservoir + 256
+        n_features = n_reservoir
 
         # Initialize temporary readout
         tmp_W = torch.randn(256, n_features, device=self.device) * (1.0 / np.sqrt(n_features))
@@ -924,14 +924,14 @@ class ModelDiagnostics:
             target_byte = data[idx + 1]
 
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[0:256] = self.trainer.eye[input_byte] * 5.0
+            input_vec[0:256] = self.trainer.eye[input_byte] * 1.0
             input_mask = torch.zeros(self.num_nodes, device=self.device)
             input_mask[list(range(256))] = 1.0
             self.engine.settle(input_vec, input_mask=input_mask, max_steps=50)
 
             with torch.no_grad():
                 level0_acts = torch.tanh(self.engine.state[self.trainer.level0_indices])
-                features = torch.cat([level0_acts, self.trainer.eye[input_byte]])
+                features = level0_acts
                 logits = tmp_W @ features + tmp_b
                 probs = torch.softmax(logits, dim=0)
                 target_one_hot = self.trainer.eye[target_byte]
@@ -948,14 +948,14 @@ class ModelDiagnostics:
             target_byte = data[idx + 1]
 
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[0:256] = self.trainer.eye[input_byte] * 5.0
+            input_vec[0:256] = self.trainer.eye[input_byte] * 1.0
             input_mask = torch.zeros(self.num_nodes, device=self.device)
             input_mask[list(range(256))] = 1.0
             self.engine.settle(input_vec, input_mask=input_mask, max_steps=50)
 
             with torch.no_grad():
                 level0_acts = torch.tanh(self.engine.state[self.trainer.level0_indices])
-                features = torch.cat([level0_acts, self.trainer.eye[input_byte]])
+                features = level0_acts
 
                 # Re-trained readout
                 logits_new = tmp_W @ features + tmp_b
@@ -1089,7 +1089,7 @@ class ModelDiagnostics:
             self.engine.state.zero_()
 
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[0:256] = self.trainer.eye[input_byte] * 5.0
+            input_vec[0:256] = self.trainer.eye[input_byte] * 1.0
             input_mask = torch.zeros(self.num_nodes, device=self.device)
             input_mask[list(range(256))] = 1.0
 

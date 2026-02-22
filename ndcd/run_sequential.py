@@ -95,10 +95,10 @@ class SequentialTrainer:
             self.level0_indices.extend(range(s, e))
         self.level0_indices = torch.tensor(self.level0_indices, dtype=torch.long, device=device)
         n_reservoir = len(self.level0_indices)
-        n_readout = n_reservoir + 256  # reservoir state + raw input one-hot
+        n_readout = n_reservoir  # reservoir state only
         self.readout_W = torch.randn(256, n_readout, device=device) * (1.0 / np.sqrt(n_readout))
         self.readout_b = torch.zeros(256, device=device)
-        print(f"Linear readout: {n_reservoir} level-0 + 256 input = {n_readout} features → 256 classes")
+        print(f"Linear readout: {n_reservoir} level-0 = {n_readout} features → 256 classes")
 
         # --- Complementary Learning Systems setup ---
         # Store module classification and connectivity on engine for access during training
@@ -197,7 +197,7 @@ class SequentialTrainer:
             self.engine.running_contribution.zero_()
 
             # Re-initialize readout from scratch for the new task
-            n_readout = len(self.level0_indices) + 256
+            n_readout = len(self.level0_indices)
             self.readout_W = torch.randn(256, n_readout, device=self.device) * (1.0 / np.sqrt(n_readout))
             self.readout_b.zero_()
 
@@ -314,7 +314,7 @@ class SequentialTrainer:
             # reservoir representations are degenerate.
             with torch.no_grad():
                 level0_acts = torch.tanh(self.engine.state[self.level0_indices])
-                features = torch.cat([level0_acts, self.eye[input_byte]])
+                features = level0_acts
                 logits = self.readout_W @ features + self.readout_b
                 probs = torch.softmax(logits, dim=0)
                 pred_idx = torch.argmax(probs).item()
@@ -508,9 +508,16 @@ class SequentialTrainer:
         # Save current state
         awake_state = self.engine.state.clone()
 
+        # Identify Level 3 nodes for targeted perturbation
+        level3_mask = self.engine.node_to_level == 3
+
         for cycle in range(num_replay_cycles):
             # 1. Initialize with low-amplitude noise biased toward recent activity
             noise = torch.randn(self.num_nodes, device=self.device) * 0.1
+            
+            # Add targeted high-variance perturbation to Level 3 nodes to break mode collapse
+            noise[level3_mask] = torch.randn(level3_mask.sum(), device=self.device) * 0.5
+            
             replay_init = awake_state * 0.05 + noise
             self.engine.state = replay_init
 
@@ -600,7 +607,7 @@ class SequentialTrainer:
             self.engine.settle(input_vec, input_mask=input_mask, max_steps=10)
 
             level0_acts = torch.tanh(self.engine.state[self.level0_indices])
-            features = torch.cat([level0_acts, self.eye[input_byte]])
+            features = level0_acts
             logits = self.readout_W @ features + self.readout_b
             probs = torch.softmax(logits, dim=0)
             pred_idx = torch.argmax(probs).item()
@@ -635,7 +642,7 @@ class SequentialTrainer:
 
         for _ in range(length):
             level0_acts = torch.tanh(self.engine.state[self.level0_indices])
-            features = torch.cat([level0_acts, self.eye[last_byte]])
+            features = level0_acts
             logits = self.readout_W @ features + self.readout_b
             probs = torch.softmax(logits, dim=0)
 
@@ -679,7 +686,7 @@ def main():
     # input_gain=5.0: stronger input to overcome recurrent attractor
     trainer.train_phase("Chars", "ndcd/data/level1_chars.txt",
                         iterations=500, steps_per_iter=100, lr=0.05,
-                        settle_steps=30, input_gain=5.0)
+                        settle_steps=30, input_gain=1.0)
     trainer.generate(start_text="A")
 
     # --- Phase boundary: Chars → Words ---
@@ -696,7 +703,7 @@ def main():
     # elapse — L2 barely moves. 30 steps = 15 time units, enough for L1/L2.
     trainer.train_phase("Words", "ndcd/data/level2_words.txt",
                         iterations=200, steps_per_iter=100, lr=0.05,
-                        settle_steps=30, input_gain=5.0, warmup_steps=5000)
+                        settle_steps=30, input_gain=1.0, warmup_steps=5000)
     trainer.evaluate_retention("ndcd/data/level1_chars.txt")
     trainer.generate()
 
@@ -709,7 +716,7 @@ def main():
     # and L3 to begin contributing sentence-level context.
     trainer.train_phase("Quotes", "ndcd/data/level3_quotes.txt",
                         iterations=200, steps_per_iter=200, lr=0.05,
-                        settle_steps=50, input_gain=5.0, warmup_steps=5000)
+                        settle_steps=50, input_gain=1.0, warmup_steps=5000)
     trainer.evaluate_retention("ndcd/data/level1_chars.txt")
     trainer.evaluate_retention("ndcd/data/level2_words.txt")
     trainer.generate()
@@ -721,7 +728,7 @@ def main():
     # settle_steps=50: Same as quotes — full hierarchy participation needed.
     trainer.train_phase("Literature", "ndcd/data/sherlock.txt",
                         iterations=500, steps_per_iter=500, lr=0.05,
-                        settle_steps=50, input_gain=5.0, warmup_steps=5000)
+                        settle_steps=50, input_gain=1.0, warmup_steps=5000)
     trainer.evaluate_retention("ndcd/data/level1_chars.txt")
     trainer.evaluate_retention("ndcd/data/level2_words.txt")
     trainer.evaluate_retention("ndcd/data/level3_quotes.txt")

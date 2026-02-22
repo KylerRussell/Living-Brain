@@ -19,6 +19,7 @@ def jit_solve_dynamics_imex(
     module_starts: torch.Tensor,
     module_ends: torch.Tensor,
     sparsity_alpha: float,  # 0.0 = no sparsity, 0.3 = moderate
+    damping: float = 0.05,
 ) -> Tuple[torch.Tensor, float]:
     """
     Semi-implicit (IMEX) dynamics solver for predictive coding.
@@ -63,7 +64,12 @@ def jit_solve_dynamics_imex(
         nonlinear = synaptic + biases + input_vector
 
         # Semi-implicit update: treats -x/tau implicitly, rest explicitly
-        current_s = (current_s + current_dt * nonlinear / taus) / imex_denom
+        current_s = ((current_s + current_dt * nonlinear / taus) / imex_denom) * (1.0 - damping)
+
+        # Homeostatic sparsity (L1 penalty) to push global density to ~10-20%
+        # sparsity_alpha is used for local within-module sparsity, but we also apply
+        # a global L1 penalty to break the dense mode-collapsed attractors.
+        current_s -= 0.01 * current_s.sign() * current_dt
 
         # State clamping: ±1.5 keeps tanh ≈ 0.91 (18% gradient headroom)
         current_s = current_s.clamp(-1.5, 1.5)
@@ -350,7 +356,7 @@ class PredictiveCodingEngine:
         self.running_contribution.zero_()
 
     def settle(self, input_vector, max_steps=20, tol=1e-3,
-               input_mask=None):
+               input_mask=None, damping=0.05):
         """
         Single-phase settling using IMEX integration.
 
@@ -387,6 +393,7 @@ class PredictiveCodingEngine:
             self.mod_starts,
             self.mod_ends,
             self.sparsity_alpha,
+            damping,
         )
 
         # Update short-term plasticity after settling
@@ -426,8 +433,16 @@ class PredictiveCodingEngine:
         # Top-down prediction: what higher levels predict for lower levels
         topdown_pred = torch.mv(td_sparse, rho)
 
-        # Spatial error = actual state - top-down prediction
-        self.spatial_errors = self.state - topdown_pred
+        if getattr(self, 'temporal_variance_ema', None) is None:
+            self.temporal_variance_ema = torch.ones(self.num_nodes, device=self.device)
+        else:
+            # Emulate variance over time
+            self.temporal_variance_ema = 0.99 * self.temporal_variance_ema + 0.01 * (rho - rho.mean()).pow(2)
+            
+        precision = 1.0 / (1.0 + self.temporal_variance_ema)
+        
+        # Spatial error = actual state - precision-weighted top-down prediction
+        self.spatial_errors = self.state - precision * topdown_pred
 
         # Store top-down prediction variance for diagnostics
         self.topdown_pred_var = topdown_pred[512:].var().item()
@@ -557,7 +572,31 @@ class PredictiveCodingEngine:
             # immediately clipped — the reservoir was physically unable to
             # change. The ±1.5 state clamp in IMEX prevents activation
             # saturation regardless of weight magnitude.
-            # FIX 2: Per-destination-node effective weight norm control.
+            # FIX 2: Per-destination-node effective weight norm control + Spectral Norm.
+            #
+            # First, run continuous spectral bounding using Power Iteration.
+            if not hasattr(self, '_pi_v'):
+                self._pi_v = torch.randn(self.num_nodes, device=self.device)
+                self._pi_v[:512] = 0.0  # Zero out I/O nodes
+                self._pi_v /= (torch.norm(self._pi_v) + 1e-8)
+                
+            eff_weights = self.effective_weights
+            W_sparse = torch.sparse_coo_tensor(self.indices, eff_weights, (self.num_nodes, self.num_nodes))
+            v_next = torch.mv(W_sparse, self._pi_v)
+            v_next[:512] = 0.0  # Limit to recurrent subgraph
+            
+            norm_v = torch.norm(v_next)
+            if norm_v > 1e-6:
+                self._pi_v = v_next / norm_v
+                spectral_radius = norm_v.item()
+                if spectral_radius > 0.99:
+                    # Top down exponential decay to constrain radius bounds
+                    decay_factor = 0.95 / spectral_radius
+                    self.w_surface *= decay_factor
+                    self.w_mid *= decay_factor
+                    self.w_deep *= decay_factor
+                    
+            # Then, apply per-destination-node effective weight norm control.
             #
             # Replaces the old approach of:
             # a) Frobenius norm on transient only (w_deep exempt → SR explosion)
@@ -609,7 +648,7 @@ class PredictiveCodingEngine:
             # (Kept from original — prevents mode collapse)
             td_idx = torch.where(self.topdown_edge_mask)[0]
             td_src = self.topdown_indices[0]
-            td_vals = self.w_deep[td_idx]
+            td_vals = self.w_surface[td_idx]
 
             unique_src, inverse = torch.unique(td_src, return_inverse=True)
             src_sums = torch.zeros(len(unique_src), device=self.device)
@@ -619,7 +658,7 @@ class PredictiveCodingEngine:
             src_means = src_sums / src_counts.clamp(min=1)
 
             correction = src_means[inverse] * 0.01
-            self.w_deep[td_idx] -= correction
+            self.w_surface[td_idx] -= correction
 
             # --- Bias update from prediction errors ---
             # Biases absorb mean prediction errors

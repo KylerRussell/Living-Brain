@@ -283,35 +283,29 @@ class DynamicGraph:
         print(f"Weight magnitudes: input={np.abs(weight_vals[input_proj_mask]).mean():.4f}, "
               f"free={np.abs(weight_vals[free_mask]).mean():.4f}")
 
-        # Make bottom-up weights positive with fan-in normalization.
-        # With zero-mean BU weights and large fan-in (~100+ connections),
-        # input-specific signal cancels out: Σ w_ij × Δs_i ≈ 0.
-        # Plain abs() fixed zero-mean but caused L1 saturation: each L1
-        # node received total BU drive ≈ fan_in × |w| ≈ 100 × 0.06 = 6.0,
-        # far exceeding the ±1.5 state clamp. Nodes pinned at ±1.5 become
-        # input-invariant (tanh(1.5)≈0.905 regardless of input), killing
-        # hierarchical sensitivity. Fan-in normalization scales each BU
-        # weight by 1/sqrt(fan_in) so total drive ≈ sqrt(fan_in) × |w|/sqrt(fan_in) = |w| ≈ 0.06.
+        # Balance Hierarchies: Shift fan-in normalization to Level 0 lateral connections.
         node_levels = np.zeros(num_nodes, dtype=int)
         node_levels[:n_io] = 0
         for mod in self.modules:
             node_levels[mod['start']:mod['end']] = mod['level']
         src_levels_arr = node_levels[edge_rows]
         dst_levels_arr = node_levels[edge_cols]
-        bu_mask = src_levels_arr < dst_levels_arr  # lower → higher
+        
+        # Lateral Level 0 edges (excluding I/O nodes mapping)
+        lat_l0_mask = (src_levels_arr == dst_levels_arr) & (src_levels_arr == 0) & (edge_rows >= n_io) & (edge_cols >= n_io)
 
-        # Fan-in normalized positive BU weights
-        # Count how many BU edges each destination node receives
-        bu_dst_nodes = edge_cols[bu_mask]
-        unique_dst, dst_counts = np.unique(bu_dst_nodes, return_counts=True)
+        # Fan-in normalized Level-0 lateral weights to prevent input-saturation cascade
+        lat_dst_nodes = edge_cols[lat_l0_mask]
+        unique_dst, dst_counts = np.unique(lat_dst_nodes, return_counts=True)
         fan_in_map = dict(zip(unique_dst, dst_counts))
 
-        # Scale each BU edge by 1/sqrt(fan_in) of its destination node
-        bu_fan_in = np.array([fan_in_map.get(d, 1) for d in bu_dst_nodes], dtype=np.float32)
-        weight_vals[bu_mask] = np.abs(weight_vals[bu_mask]) / np.sqrt(bu_fan_in)
-        n_bu = int(bu_mask.sum())
-        avg_fan_in = np.mean(list(fan_in_map.values()))
-        print(f"Bottom-up edges: {n_bu} made positive, fan-in normalized (avg fan-in={avg_fan_in:.0f})")
+        lat_fan_in = np.array([fan_in_map.get(d, 1) for d in lat_dst_nodes], dtype=np.float32)
+        weight_vals[lat_l0_mask] = np.abs(weight_vals[lat_l0_mask]) / np.sqrt(lat_fan_in)
+        
+        n_lat = int(lat_l0_mask.sum())
+        if len(fan_in_map) > 0:
+            avg_fan_in = np.mean(list(fan_in_map.values()))
+            print(f"Level 0 lateral edges: {n_lat} made positive, fan-in normalized (avg fan-in={avg_fan_in:.0f})")
 
         # Build final sparse matrix
         self.weight_sparse = sp.csr_matrix(
