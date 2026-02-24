@@ -49,7 +49,7 @@ def jit_solve_dynamics_imex(
     # from high-energy input projections.
     current_dt = dt
     imex_denom = 1.0 + implicit_damping * current_dt / taus
-    min_dt: float = 0.01
+    min_dt: float = 0.05
 
     step_count = 0
     diff = tol + 1.0  # Ensure at least one step
@@ -109,6 +109,10 @@ def jit_solve_dynamics_imex(
 
         # Convergence check
         diff = torch.norm(current_s - old_state).item()
+
+        # Relax tolerance slightly during internal steps to avoid infinite halving deadlocks
+        if diff <= tol * 1.5:
+            break
 
         # Adaptive dt: halve timestep if diverging
         if diff > prev_diff and current_dt > min_dt:
@@ -244,8 +248,8 @@ class PredictiveCodingEngine:
         # Over 40K steps that accumulates ~0.08 in w_deep — far too slow for
         # meaningful consolidation. At 1000, the same w_mid transfers 2e-5/step
         # → ~0.8 over 40K steps, giving w_deep real content to preserve.
-        self.tau_surface_to_mid = 150.0   # was 50; at 50 surface drains before accumulating
-        self.tau_mid_to_deep = 1000.0     # was 10000
+        self.tau_surface_to_mid = 500.0   # was 150.0
+        self.tau_mid_to_deep = 2000.0     # was 1000.0
 
         # Metaplastic scaling: how much accumulated deep weight
         # reduces surface learning rate. Reduced from 1.0 to 0.1 because
@@ -262,7 +266,8 @@ class PredictiveCodingEngine:
 
         # --- Synaptic intelligence (Zenke et al., 2017) ---
         self.omega = torch.zeros_like(self.weight_values)       # accumulated importance
-        self.prev_weights = self.effective_weights.clone()       # for computing Δw
+        self.prev_weights = self.effective_weights.clone()       # for computing Δw per step
+        self.si_baseline_weights = self.effective_weights.clone() # for computing total Δw over epoch
         self.running_contribution = torch.zeros_like(self.weight_values)  # path integral
         self.si_damping = 0.1  # prevents omega from growing unboundedly
 
@@ -359,15 +364,20 @@ class PredictiveCodingEngine:
 
         Transfers running contribution to permanent importance (omega).
         """
-        delta_w_total = self.effective_weights - self.prev_weights
+        # delta_w_total MUST be relative to the start of the consolidation epoch,
+        # otherwise we are dividing 10K steps of accumulated contribution by
+        # the tiny delta_w of a single step, which explodes omega near infinity.
+        delta_w_total = self.effective_weights - self.si_baseline_weights
+        
         # Normalize by total weight change to get per-unit importance
         self.omega += torch.relu(self.running_contribution) / (delta_w_total.pow(2) + 1e-6)
 
         # Decay old importance slowly to allow forgetting truly obsolete knowledge
         self.omega *= (1.0 - self.si_damping)
 
-        # Reset accumulator
+        # Reset accumulator and baseline
         self.running_contribution.zero_()
+        self.si_baseline_weights = self.effective_weights.clone()
 
     def settle(self, input_vector, max_steps=20, tol=5e-3,
                input_mask=None, damping=0.15, implicit_damping=1.2):
@@ -442,7 +452,7 @@ class PredictiveCodingEngine:
                    self.facilitation[self.topdown_edge_mask] *
                    self.depression[self.topdown_edge_mask])
         td_sparse = torch.sparse_coo_tensor(
-            self.topdown_indices, td_vals,
+            self.topdown_indices.flip(0), td_vals,
             (self.num_nodes, self.num_nodes))
 
         # Top-down prediction: what higher levels predict for lower levels
@@ -451,10 +461,13 @@ class PredictiveCodingEngine:
         if getattr(self, 'temporal_variance_ema', None) is None:
             self.temporal_variance_ema = torch.ones(self.num_nodes, device=self.device)
         else:
-            # Emulate variance over time
-            self.temporal_variance_ema = 0.99 * self.temporal_variance_ema + 0.01 * (rho - rho.mean()).pow(2)
+            # Bound variation so EMA isn't wildly inflating temporal precision
+            var_change = (rho - rho.mean()).pow(2).clamp(0, 5.0)
+            self.temporal_variance_ema = 0.99 * self.temporal_variance_ema + 0.01 * var_change
             
-        precision = 1.0 / (1.0 + self.temporal_variance_ema)
+        # FIX: Drop precision weighting. The EMA was inflating prediction variance
+        # and suppressing top-down gradients to near zero.
+        precision = 1.0
         
         # Spatial error = actual state - precision-weighted top-down prediction
         self.spatial_errors = self.state - precision * topdown_pred
@@ -558,11 +571,16 @@ class PredictiveCodingEngine:
             for mod_idx, (start, end) in enumerate(self.module_ranges):
                 module_mean_act[mod_idx] = rho[start:end].abs().mean()
 
-            # Map each lateral edge to its source module's mean activity
+            # Retrieve mapped module levels from index mapping directly via node_to_module
+            # rather than nested loops, fixing gradient leak.
             lat_src_mod = torch.zeros(lat_i.size(0), dtype=torch.long, device=self.device)
-            for mod_idx, (start, end) in enumerate(self.module_ranges):
-                mask = (lat_i >= start) & (lat_i < end)
-                lat_src_mod[mask] = mod_idx
+            if hasattr(self, 'node_to_module'):
+                lat_src_mod = self.node_to_module[lat_i]
+            else:
+                for mod_idx, (start, end) in enumerate(self.module_ranges):
+                    mask = (lat_i >= start) & (lat_i < end)
+                    lat_src_mod[mask] = mod_idx
+
             mod_act = module_mean_act[lat_src_mod]
 
             # Inhibition strength increases with module mean activity.
@@ -590,66 +608,25 @@ class PredictiveCodingEngine:
 
             # Apply update only to surface level
             self.w_surface += meta_lr * grad
-            # Keep total effective weight in bounds.
-            # ±3.0 gives 3.0 - 0.93 = 2.07 headroom for surface weights.
-            # The old ±1.0 clamp left only 0.07 headroom (w_deep=0.83 +
-            # w_mid=0.10 = 0.93), causing every surface update to be
-            # immediately clipped — the reservoir was physically unable to
-            # change. The ±1.5 state clamp in IMEX prevents activation
-            # saturation regardless of weight magnitude.
-            # FIX 2: Per-destination-node effective weight norm control + Spectral Norm.
-            #
-            # First, run continuous spectral bounding using Power Iteration.
-            if not hasattr(self, '_pi_v'):
-                self._pi_v = torch.randn(self.num_nodes, device=self.device)
-                self._pi_v[:512] = 0.0  # Zero out I/O nodes
-                self._pi_v /= (torch.norm(self._pi_v) + 1e-8)
-                
-            eff_weights = self.effective_weights
-            W_sparse = torch.sparse_coo_tensor(self.indices, eff_weights, (self.num_nodes, self.num_nodes))
-            v_next = torch.mv(W_sparse, self._pi_v)
-            v_next[:512] = 0.0  # Limit to recurrent subgraph
-            
-            norm_v = torch.norm(v_next)
-            if norm_v > 1e-6:
-                self._pi_v = v_next / norm_v
-                spectral_radius = norm_v.item()
-                if spectral_radius > 0.99:
-                    # Top down exponential decay to constrain radius bounds
-                    # w_deep is shielded — preserve spectrally-tuned structure
-                    decay_factor = 0.95 / spectral_radius
-                    self.w_surface *= decay_factor
-                    self.w_mid *= decay_factor
-                    
-            # Then, apply per-destination-node effective weight norm control.
-            #
-            # Replaces the old approach of:
-            # a) Frobenius norm on transient only (w_deep exempt → SR explosion)
-            # b) Separate TD and BU norm constraints (didn't catch lateral growth)
-            #
-            # This single constraint bounds the total incoming effective weight
-            # RMS for EVERY destination node across ALL edge types. It directly
-            # controls what matters: per-node input magnitude, which determines
-            # whether the network is input-driven or attractor-dominated.
-            #
-            # The cascade structure is preserved: we scale all three levels
-            # proportionally, so the relative importance ordering (deep > mid >
-            # surface) is maintained. w_deep IS scaled here, but only when
-            # a specific node's incoming weights are over threshold — not
-            # globally. This is much gentler than the old global SR rescaling
-            # that multiplied everything by 0.006x.
-            effective = self.effective_weights
-            effective.clamp_(-3.0, 3.0)
-            self.w_surface = effective - self.w_mid - self.w_deep
 
-            dst_nodes = self.indices[1]
-            unique_dst, inverse_dst = torch.unique(dst_nodes, return_inverse=True)
+            # Then, apply per-destination-node effective weight norm control.
+            # We ONLY apply this to recurrent (free) edges. Input projection
+            # edges (source < 512) are clamped separately and shouldn't
+            # trigger massive decay on recurrent edges.
+            free_mask = self.indices[0] >= 512
+            
+            effective_free = self.effective_weights[free_mask]
+            effective_free.clamp_(-3.0, 3.0)
+            self.w_surface[free_mask] = effective_free - self.w_mid[free_mask] - self.w_deep[free_mask]
+
+            dst_nodes_free = self.indices[1][free_mask]
+            unique_dst, inverse_dst = torch.unique(dst_nodes_free, return_inverse=True)
             n_unique = len(unique_dst)
 
             dst_sq_sums = torch.zeros(n_unique, device=self.device)
             dst_counts = torch.zeros(n_unique, device=self.device)
-            dst_sq_sums.scatter_add_(0, inverse_dst, effective.pow(2))
-            dst_counts.scatter_add_(0, inverse_dst, torch.ones_like(effective))
+            dst_sq_sums.scatter_add_(0, inverse_dst, effective_free.pow(2))
+            dst_counts.scatter_add_(0, inverse_dst, torch.ones_like(effective_free))
             dst_rms = torch.sqrt(dst_sq_sums / dst_counts.clamp(min=1))
 
             # Target RMS per destination node.
@@ -665,10 +642,8 @@ class PredictiveCodingEngine:
             weight_scale = scale_per_dst[inverse_dst]
 
             # Apply to transient cascade levels only; w_deep is shielded
-            # from per-step RMS normalization (cascade_transfer enforces
-            # a soft 2x norm ceiling on w_deep separately)
-            self.w_surface *= weight_scale
-            self.w_mid *= weight_scale
+            self.w_surface[free_mask] *= weight_scale
+            self.w_mid[free_mask] *= weight_scale
 
             # --- Top-down weight diversity regularization ---
             # (Kept from original — prevents mode collapse)
@@ -696,12 +671,16 @@ class PredictiveCodingEngine:
             # ΔA_ℓ ∝ lr * ε_temporal * x_prev (diagonal approximation)
             for mod_idx, (start, end) in enumerate(self.module_ranges):
                 t_error = self.temporal_errors[start:end]
-                prev = self.previous_state[start:end]
+                prev = torch.tanh(self.previous_state[start:end])
 
-                delta_a = learning_rate * t_error * prev
-                delta_a = delta_a.clamp(-0.1, 0.1)
-                self.temporal_A[mod_idx] += delta_a
-                # Keep A values reasonable
+                # ΔA_ℓ ∝ lr * ε_temporal * x_prev
+                # FIX: Boost temporal learning rate. The old 0.1x multiplier 
+                # combined with tiny t_error meant Temporal A never deviated
+                # from its initialization of 0.9.
+                a_mod = learning_rate * 5.0 * t_error * prev
+                # Bound update delta
+                self.temporal_A[mod_idx] += a_mod.clamp(-0.05, 0.05)
+                # Bound A diagonal to stop exponential explosion
                 self.temporal_A[mod_idx].clamp_(-1.5, 1.5)
 
     def store_previous_state(self):

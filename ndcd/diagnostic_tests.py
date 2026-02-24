@@ -184,7 +184,10 @@ class ModelDiagnostics:
         output_acc = r.get("output_acc", 0)
         readout_acc = r.get("readout_acc", 0)
         chance = r.get("chance", 1 / 256)
-        if output_acc > chance * 3 and output_acc > readout_acc * 0.3:
+        
+        if readout_acc > 0.8 and output_acc < chance * 5:
+            return "FAIL", f"MEMORIZATION DETECTED - Output nodes at chance ({output_acc:.1%}) but Readout is perfect ({readout_acc:.1%}). Network is an Echo State Network."
+        elif output_acc > chance * 3 and output_acc > readout_acc * 0.3:
             return "PASS", f"Output nodes functional ({output_acc:.1%} acc, readout {readout_acc:.1%})"
         elif output_acc > chance * 2:
             return "WARN", f"Output nodes marginal ({output_acc:.1%} acc, readout {readout_acc:.1%})"
@@ -1187,9 +1190,18 @@ def run_diagnostics_standalone(args):
         num_nodes=args.nodes, device=device, num_modules=args.modules)
 
     if args.train_first:
-        print("\nRunning Chars training phase before diagnostics...")
+        print(f"\nRunning Full Curriculum ({args.train_iters} steps per phase) before diagnostics...")
         trainer.engine.state.zero_()
+        
         trainer.train_phase("Chars", "ndcd/data/level1_chars.txt",
+                            iterations=args.train_iters, steps_per_iter=100,
+                            lr=0.05, settle_steps=8, input_gain=5.0)
+                            
+        trainer.train_phase("Words", "ndcd/data/level2_words.txt",
+                            iterations=args.train_iters, steps_per_iter=100,
+                            lr=0.05, settle_steps=8, input_gain=5.0)
+                            
+        trainer.train_phase("Quotes", "ndcd/data/level3_quotes.txt",
                             iterations=args.train_iters, steps_per_iter=100,
                             lr=0.05, settle_steps=8, input_gain=5.0)
 

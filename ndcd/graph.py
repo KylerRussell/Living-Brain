@@ -135,8 +135,9 @@ class DynamicGraph:
             edge_cols.extend(idx[local_cols].tolist())
 
         # 2. Sparse INTER-module connectivity at same level (~3%)
-        inter_same_density = 0.03
+        inter_same_density_default = 0.03
         for level in range(num_levels):
+            inter_same_density = 0.10 if level == 0 else inter_same_density_default
             mods_at_level = self.level_modules[level]
             for i in range(len(mods_at_level)):
                 for j in range(i + 1, len(mods_at_level)):
@@ -191,7 +192,7 @@ class DynamicGraph:
             mod = self.modules[mod_id]
             idx = mod['indices']
             # Each sensory node connects to a subset of level-0 module nodes
-            n_proj = max(1, len(idx) // 4)
+            n_proj = max(1, len(idx) // 2)
             for s in range(n_sensory):
                 targets = np.random.choice(idx, n_proj, replace=False)
                 edge_rows.extend([s] * n_proj)
@@ -273,14 +274,16 @@ class DynamicGraph:
             if frob > 0:
                 weight_vals[free_mask] *= np.float32(target_sr * np.sqrt(num_nodes) / frob)
 
-        # Set input projection edges independently (2x Xavier).
+        # Set input projection edges independently.
         # These are external forcing (clamped nodes), not recurrence.
-        # Reduced from 5.0x to 2.0x: the 5x scaling shattered the
-        # dynamical stability of the IMEX integration step, causing
-        # high-frequency limit cycles. At 2.0x with input_gain=0.5,
-        # effective drive is sufficient to overcome recurrent dynamics
-        # without destabilizing the solver.
-        weight_vals[input_proj_mask] *= 2.0
+        # CRITICAL FIX for One-Hot Input Drive:
+        # Since the input is one-hot (only 1 out of 256 nodes active), standard
+        # Xavier limits the sum to just one single weight instead of a random sum
+        # over the fan-in. To achieve order ~1.0 variance in the receiving Level 0 nodes,
+        # we must multiply the input weights by sqrt(fan_in) for the input projection.
+        # With avg fan-in ~250 from I/O nodes, sqrt(250) ≈ 15.8.
+        # We cap it at 15.0 to maintain solver stability.
+        weight_vals[input_proj_mask] *= 15.0
 
         n_input = int(input_proj_mask.sum())
         n_free = int(free_mask.sum())
@@ -324,7 +327,7 @@ class DynamicGraph:
         # 0.02× its input signal — after 20 steps L3 integrates just 0.4×.
         # Tau ratio 80:1 still gives meaningful timescale separation while
         # letting L3 respond within reasonable settle step counts.
-        tau_by_level = {0: 0.1, 1: 0.5, 2: 2.0, 3: 8.0}
+        tau_by_level = {0: 0.4, 1: 0.8, 2: 2.0, 3: 8.0}
 
         self.taus = np.zeros(num_nodes)
         # I/O nodes: fast

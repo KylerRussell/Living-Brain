@@ -394,33 +394,12 @@ class SequentialTrainer:
             if step > 0 and step % self.sleep_interval == 0:
                 self.sleep_phase(num_replay_cycles=200, replay_lr_mult=0.1)
 
-            # 9. VICReg Regularization — per-module to avoid OOM
-            # Global covariance over ~49K hidden nodes would be 49K×49K ≈ 9GB.
-            # Per-module covariance is ~1000×1000 ≈ 4MB each.
-            hidden_act = torch.tanh(self.engine.state[512:])
-            if not hasattr(self, '_vicreg_buffer'):
-                self._vicreg_buffer = []
-            self._vicreg_buffer.append(hidden_act.detach())
-            if len(self._vicreg_buffer) >= 32:
-                batch = torch.stack(self._vicreg_buffer)  # [32, num_hidden]
-                vicreg_lr = 0.001
-
-                for mod_idx, (start, end) in enumerate(self.engine.module_ranges):
-                    if end <= 512:
-                        continue
-                    mod_batch = batch[:, start - 512:end - 512]
-
-                    std = torch.sqrt(mod_batch.var(dim=0) + 1e-4)
-                    var_loss = torch.relu(1.0 - std).mean()
-
-                    mod_centered = mod_batch - mod_batch.mean(dim=0)
-                    cov = (mod_centered.T @ mod_centered) / (mod_batch.shape[0] - 1)
-                    cov_loss = cov.fill_diagonal_(0).pow(2).sum() / mod_batch.shape[1]
-
-                    with torch.no_grad():
-                        self.engine.biases[start:end] -= vicreg_lr * (var_loss + cov_loss)
-
-                self._vicreg_buffer = []
+            # 9. VICReg Regularization logic removed.
+            # The previous logic incorrectly subtracted a scalar positive loss 
+            # value directly from the network biases, driving all biases to -1.0 
+            # after ~8000 steps and destroying network activations.
+            # Representational decorrelation is already properly handled by
+            # the anti-Hebbian Oja rule and k-WTA inside engine_torch.py.
 
             # 10. Logging
             if step % 100 == 0:
@@ -535,7 +514,12 @@ class SequentialTrainer:
             rj = rho[idx_j]
 
             # Only update the mid level during sleep (surface is for online learning)
-            hebbian_update = replay_lr_mult * 0.001 * ri * rj
+            # Use Oja's rule to prevent unbounded exponential weight explosion.
+            # CRITICAL FIX: The decay term MUST use effective_weights! If we only
+            # decay based on w_mid, then w_mid will grow large enough to balance
+            # the Hebbian term on its own, ignoring the already-large w_deep!
+            w_eff = self.engine.effective_weights
+            hebbian_update = replay_lr_mult * 0.001 * (ri * rj - w_eff * rj.pow(2))
             self.engine.w_mid += hebbian_update
 
             # 4. CLS: hippocampal-to-neocortical transfer during replay
@@ -556,6 +540,9 @@ class SequentialTrainer:
                     hippo_mean = hippo_activity.mean()
                     neo_update = replay_lr_mult * 0.005 * hippo_mean * neo_activity
                     self.engine.biases[neo_start:neo_end] += neo_update.clamp(-0.01, 0.01)
+
+            # Prevent unbounded bias accumulation during 200 sleep cycles
+            self.engine.biases.clamp_(-1.0, 1.0)
 
             # Log every 50 cycles
             if cycle % 50 == 0:
