@@ -247,9 +247,8 @@ class PredictiveCodingEngine:
         # At tau_mid_to_deep=10000, w_mid≈0.02 transfers only 2e-6 per step.
         # Over 40K steps that accumulates ~0.08 in w_deep — far too slow for
         # meaningful consolidation. At 1000, the same w_mid transfers 2e-5/step
-        # → ~0.8 over 40K steps, giving w_deep real content to preserve.
-        self.tau_surface_to_mid = 500.0   # was 150.0
-        self.tau_mid_to_deep = 2000.0     # was 1000.0
+        self.tau_surface_to_mid = 1000.0   # was 500.0
+        self.tau_mid_to_deep = 2000.0     # was 2000.0
 
         # Metaplastic scaling: how much accumulated deep weight
         # reduces surface learning rate. Reduced from 1.0 to 0.1 because
