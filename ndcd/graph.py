@@ -337,12 +337,9 @@ class DynamicGraph:
         )
 
         # --- Timescale Assignment (per-module, per-level) ---
-        # Reduced from {0.1, 0.75, 5.0, 25.0} to {0.1, 0.5, 2.0, 8.0}.
-        # With dt=0.5 and tau=25.0, each IMEX step moves L3 by only
-        # 0.02× its input signal — after 20 steps L3 integrates just 0.4×.
-        # Tau ratio 80:1 still gives meaningful timescale separation while
-        # letting L3 respond within reasonable settle step counts.
-        tau_by_level = {0: 0.4, 1: 0.8, 2: 2.0, 3: 8.0}
+        # Compressed the temporal hierarchy's time constant range to [0.5, 4.0]
+        # to reduce extreme mathematical stiffness.
+        tau_by_level = {0: 0.5, 1: 1.0, 2: 2.0, 3: 4.0}
 
         self.taus = np.zeros(num_nodes)
         # I/O nodes: fast

@@ -114,9 +114,12 @@ def jit_solve_dynamics_imex(
         if diff <= tol * 1.5:
             break
 
-        # Adaptive dt: halve timestep if diverging
+        # Adaptive dt: smaller steps during volatile phases, larger as it nears steady-state
         if diff > prev_diff and current_dt > min_dt:
-            current_dt = current_dt * 0.5
+            current_dt = max(current_dt * 0.5, min_dt)
+            imex_denom = 1.0 + implicit_damping * current_dt / taus
+        elif diff < prev_diff * 0.8 and current_dt < dt:
+            current_dt = min(current_dt * 1.2, dt)
             imex_denom = 1.0 + implicit_damping * current_dt / taus
 
         prev_diff = diff
@@ -689,6 +692,47 @@ class PredictiveCodingEngine:
     def store_previous_state(self):
         """Store current state as previous state for temporal prediction."""
         self.previous_state = self.state.clone()
+
+    def enforce_spectral_radius(self, target_max=0.95):
+        """
+        Estimate dominant eigenvalue of effective weights using power iteration,
+        and dampen w_surface if the spectral radius exceeds target_max.
+        """
+        with torch.no_grad():
+            if getattr(self, '_power_iter_v', None) is None:
+                self._power_iter_v = torch.randn(self.num_nodes, device=self.device)
+                norm = torch.norm(self._power_iter_v)
+                if norm > 0:
+                    self._power_iter_v /= norm
+
+            # Build sparse effective weight matrix
+            W_eff = torch.sparse_coo_tensor(
+                self.indices, self.effective_weights, 
+                (self.num_nodes, self.num_nodes)
+            )
+
+            # Power iteration
+            v = self._power_iter_v
+            for _ in range(5):
+                v_next = torch.mv(W_eff, v)
+                norm = torch.norm(v_next)
+                if norm > 1e-8:
+                    v = v_next / norm
+
+            self._power_iter_v = v
+            
+            # Rayleigh quotient to estimate dominant eigenvalue
+            Wv = torch.mv(W_eff, v)
+            eigenvalue = torch.dot(v, Wv)
+            sr = torch.abs(eigenvalue).item()
+
+            dampening_factor = 1.0
+            if sr > target_max:
+                dampening_factor = target_max / sr
+                self.w_surface *= dampening_factor
+            
+            self.last_sr = sr
+            return sr, dampening_factor
 
     def _update_short_term_plasticity(self):
         """

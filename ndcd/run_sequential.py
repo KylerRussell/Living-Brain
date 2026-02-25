@@ -404,6 +404,10 @@ class SequentialTrainer:
                 # 8e. Synaptic intelligence tracking
                 self.engine.update_synaptic_intelligence(current_loss=energy)
 
+                # Periodic spectral radius enforcement
+                if step % 100 == 0:
+                    self.engine.enforce_spectral_radius(target_max=0.95)
+
             # 8f. Periodic synaptic intelligence consolidation
             if step > 0 and step % self.si_consolidation_interval == 0:
                 self.engine.consolidate_importance()
@@ -447,8 +451,10 @@ class SequentialTrainer:
 
                     # Cascade distribution diagnostic
                     cstats = self.engine.cascade_stats()
+                    sr_val = getattr(self.engine, 'last_sr', 0.0)
                     print(f"  Cascade: surface={cstats['surface']:.4f} "
-                          f"mid={cstats['mid']:.4f} deep={cstats['deep']:.4f}")
+                          f"mid={cstats['mid']:.4f} deep={cstats['deep']:.4f} | "
+                          f"SR: {sr_val:.4f}")
 
                     # Diagnostic: top-down weight stats per level pair.
                     # If L1 spatial error is stuck high (~5.4), check whether
