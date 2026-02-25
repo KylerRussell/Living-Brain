@@ -281,7 +281,7 @@ class SequentialTrainer:
                 fast_mask = self.engine.taus < 0.5
                 self.engine.state[fast_mask] *= 0.1
 
-            # 5. Single-phase settle (IMEX)
+            # 5. Single-phase settle (IMEX) -> FREE PHASE
             # Dynamic tolerance: relax to 1e-2 during the first 2000 steps
             # of each phase, preventing the solver from fruitlessly exhausting
             # max_steps during transient reorganization after phase boundaries.
@@ -292,38 +292,54 @@ class SequentialTrainer:
                 max_steps=settle_steps,
                 tol=settle_tol,
             )
+            free_state = self.engine.state.clone()
+            free_diff = self.engine.last_settle_diff
 
-            # 5b. State norm control removed — the global rescaling projected
-            # all states to the same sphere, destroying input-dependent signal.
-            # The ±1.5 clamp in the IMEX solver already prevents saturation.
-
-            # 6. Compute prediction errors (top-down only; I/O zeroed)
+            # 6. Compute prediction errors (top-down only; I/O zeroed) based on free state
             energy = self.engine.compute_prediction_errors()
 
-            # 6b. CRITICAL: Inject target as observation error at output nodes.
-            # Without this, the network has zero gradient toward correct
-            # next-byte prediction — it just settles into random attractors.
-            # This is the predictive coding equivalent of EqProp's nudge phase.
+            # 6b. EqProp Nudge Phase
+            beta = 0.5
             output_target = self.eye[target_byte]                          # one-hot [256]
-            output_actual = torch.tanh(self.engine.state[256:512])         # current output
-            output_error = output_target - output_actual                   # observation error
-            self.engine.spatial_errors[256:512] = output_error
+            nudge_vec = input_vec.clone()
+            nudge_vec[256:512] = output_target * beta
+            
+            self.engine.settle(
+                nudge_vec,
+                input_mask=input_mask,
+                max_steps=settle_steps,
+                tol=settle_tol,
+            )
+            nudge_state = self.engine.state.clone()
+            nudge_diff = self.engine.last_settle_diff
 
+            output_actual = torch.tanh(free_state[256:512])         # evaluate on free_state
+            output_error = output_target - output_actual                   # observation error
+            
             energy += 0.5 * torch.sum(output_error ** 2).item()
             energy_accum += energy
+
+            if step < 5:
+                # Debug output nodes 
+                rho_free = torch.tanh(free_state)
+                rho_nudge = torch.tanh(nudge_state)
+                target_diff = rho_nudge[256:512] - rho_free[256:512]
+                print(f"DEBUG Step {step}: target_byte={target_byte}")
+                print(f"  Target node diff= {target_diff[target_byte].item():.5f}, Non-target avg diff= {target_diff.mean().item():.5f}")
+                print(f"  Max free state output= {rho_free[256:512].max().item():.5f}, Min= {rho_free[256:512].min().item():.5f}")
 
             # 7. Measure Prediction via linear readout (not output nodes).
             # Readout sees reservoir state + raw input (standard ESN practice).
             # This gives a direct linear path from input to prediction even if
             # reservoir representations are degenerate.
             with torch.no_grad():
-                level0_acts = torch.tanh(self.engine.state[self.level0_indices])
+                level0_acts = torch.tanh(free_state[self.level0_indices])
                 features = level0_acts
                 logits = self.readout_W @ features + self.readout_b
                 probs = torch.softmax(logits, dim=0)
                 pred_idx = torch.argmax(probs).item()
 
-            state_norm = torch.norm(self.engine.state) / np.sqrt(self.num_nodes)
+            state_norm = torch.norm(free_state) / np.sqrt(self.num_nodes)
 
             is_correct = (pred_idx == target_byte)
             acc_window.append(1.0 if is_correct else 0.0)
@@ -353,20 +369,22 @@ class SequentialTrainer:
             # This prevents the reservoir from being pulled in random directions
             # before the readout has calibrated to the new data statistics.
             if step >= warmup_steps:
-                # Gate weight updates on IMEX convergence only.
-                # If the solver didn't converge, prediction errors are from an
-                # unsettled state and weight updates would be noise.
-                # NOTE: Do NOT gate on td_pred_active — that creates a deadlock
-                # where learning waits for predictions that can't exist without
-                # learning. The hierarchy must bootstrap from random weights.
-                settled_ok = self.engine.last_settle_diff <= 0.1
-
-                if settled_ok:
-                    # 8b. Update recurrent weights using local predictive coding rule
-                    # CLS differentiation is handled inside the engine via hippo_edge_mask
-                    self.engine.update_weights_predictive(
-                        learning_rate=effective_lr,
-                        hippo_edge_mask=self.hippo_edge_mask)
+                # 8b. Update recurrent weights using EqProp rule
+                self.engine.update_weights_predictive(
+                    free_state,
+                    nudge_state,
+                    beta=beta,
+                    learning_rate=effective_lr,
+                    hippo_edge_mask=self.hippo_edge_mask)
+                
+                if step < 5:
+                    # Inspect the motor weights
+                    t_mask = self.engine.topdown_edge_mask
+                    b_mask = self.engine.bottomup_edge_mask
+                    td_motor = (self.engine.indices[1][t_mask] >= 256) & (self.engine.indices[1][t_mask] < 512)
+                    bu_motor = (self.engine.indices[0][b_mask] >= 256) & (self.engine.indices[0][b_mask] < 512)
+                    print(f"  Motor TD grads mean=|{self.engine.w_surface[t_mask][td_motor].abs().mean().item():.6f}|")
+                    print(f"  Motor BU grads mean=|{self.engine.w_surface[b_mask][bu_motor].abs().mean().item():.6f}|")
 
                 # 8d. Cascade transfer — step-count + magnitude gated.
                 # Surface must integrate gradients autonomously for at least

@@ -293,7 +293,7 @@ class DynamicGraph:
 
         # Balance Hierarchies: Shift fan-in normalization to Level 0 lateral connections.
         node_levels = np.zeros(num_nodes, dtype=int)
-        node_levels[:n_io] = 0
+        node_levels[:n_io] = -1  # I/O nodes conceptually at level -1
         for mod in self.modules:
             node_levels[mod['start']:mod['end']] = mod['level']
         src_levels_arr = node_levels[edge_rows]
@@ -314,6 +314,21 @@ class DynamicGraph:
         if len(fan_in_map) > 0:
             avg_fan_in = np.mean(list(fan_in_map.values()))
             print(f"Level 0 lateral edges: {n_lat} made positive, fan-in normalized (avg fan-in={avg_fan_in:.0f})")
+
+        # Boost Bottom-Up edges to prevent vanishing activations across hierarchy
+        # Without this, the SR=0.85 tuning makes the signal decay at each level,
+        # leaving L1-L3 completely dead initially so they can never learn.
+        # Only boost internal hierarchy (src >= 512), not I/O feedback.
+        bu_mask = (src_levels_arr < dst_levels_arr) & free_mask & (edge_rows >= 512)
+        
+        # Fan-in normalize the bottom-up edges and scale them so their sum ~ 2.0
+        bu_dst_nodes = edge_cols[bu_mask]
+        unique_bu_dst, bu_dst_counts = np.unique(bu_dst_nodes, return_counts=True)
+        bu_fan_in_map = dict(zip(unique_bu_dst, bu_dst_counts))
+        bu_fan_in = np.array([bu_fan_in_map.get(d, 1) for d in bu_dst_nodes], dtype=np.float32)
+        
+        weight_vals[bu_mask] = (weight_vals[bu_mask] / np.sqrt(bu_fan_in)) * 5.0
+        print(f"Bottom-up edges: {int(bu_mask.sum())} boosted to prevent vanishing activations")
 
         # Build final sparse matrix
         self.weight_sparse = sp.csr_matrix(

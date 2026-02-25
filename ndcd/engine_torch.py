@@ -68,7 +68,7 @@ def jit_solve_dynamics_imex(
         nonlinear = synaptic + biases + input_vector
 
         # Semi-implicit update: treats -x/tau implicitly, rest explicitly
-        current_s = ((current_s + current_dt * nonlinear / taus) / imex_denom) * (1.0 - damping)
+        current_s = (current_s + current_dt * nonlinear / taus) / imex_denom
 
         # Homeostatic sparsity (L1 penalty) — reduced from 0.01 to 0.001.
         # The old 0.01 coefficient was excessively punitive, driving 33% of
@@ -195,7 +195,7 @@ class PredictiveCodingEngine:
         # weight matrix. Using all synaptic input (intra-module, lateral,
         # bottom-up) gives the dynamics residual, not a prediction error.
         self.node_to_level = torch.zeros(num_nodes, dtype=torch.long, device=device)
-        self.node_to_level[:512] = 0  # I/O nodes at level 0
+        self.node_to_level[:512] = -1  # I/O nodes conceptually at level -1
         for mod_idx, (start, end) in enumerate(self.module_ranges):
             self.node_to_level[start:end] = self.module_levels[mod_idx]
         self.max_level = int(self.node_to_level.max().item())
@@ -239,16 +239,14 @@ class PredictiveCodingEngine:
         # Surface: fast, updated every step
         # Mid: medium, τ ≈ 100 steps
         # Deep: slow, τ ≈ 10000 steps
-        self.w_deep = self.weight_values.clone()   # Initialize with current learned weights
+        self.w_deep = torch.zeros_like(self.weight_values)
         self.w_surface = torch.zeros_like(self.weight_values)
         self.w_mid = torch.zeros_like(self.weight_values)
 
-        # Cascade transfer rates — reduced from 100/10000.
-        # At tau_mid_to_deep=10000, w_mid≈0.02 transfers only 2e-6 per step.
-        # Over 40K steps that accumulates ~0.08 in w_deep — far too slow for
-        # meaningful consolidation. At 1000, the same w_mid transfers 2e-5/step
-        self.tau_surface_to_mid = 1000.0   # was 500.0
-        self.tau_mid_to_deep = 2000.0     # was 2000.0
+        # Cascade transfer rates — significantly increased to allow transient
+        # syntactic rules to meaningfully accumulate in surface weights.
+        self.tau_surface_to_mid = 10000.0   # was 1000.0
+        self.tau_mid_to_deep = 50000.0     # was 2000.0
 
         # Metaplastic scaling: how much accumulated deep weight
         # reduces surface learning rate. Reduced from 1.0 to 0.1 because
@@ -261,7 +259,7 @@ class PredictiveCodingEngine:
         # FIX 1: Track the initial w_deep Frobenius norm as a target.
         # This is the SR-tuned initialization; effective weights should
         # never exceed ~2x this norm during training.
-        self._initial_deep_frob = self.w_deep.norm().item()
+        self._initial_deep_frob = self.weight_values.norm().item()
 
         # --- Synaptic intelligence (Zenke et al., 2017) ---
         self.omega = torch.zeros_like(self.weight_values)       # accumulated importance
@@ -301,8 +299,8 @@ class PredictiveCodingEngine:
 
     @property
     def effective_weights(self):
-        """Effective weight is always the sum of all three cascade levels."""
-        return self.w_surface + self.w_mid + self.w_deep
+        """Effective weight is base topology + learned cascade deltas."""
+        return self.weight_values + self.w_surface + self.w_mid + self.w_deep
 
     def cascade_transfer(self, include_deep=True):
         """Call once per training step after weight update.
@@ -319,20 +317,16 @@ class PredictiveCodingEngine:
             include_deep: If False, only surface→mid transfer occurs
                 (used during early training steps 500-5000).
         """
-        # Surface → Mid: only if surface has accumulated enough
-        surface_mag = self.w_surface.abs().mean().item()
-        if surface_mag > 0.02:
-            transfer_sm = self.w_surface / self.tau_surface_to_mid
-            self.w_mid += transfer_sm
-            self.w_surface -= transfer_sm
+        # Surface → Mid: Continuous leaky integration
+        transfer_sm = self.w_surface / self.tau_surface_to_mid
+        self.w_mid += transfer_sm
+        self.w_surface -= transfer_sm
 
-        # Mid → Deep: only if enabled and mid has accumulated enough
+        # Mid → Deep: Continuous leaky integration if enabled
         if include_deep:
-            mid_mag = self.w_mid.abs().mean().item()
-            if mid_mag > 0.02:
-                transfer_md = self.w_mid / self.tau_mid_to_deep
-                self.w_deep += transfer_md
-                self.w_mid -= transfer_md
+            transfer_md = self.w_mid / self.tau_mid_to_deep
+            self.w_deep += transfer_md
+            self.w_mid -= transfer_md
 
         # Gentle w_deep norm control — prevent SR explosion.
         # Soft ceiling: w_deep can grow up to 2x its initial norm
@@ -505,12 +499,12 @@ class PredictiveCodingEngine:
 
         return total_energy
 
-    def update_weights_predictive(self, learning_rate=0.01, hippo_edge_mask=None):
+    def update_weights_predictive(self, free_state, nudge_state, beta=0.5, learning_rate=0.01, hippo_edge_mask=None):
         """
-        Local Hebbian weight update based on prediction errors.
+        Local Hebbian weight update based on True Equilibrium Propagation.
 
-        Spatial weight update:
-            ΔW_ij ∝ meta_lr * ε_{lower_j} * tanh(x_upper_i)^T
+        Top-Down Spatial weight update (EqProp):
+            ΔW_ij ∝ (rho_nudge_i * rho_nudge_j - rho_free_i * rho_free_j) / beta
 
         Updates go to w_surface only. The metaplastic scaling and synaptic
         intelligence reduce per-synapse learning rate for consolidated and
@@ -520,7 +514,11 @@ class PredictiveCodingEngine:
             ΔA_ℓ ∝ lr * ε_temporal * x_prev^T
         """
         with torch.no_grad():
-            rho = torch.tanh(self.state)
+            rho_free = torch.tanh(free_state)
+            rho_nudge = torch.tanh(nudge_state)
+            
+            # Use free phase as baseline for associative rules
+            rho = rho_free
 
             # --- Spatial weight update (top-down + bottom-up + lateral) ---
             idx_i = self.indices[0]
@@ -528,11 +526,17 @@ class PredictiveCodingEngine:
 
             grad = torch.zeros_like(self.weight_values)
 
-            # Top-down edges: learn to predict lower-level states
-            # ΔW_td ∝ ε_lower × tanh(x_upper)
-            td_error_j = self.spatial_errors[idx_j[self.topdown_edge_mask]]
-            td_rho_i = rho[idx_i[self.topdown_edge_mask]]
-            grad[self.topdown_edge_mask] = td_error_j * td_rho_i
+            # Top-down edges: EqProp gradient
+            # ΔW_ij ∝ (rho_nudge_i * rho_nudge_j - rho_free_i * rho_free_j) / beta
+            td_rho_nudge_i = rho_nudge[idx_i[self.topdown_edge_mask]]
+            td_rho_nudge_j = rho_nudge[idx_j[self.topdown_edge_mask]]
+            td_rho_free_i = rho_free[idx_i[self.topdown_edge_mask]]
+            td_rho_free_j = rho_free[idx_j[self.topdown_edge_mask]]
+            
+            grad[self.topdown_edge_mask] = (td_rho_nudge_i * td_rho_nudge_j - td_rho_free_i * td_rho_free_j) / beta
+
+            # Pre-synaptic state t-1 for temporal prediction
+            prev_rho = torch.tanh(self.previous_state)
 
             # Bottom-up edges: pure associative Oja rule (no spatial error).
             # The spatial prediction error must be gated strictly through
@@ -540,11 +544,11 @@ class PredictiveCodingEngine:
             # representations via co-occurrence, not generative modeling.
             # Using spatial error here caused destructive interference
             # between generative (TD) and associative (BU) pathways.
-            bu_rho_i = rho[idx_i[self.bottomup_edge_mask]]
+            bu_prev_rho_i = prev_rho[idx_i[self.bottomup_edge_mask]]
             bu_rho_j = rho[idx_j[self.bottomup_edge_mask]]
             bu_w = self.effective_weights[self.bottomup_edge_mask]
             # Pure associative Oja rule: co-occurrence with self-normalization
-            grad[self.bottomup_edge_mask] = 0.1 * (bu_rho_i * bu_rho_j - bu_w * bu_rho_j.pow(2))
+            grad[self.bottomup_edge_mask] = 0.1 * (bu_prev_rho_i * bu_rho_j - bu_w * bu_rho_j.pow(2))
 
             # FIX 4: Lateral edges — anti-Hebbian inhibitory + Oja excitatory.
             #
@@ -561,7 +565,7 @@ class PredictiveCodingEngine:
             # for co-active pairs. This creates genuine competition.
             lat_i = idx_i[self.lateral_edge_mask]
             lat_j = idx_j[self.lateral_edge_mask]
-            lat_rho_i = rho[lat_i]
+            lat_prev_rho_i = prev_rho[lat_i]
             lat_rho_j = rho[lat_j]
             lat_w = self.effective_weights[self.lateral_edge_mask]
 
@@ -587,8 +591,8 @@ class PredictiveCodingEngine:
             # At mod_act=0.7 (dense): inhibition ≈ 0.5, suppresses co-activation
             inhibition_strength = torch.clamp(mod_act - 0.3, min=0.0)
 
-            oja_excitatory = lat_rho_i * lat_rho_j - lat_w * lat_rho_j.pow(2)
-            inhibitory = -inhibition_strength * lat_rho_i.abs() * lat_rho_j.abs()
+            oja_excitatory = lat_prev_rho_i * lat_rho_j - lat_w * lat_rho_j.pow(2)
+            inhibitory = -inhibition_strength * lat_prev_rho_i.abs() * lat_rho_j.abs()
             grad[self.lateral_edge_mask] = 0.1 * (oja_excitatory + inhibitory)
 
             # Gradient clipping
@@ -608,24 +612,23 @@ class PredictiveCodingEngine:
             # Apply update only to surface level
             self.w_surface += meta_lr * grad
 
-            # Then, apply per-destination-node effective weight norm control.
-            # We ONLY apply this to recurrent (free) edges. Input projection
-            # edges (source < 512) are clamped separately and shouldn't
-            # trigger massive decay on recurrent edges.
-            free_mask = self.indices[0] >= 512
+            # Apply RMS normalization to the learned deltas (cascade) universally
+            # across all edges. Grouping by destination node ensures no neuron
+            # becomes excessively overwhelmed by incoming synaptic changes.
+            cascade_all = self.w_surface + self.w_mid + self.w_deep
             
-            effective_free = self.effective_weights[free_mask]
-            effective_free.clamp_(-3.0, 3.0)
-            self.w_surface[free_mask] = effective_free - self.w_mid[free_mask] - self.w_deep[free_mask]
+            # Prevent extreme runaway of cascade weights before RMS
+            cascade_all = cascade_all.clamp(-3.0, 3.0)
+            self.w_surface = cascade_all - self.w_mid - self.w_deep
 
-            dst_nodes_free = self.indices[1][free_mask]
-            unique_dst, inverse_dst = torch.unique(dst_nodes_free, return_inverse=True)
+            dst_nodes = self.indices[1]
+            unique_dst, inverse_dst = torch.unique(dst_nodes, return_inverse=True)
             n_unique = len(unique_dst)
 
             dst_sq_sums = torch.zeros(n_unique, device=self.device)
             dst_counts = torch.zeros(n_unique, device=self.device)
-            dst_sq_sums.scatter_add_(0, inverse_dst, effective_free.pow(2))
-            dst_counts.scatter_add_(0, inverse_dst, torch.ones_like(effective_free))
+            dst_sq_sums.scatter_add_(0, inverse_dst, cascade_all.pow(2))
+            dst_counts.scatter_add_(0, inverse_dst, torch.ones_like(cascade_all))
             dst_rms = torch.sqrt(dst_sq_sums / dst_counts.clamp(min=1))
 
             # Target RMS per destination node.
@@ -641,8 +644,8 @@ class PredictiveCodingEngine:
             weight_scale = scale_per_dst[inverse_dst]
 
             # Apply to transient cascade levels only; w_deep is shielded
-            self.w_surface[free_mask] *= weight_scale
-            self.w_mid[free_mask] *= weight_scale
+            self.w_surface *= weight_scale
+            self.w_mid *= weight_scale
 
             # --- Top-down weight diversity regularization ---
             # (Kept from original — prevents mode collapse)
@@ -661,8 +664,9 @@ class PredictiveCodingEngine:
             self.w_surface[td_idx] -= correction
 
             # --- Bias update from prediction errors ---
-            # Biases absorb mean prediction errors
-            bias_grad = self.spatial_errors + self.temporal_alpha * self.temporal_errors
+            # EqProp bias update: Δb_i ∝ (rho_nudge_i - rho_free_i) / beta
+            # + temporal errors
+            bias_grad = (rho_nudge - rho_free) / beta + self.temporal_alpha * self.temporal_errors
             self.biases += learning_rate * 0.1 * bias_grad
             self.biases.clamp_(-1.0, 1.0)
 
@@ -670,13 +674,13 @@ class PredictiveCodingEngine:
             # ΔA_ℓ ∝ lr * ε_temporal * x_prev (diagonal approximation)
             for mod_idx, (start, end) in enumerate(self.module_ranges):
                 t_error = self.temporal_errors[start:end]
-                prev = torch.tanh(self.previous_state[start:end])
+                prev = self.previous_state[start:end]  # Match linear state used in prediction
 
                 # ΔA_ℓ ∝ lr * ε_temporal * x_prev
                 # FIX: Boost temporal learning rate. The old 0.1x multiplier 
                 # combined with tiny t_error meant Temporal A never deviated
                 # from its initialization of 0.9.
-                a_mod = learning_rate * 5.0 * t_error * prev
+                a_mod = learning_rate * 25.0 * t_error * prev
                 # Bound update delta
                 self.temporal_A[mod_idx] += a_mod.clamp(-0.05, 0.05)
                 # Bound A diagonal to stop exponential explosion
