@@ -222,6 +222,19 @@ class PredictiveCodingEngine:
             (self.indices[1] >= 512)
         )
 
+        # FIX 4: Track symmetric motor connections
+        fwd_motor_mask = (self.indices[0] >= 512) & (self.indices[1] >= 256) & (self.indices[1] < 512)
+        fb_motor_mask = (self.indices[0] >= 256) & (self.indices[0] < 512) & (self.indices[1] >= 512)
+
+        fwd_idx = torch.where(fwd_motor_mask)[0]
+        fb_idx = torch.where(fb_motor_mask)[0]
+
+        fwd_ids = self.indices[0, fwd_idx] * self.num_nodes + self.indices[1, fwd_idx]
+        fb_ids = self.indices[1, fb_idx] * self.num_nodes + self.indices[0, fb_idx]
+
+        self.fwd_motor_idx = fwd_idx[torch.argsort(fwd_ids)]
+        self.fb_motor_idx = fb_idx[torch.argsort(fb_ids)]
+
         # --- Temporal prediction state ---
         # Previous state buffer per module (for temporal prediction errors)
         self.previous_state = torch.zeros(num_nodes, dtype=torch.float32, device=device)
@@ -553,6 +566,9 @@ class PredictiveCodingEngine:
             # Pure associative Oja rule: co-occurrence with self-normalization
             grad[self.bottomup_edge_mask] = 0.1 * (bu_prev_rho_i * bu_rho_j - bu_w * bu_rho_j.pow(2))
 
+            # FIX 4: Zero out gradients for motor feedback edges so they don't learn independently
+            grad[self.fb_motor_idx] = 0.0
+
             # FIX 4: Lateral edges — anti-Hebbian inhibitory + Oja excitatory.
             #
             # The old pure Oja (0.1 * (rho_i*rho_j - w*rho_j^2)) still drove
@@ -597,6 +613,39 @@ class PredictiveCodingEngine:
             oja_excitatory = lat_prev_rho_i * lat_rho_j - lat_w * lat_rho_j.pow(2)
             inhibitory = -inhibition_strength * lat_prev_rho_i.abs() * lat_rho_j.abs()
             grad[self.lateral_edge_mask] = 0.1 * (oja_excitatory + inhibitory)
+
+            # --- Orthogonalization penalty on lateral weights ---
+            with torch.enable_grad():
+                lat_w_var = lat_w.detach().clone().requires_grad_(True)
+                total_penalty = 0.0
+                
+                for mod_idx, (start, end) in enumerate(self.module_ranges):
+                    mod_size = end - start
+                    if mod_size <= 1: continue
+                    
+                    # Only restrict to intra-module lateral edges properly
+                    mask = (lat_i >= start) & (lat_i < end) & (lat_j >= start) & (lat_j < end)
+                    if not mask.any(): continue
+                    
+                    mod_i_idx = lat_i[mask] - start
+                    mod_j_idx = lat_j[mask] - start
+                    mod_w_var = lat_w_var[mask]
+                    
+                    W_dense = torch.sparse_coo_tensor(
+                        torch.stack([mod_i_idx, mod_j_idx]), mod_w_var, (mod_size, mod_size)
+                    ).to_dense()
+                    
+                    W_norm = torch.nn.functional.normalize(W_dense, p=2, dim=1, eps=1e-6)
+                    sim_matrix = torch.mm(W_norm, W_norm.t())
+                    
+                    I = torch.eye(mod_size, device=self.device)
+                    penalty = torch.sum((sim_matrix - I) ** 2)
+                    total_penalty = total_penalty + penalty
+                    
+                if isinstance(total_penalty, torch.Tensor) and total_penalty.requires_grad:
+                    ortho_grad = torch.autograd.grad(total_penalty, lat_w_var)[0]
+                    # subtract the gradient of the penalty (minimize penalty)
+                    grad[self.lateral_edge_mask] -= 0.05 * ortho_grad
 
             # Gradient clipping
             grad = grad.clamp(-1.0, 1.0)
@@ -649,6 +698,11 @@ class PredictiveCodingEngine:
             # Apply to transient cascade levels only; w_deep is shielded
             self.w_surface *= weight_scale
             self.w_mid *= weight_scale
+
+            # FIX 4: Enforce tied weights dynamically (W_fb = W_fwd^T)
+            self.w_surface[self.fb_motor_idx] = self.w_surface[self.fwd_motor_idx]
+            self.w_mid[self.fb_motor_idx] = self.w_mid[self.fwd_motor_idx]
+            self.w_deep[self.fb_motor_idx] = self.w_deep[self.fwd_motor_idx]
 
             # --- Top-down weight diversity regularization ---
             # (Kept from original — prevents mode collapse)

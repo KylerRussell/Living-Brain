@@ -124,6 +124,9 @@ class SequentialTrainer:
         # Sleep phase interval
         self.sleep_interval = 5000
 
+        # Dynamic beta starting value
+        self.dynamic_beta = 0.5
+
     def tune_spectral_radius(self, target_radius=0.95):
         """Tunes the spectral radius of the weight matrix to a target value.
 
@@ -174,19 +177,18 @@ class SequentialTrainer:
         rescaling to 0.80 multiplies all weights by 0.006x, destroying
         everything the network learned. Instead we:
         - Keep w_deep intact (long-term memory / inductive bias)
-        - Zero w_surface and w_mid (transient learning from prior phase)
+        - Apply a decay factor to w_surface and w_mid to preserve residual trace
         - Zero network state (avoid prior-phase attractor lock-in)
         - Zero SI accumulators (omega was double-counting protection)
-        - Re-initialize readout from scratch (old readout is calibrated
-          to the prior phase's distribution and misleads early learning)
+        - Preserve linear readout so it can track evolving hierarchical structure
         """
         print(f"\n--- Phase boundary: {phase_from} → {phase_to} ---")
 
         with torch.no_grad():
-            # Preserve w_deep (long-term memory), reset transients
+            # Preserve w_deep (long-term memory), apply decay to transients
             deep_mag = self.engine.w_deep.abs().mean().item()
-            self.engine.w_surface.zero_()
-            self.engine.w_mid.zero_()
+            self.engine.w_surface *= 0.1
+            self.engine.w_mid *= 0.1
 
             # Reset network state to avoid prior-phase attractors
             self.engine.state.zero_()
@@ -196,13 +198,10 @@ class SequentialTrainer:
             self.engine.omega.zero_()
             self.engine.running_contribution.zero_()
 
-            # Re-initialize readout from scratch for the new task
-            n_readout = len(self.level0_indices)
-            self.readout_W = torch.randn(256, n_readout, device=self.device) * (1.0 / np.sqrt(n_readout))
-            self.readout_b.zero_()
+            # Do not re-initialize readout from scratch; allow fine-tuning across phases
 
         print(f"  w_deep preserved (|w_deep|={deep_mag:.4f}), "
-              f"w_surface/w_mid zeroed, state reset, readout re-initialized")
+              f"w_surface/w_mid decayed by 0.1, state reset, readout preserved")
 
     def train_phase(self, phase_name, data_path, iterations, steps_per_iter, lr=0.01,
                     settle_steps=20, input_gain=0.5, warmup_steps=0):
@@ -298,8 +297,21 @@ class SequentialTrainer:
             # 6. Compute prediction errors (top-down only; I/O zeroed) based on free state
             energy = self.engine.compute_prediction_errors()
 
-            # 6b. EqProp Nudge Phase
-            beta = 0.5
+            # 6b. EqProp Nudge Phase with Dynamic Beta
+            output_actual = torch.tanh(free_state[256:512])         # evaluate on free_state
+            
+            # Monitor free-state confidence of the output nodes
+            target_conf = output_actual[target_byte].item()
+            pred_conf, pred_idx = torch.max(output_actual, dim=0)
+            
+            # Temporarily increase beta if highly confident but incorrect
+            if pred_idx != target_byte and pred_conf.item() > 0.0:
+                self.dynamic_beta = min(2.0, self.dynamic_beta + 0.05 * pred_conf.item())
+            # Decay beta if nearing the target
+            elif pred_idx == target_byte:
+                self.dynamic_beta = max(0.1, self.dynamic_beta - 0.05 * target_conf)
+
+            beta = self.dynamic_beta
             output_target = self.eye[target_byte]                          # one-hot [256]
             nudge_vec = input_vec.clone()
             nudge_vec[256:512] = output_target * beta
@@ -313,7 +325,6 @@ class SequentialTrainer:
             nudge_state = self.engine.state.clone()
             nudge_diff = self.engine.last_settle_diff
 
-            output_actual = torch.tanh(free_state[256:512])         # evaluate on free_state
             output_error = output_target - output_actual                   # observation error
             
             energy += 0.5 * torch.sum(output_error ** 2).item()

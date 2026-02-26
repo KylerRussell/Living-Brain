@@ -330,6 +330,22 @@ class DynamicGraph:
         weight_vals[bu_mask] = (weight_vals[bu_mask] / np.sqrt(bu_fan_in)) * 5.0
         print(f"Bottom-up edges: {int(bu_mask.sum())} boosted to prevent vanishing activations")
 
+        # FIX 4: Decouple & enforce symmetric motor connections (Motor -> Level 0)
+        fwd_motor_mask = (edge_rows >= 512) & (edge_cols >= 256) & (edge_cols < 512)
+        fb_motor_mask = (edge_rows >= 256) & (edge_rows < 512) & (edge_cols >= 512)
+
+        fwd_idx = np.where(fwd_motor_mask)[0]
+        fb_idx = np.where(fb_motor_mask)[0]
+
+        fwd_ids = edge_rows[fwd_idx] * num_nodes + edge_cols[fwd_idx]
+        fb_ids = edge_cols[fb_idx] * num_nodes + edge_rows[fb_idx]  # transpose to match
+
+        fwd_sort = np.argsort(fwd_ids)
+        fb_sort = np.argsort(fb_ids)
+
+        weight_vals[fb_idx[fb_sort]] = weight_vals[fwd_idx[fwd_sort]]
+        print(f"Tied {len(fb_idx)} motor feedback edges to their forward counterparts (W_fb = W_fwd^T).")
+
         # Build final sparse matrix
         self.weight_sparse = sp.csr_matrix(
             (weight_vals, (edge_rows, edge_cols)),
