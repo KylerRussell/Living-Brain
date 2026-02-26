@@ -122,7 +122,14 @@ class SequentialTrainer:
         # Set differentiated cascade rates for hippocampal modules
         # Hippocampal: faster deep cascade (τ_deep = 1000 not 10000)
         self.engine.tau_deep_hippo = 1000.0
-        self.engine.tau_deep_neo = 10000.0
+        self.engine.tau_deep_neo = 2000.0
+        
+        # Apply the edge-wise mask to configure mid_to_deep tau heterogeneous parameters
+        self.engine.tau_mid_to_deep = torch.where(
+            self.hippo_edge_mask,
+            torch.full_like(self.engine.tau_mid_to_deep, self.engine.tau_deep_hippo),
+            torch.full_like(self.engine.tau_mid_to_deep, self.engine.tau_deep_neo)
+        )
 
         # Synaptic intelligence consolidation interval
         self.si_consolidation_interval = 10000
@@ -196,18 +203,19 @@ class SequentialTrainer:
             self.engine.w_surface *= 0.1
             self.engine.w_mid *= 0.1
 
-            # Reset network state to avoid prior-phase attractors
-            self.engine.state.zero_()
-            self.engine.previous_state.zero_()
+            # Flush immediate context with exponential decay instead of hard zeroing
+            self.engine.state *= 0.01
+            self.engine.previous_state *= 0.01
 
             # Reset synaptic intelligence — omega double-counts with cascade
             self.engine.omega.zero_()
             self.engine.running_contribution.zero_()
 
-            # Do not re-initialize readout from scratch; allow fine-tuning across phases
+            # Orthogonal seeding for the readout to map optimal directions in shifted latent space
+            torch.nn.init.orthogonal_(self.readout_W)
 
         print(f"  w_deep preserved (|w_deep|={deep_mag:.4f}), "
-              f"w_surface/w_mid decayed by 0.1, state reset, readout preserved")
+              f"w_surface/w_mid decayed by 0.1, state decayed to 0.01, readout orthogonally seeded")
 
     def train_phase(self, phase_name, data_path, iterations, steps_per_iter, lr=0.01,
                     settle_steps=20, input_gain=0.5, warmup_steps=0):
@@ -303,22 +311,18 @@ class SequentialTrainer:
             # 6. Compute prediction errors (top-down only; I/O zeroed) based on free state
             energy = self.engine.compute_prediction_errors()
 
-            # 6b. EqProp Nudge Phase with Dynamic Beta
+            # 6b. EqProp Nudge Phase with Error-Proportional Beta
             output_actual = torch.tanh(free_state[256:512])         # evaluate on free_state
+            output_target = self.eye[target_byte]                   # one-hot [256]
+            output_error = output_target - output_actual            # observation error
             
-            # Monitor free-state confidence of the output nodes
-            target_conf = output_actual[target_byte].item()
-            pred_conf, pred_idx = torch.max(output_actual, dim=0)
+            # Calculate Absolute Error Magnitude
+            error_magnitude = torch.sum(torch.abs(output_error)).item()
             
-            # Temporarily increase beta if highly confident but incorrect
-            if pred_idx != target_byte and pred_conf.item() > 0.0:
-                self.dynamic_beta = min(2.0, self.dynamic_beta + 0.05 * pred_conf.item())
-            # Decay beta if nearing the target
-            elif pred_idx == target_byte:
-                self.dynamic_beta = max(0.1, self.dynamic_beta - 0.05 * target_conf)
-
+            # Scale Beta by Error
+            self.dynamic_beta = min(2.0, error_magnitude)
             beta = self.dynamic_beta
-            output_target = self.eye[target_byte]                          # one-hot [256]
+            
             nudge_vec = input_vec.clone()
             nudge_vec[256:512] = output_target * beta
             
@@ -330,8 +334,6 @@ class SequentialTrainer:
             )
             nudge_state = self.engine.state.clone()
             nudge_diff = self.engine.last_settle_diff
-
-            output_error = output_target - output_actual                   # observation error
             
             energy += 0.5 * torch.sum(output_error ** 2).item()
             energy_accum += energy
@@ -426,11 +428,11 @@ class SequentialTrainer:
                     self.engine.enforce_spectral_radius(target_max=0.95)
 
             # 8f. Periodic synaptic intelligence consolidation
-            if step > 0 and step % self.si_consolidation_interval == 0:
+            if step >= warmup_steps and step > 0 and step % self.si_consolidation_interval == 0:
                 self.engine.consolidate_importance()
 
             # 8g. Sleep replay phase for memory consolidation
-            if step > 0 and step % self.sleep_interval == 0:
+            if step >= warmup_steps and step > 0 and step % self.sleep_interval == 0:
                 self.sleep_phase(num_replay_cycles=200, replay_lr_mult=0.1)
 
             # 9. VICReg Regularization logic removed.

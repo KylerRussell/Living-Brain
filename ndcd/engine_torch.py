@@ -262,7 +262,10 @@ class PredictiveCodingEngine:
         # Cascade transfer rates — significantly increased to allow transient
         # syntactic rules to meaningfully accumulate in surface weights.
         self.tau_surface_to_mid = 10000.0   # was 1000.0
-        self.tau_mid_to_deep = 50000.0     # was 2000.0
+        
+        # We now track separate mid-to-deep transfer rates per edge depending on 
+        # whether the source node belongs to a hippocampal or neocortical module.
+        self.tau_mid_to_deep = torch.ones_like(self.weight_values) * 50000.0
 
         # Metaplastic scaling: how much accumulated deep weight
         # reduces surface learning rate. Reduced from 1.0 to 0.1 because
@@ -345,12 +348,12 @@ class PredictiveCodingEngine:
             self.w_mid -= transfer_md
 
         # Gentle w_deep norm control — prevent SR explosion.
-        # Soft ceiling: w_deep can grow up to 2x its initial norm
+        # Soft ceiling: w_deep can grow up to its initial baseline norm
         # (to encode learned structure) but no further. Proportional
         # scaling preserves relative weight patterns (the actual
         # "memory") while preventing magnitude blow-up.
         deep_frob = self.w_deep.norm().item()
-        max_deep_frob = self._initial_deep_frob * 2.0
+        max_deep_frob = self._initial_deep_frob
         if deep_frob > max_deep_frob:
             self.w_deep *= max_deep_frob / deep_frob
 
@@ -532,6 +535,15 @@ class PredictiveCodingEngine:
         with torch.no_grad():
             rho_free = torch.tanh(free_state)
             rho_nudge = torch.tanh(nudge_state)
+            
+            # --- Intrinsic Plasticity (IP) Update ---
+            # Track the temporal mean of each node's absolute activation
+            if getattr(self, 'activation_ema', None) is None:
+                self.activation_ema = torch.zeros(self.num_nodes, device=self.device)
+            self.activation_ema = 0.99 * self.activation_ema + 0.01 * rho_free.abs()
+            
+            # Adjust bias to explicitly pull temporal mean toward target sparsity
+            ip_gradient = self.sparsity_alpha - self.activation_ema
             
             # Use free phase as baseline for associative rules
             rho = rho_free
@@ -720,28 +732,29 @@ class PredictiveCodingEngine:
             correction = src_means[inverse] * 0.01
             self.w_surface[td_idx] -= correction
 
-            # --- Bias update from prediction errors ---
+            # --- Bias update from prediction errors + IP ---
             # EqProp bias update: Δb_i ∝ (rho_nudge_i - rho_free_i) / beta
             # + temporal errors
-            bias_grad = (rho_nudge - rho_free) / beta + self.temporal_alpha * self.temporal_errors
+            # + intrinsic plasticity correction
+            bias_grad = (rho_nudge - rho_free) / beta + self.temporal_alpha * self.temporal_errors + ip_gradient
             self.biases += learning_rate * 0.1 * bias_grad
             self.biases.clamp_(-1.0, 1.0)
 
             # --- Temporal transition matrix update ---
-            # ΔA_ℓ ∝ lr * ε_temporal * x_prev (diagonal approximation)
+            # ΔA_ℓ ∝ eta * ε_temporal * x_prev (diagonal approximation)
+            eta = learning_rate * 25.0  # Dedicated temporal learning rate (η)
             for mod_idx, (start, end) in enumerate(self.module_ranges):
                 t_error = self.temporal_errors[start:end]
                 prev = self.previous_state[start:end]  # Match linear state used in prediction
 
-                # ΔA_ℓ ∝ lr * ε_temporal * x_prev
-                # FIX: Boost temporal learning rate. The old 0.1x multiplier 
-                # combined with tiny t_error meant Temporal A never deviated
-                # from its initialization of 0.9.
-                a_mod = learning_rate * 25.0 * t_error * prev
-                # Bound update delta
+                # Element-wise multiplication for the diagonal approximation
+                a_mod = eta * t_error * prev
+                
+                # Apply the gradient
                 self.temporal_A[mod_idx] += a_mod.clamp(-0.05, 0.05)
-                # Bound A diagonal to stop exponential explosion
-                self.temporal_A[mod_idx].clamp_(-1.5, 1.5)
+                
+                # Hard clamp the diagonal so absolute value never exceeds 1.0
+                self.temporal_A[mod_idx].clamp_(-1.0, 1.0)
 
     def store_previous_state(self):
         """Store current state as previous state for temporal prediction."""
