@@ -8,15 +8,21 @@ import scipy.sparse as sp
 from scipy.sparse.linalg import eigs
 from ndcd.graph import DynamicGraph
 from ndcd.engine_torch import PredictiveCodingEngine
-from ndcd.curriculum_gen import generate_chars, generate_toddler_words, generate_quotes
+from ndcd.curriculum_gen import (
+    generate_holophrases,
+    generate_slot_and_frame,
+    generate_complex_constructions,
+    generate_contextual_continuity
+)
 
 def ensure_data(data_path, phase_name):
     if not os.path.exists(data_path):
         print(f"Data {data_path} not found. Generating for {phase_name}...")
         os.makedirs(os.path.dirname(data_path), exist_ok=True)
-        if "level1" in data_path: generate_chars(data_path)
-        elif "level2" in data_path: generate_toddler_words(data_path)
-        elif "level3" in data_path: generate_quotes(data_path)
+        if "level1" in data_path: generate_holophrases(data_path)
+        elif "level2" in data_path: generate_slot_and_frame(data_path)
+        elif "level3" in data_path: generate_complex_constructions(data_path)
+        elif "level4" in data_path: generate_contextual_continuity(data_path)
         elif "sherlock" in data_path:
              import urllib.request
              url = "https://www.gutenberg.org/files/1661/1661-0.txt"
@@ -701,61 +707,44 @@ def main():
     # Reset state before curriculum begins
     trainer.engine.state.zero_()
 
-    # Phase 1: Chars
-    # lr=0.05: compensates for tiny activation products
-    # settle_steps=30: L1 (tau=0.5) and L2 (tau=2.0) need time to respond.
-    #   With dt=0.5 and 8 steps, only 4 time units elapsed — L2 barely moved.
-    #   30 steps = 15 time units, enough for L1/L2 to participate.
-    # input_gain=5.0: stronger input to overcome recurrent attractor
-    trainer.train_phase("Chars", "ndcd/data/level1_chars.txt",
+    # Phase 1: Holophrases
+    trainer.train_phase("Holophrases", "ndcd/data/level1_holophrases.txt",
                         iterations=500, steps_per_iter=100, lr=0.05,
                         settle_steps=30, input_gain=0.5)
-    trainer.generate(start_text="A")
+    trainer.generate(start_text="L")
 
-    # --- Phase boundary: Chars → Words ---
-    # Chars w_deep encodes deterministic cycle positions (a→b→c...) which
-    # don't transfer to stochastic word tasks. Keep w_deep intact as
-    # inductive bias (letter representations) but reset transients.
-    # DO NOT call tune_spectral_radius() here — after 50K steps the spectral
-    # radius is ~124, and rescaling by 0.006x destroys all learned weights.
-    trainer.phase_boundary_reset("Chars", "Words")
+    # --- Phase boundary: Holophrases → Slot-and-Frame ---
+    trainer.phase_boundary_reset("Holophrases", "Slot-and-Frame")
 
-    # Phase 2: Words — evaluate retention on Chars after training
-    # settle_steps=30: L1 (tau=0.75) and L2 (tau=5.0) need more time
-    # to participate. With dt=0.5 and 8 steps, only 4 effective time units
-    # elapse — L2 barely moves. 30 steps = 15 time units, enough for L1/L2.
-    trainer.train_phase("Words", "ndcd/data/level2_words.txt",
+    # Phase 2: Slot-and-Frame
+    trainer.train_phase("Slot-and-Frame", "ndcd/data/level2_slot_frame.txt",
                         iterations=200, steps_per_iter=100, lr=0.05,
                         settle_steps=30, input_gain=0.5, warmup_steps=5000)
-    trainer.evaluate_retention("ndcd/data/level1_chars.txt")
-    trainer.generate()
+    trainer.evaluate_retention("ndcd/data/level1_holophrases.txt")
+    trainer.generate(start_text="W")
 
-    # --- Phase boundary: Words → Quotes ---
-    trainer.phase_boundary_reset("Words", "Quotes")
+    # --- Phase boundary: Slot-and-Frame → Complex Constructions ---
+    trainer.phase_boundary_reset("Slot-and-Frame", "Complex Constructions")
 
-    # Phase 3: Quotes — evaluate retention on Chars and Words
-    # settle_steps=50: Quotes need L2 (tau=5.0) and L3 (tau=25.0) to
-    # participate. 50 steps = 25 time units, enough for L2 to fully settle
-    # and L3 to begin contributing sentence-level context.
-    trainer.train_phase("Quotes", "ndcd/data/level3_quotes.txt",
+    # Phase 3: Complex Constructions
+    trainer.train_phase("Complex Constructions", "ndcd/data/level3_complex.txt",
                         iterations=200, steps_per_iter=200, lr=0.05,
                         settle_steps=50, input_gain=0.5, warmup_steps=5000)
-    trainer.evaluate_retention("ndcd/data/level1_chars.txt")
-    trainer.evaluate_retention("ndcd/data/level2_words.txt")
-    trainer.generate()
+    trainer.evaluate_retention("ndcd/data/level1_holophrases.txt")
+    trainer.evaluate_retention("ndcd/data/level2_slot_frame.txt")
+    trainer.generate(start_text="I")
 
-    # --- Phase boundary: Quotes → Literature ---
-    trainer.phase_boundary_reset("Quotes", "Literature")
+    # --- Phase boundary: Complex Constructions → Contextual Continuity ---
+    trainer.phase_boundary_reset("Complex Constructions", "Contextual Continuity")
 
-    # Phase 4: Literature — evaluate retention on all prior phases
-    # settle_steps=50: Same as quotes — full hierarchy participation needed.
-    trainer.train_phase("Literature", "ndcd/data/sherlock.txt",
-                        iterations=500, steps_per_iter=500, lr=0.05,
+    # Phase 4: Contextual Continuity
+    trainer.train_phase("Contextual Continuity", "ndcd/data/level4_contextual.txt",
+                        iterations=200, steps_per_iter=200, lr=0.05,
                         settle_steps=50, input_gain=0.5, warmup_steps=5000)
-    trainer.evaluate_retention("ndcd/data/level1_chars.txt")
-    trainer.evaluate_retention("ndcd/data/level2_words.txt")
-    trainer.evaluate_retention("ndcd/data/level3_quotes.txt")
-    trainer.generate(start_text="Sherlock", length=200)
+    trainer.evaluate_retention("ndcd/data/level1_holophrases.txt")
+    trainer.evaluate_retention("ndcd/data/level2_slot_frame.txt")
+    trainer.evaluate_retention("ndcd/data/level3_complex.txt")
+    trainer.generate(start_text="I", length=200)
 
 if __name__ == "__main__":
     main()

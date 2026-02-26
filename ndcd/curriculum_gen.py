@@ -1,151 +1,164 @@
 import random
-import json
-import urllib.request
 import os
 
-def generate_simple_lowercase(filename="ndcd/data/simple_lower.txt", size=10000):
+def generate_holophrases(filename="ndcd/data/level1_holophrases.txt", size=20000):
     """
-    Trivial task: Lowecase alphabet sequence ONLY.
-    a -> b -> c ... -> z -> a
+    Phase 1: Holophrases and Concrete Chunks
+    Early in development, children attempt to reproduce whole adult utterances 
+    rather than isolated words.
     """
-    print(f"Generating {filename} (Lowercase Alphabet Only)...")
-    chars = "abcdefghijklmnopqrstuvwxyz"
-    
-    with open(filename, "w") as f:
-        # Just repeat the alphabet sequence
-        for _ in range(size // 26 + 1):
-            f.write(chars + " ")
-            
-            # Occasionally repeat single letters to anchor them (a a a b b b)
-            if random.random() < 0.1:
-                char = random.choice(chars)
-                f.write((char * 5) + " ")
-
-def download_file(url, target_path):
-    if not os.path.exists(target_path):
-        print(f"Downloading {url} to {target_path}...")
-        try:
-            urllib.request.urlretrieve(url, target_path)
-        except Exception as e:
-            print(f"Failed to download {url}: {e}")
-
-def generate_chars(filename="ndcd/data/level1_chars.txt", size=20000):
-    """
-    Level 1: Simple character sequence learning.
-    Repeats: "abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789"
-    """
-    print(f"Generating {filename}...")
-    pattern = "abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789"
-
+    print(f"Generating {filename} (Phase 1: Holophrases)...")
+    phrases = [
+        "Look at that.",
+        "I want it.",
+        "Go away.",
+        "Give me.",
+        "Pick it up.",
+        "Put it down.",
+        "No more.",
+        "All gone.",
+        "Come here.",
+        "Help me.",
+        "What is that?",
+        "Stop it."
+    ]
     with open(filename, "w") as f:
         current_size = 0
         while current_size < size:
-            f.write(pattern)
-            current_size += len(pattern)
-            
-def generate_toddler_words(filename="ndcd/data/level2_words.txt", source_file="ndcd/data/google-10000-english.txt", size=150000):
-    """
-    Level 2: Toddler Vocabulary Expansion (Progressive).
-    Source: https://github.com/first20hours/google-10000-english/blob/master/google-10000-english.txt
-    
-    Strategy:
-    1.  Stage 1: Top 50 words (nouns/verbs). Dense repetition.
-    2.  Stage 2: Top 100 words. Simple 2-word pairs.
-    3.  Stage 3: Top 300 words. 3-word pairings.
-    4.  Stage 4: Top 1000 words. Mixed sentences.
-    """
-    url = "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english.txt"
-    download_file(url, source_file)
-    
-    print(f"Generating {filename} from {source_file} (Toddler Mode)...")
-    
-    vocab = []
-    if os.path.exists(source_file):
-        with open(source_file, "r") as f:
-            vocab = [line.strip() for line in f if line.strip()]
-    else:
-        print(f"Warning: {source_file} not found. Using fallback.")
-        vocab = ["the", "be", "to", "of", "and", "a", "in", "that", "have", "i"] # Fallback
+            phrase = random.choice(phrases)
+            f.write(phrase + " ")
+            current_size += len(phrase) + 1
 
+def generate_slot_and_frame(filename="ndcd/data/level2_slot_frame.txt", size=150000):
+    """
+    Phase 2: Slot-and-Frame Patterns
+    Humans generalize grammar by noticing variations within fixed, recurrent utterance frames.
+    """
+    print(f"Generating {filename} (Phase 2: Slot-and-Frame)...")
+    nouns = ["ball", "dog", "cat", "car", "apple", "cup", "book", "bear", "shoe", "bottle"]
+    
+    frames = [
+        "Where is the {noun}?",
+        "More {noun}, please.",
+        "I see the {noun}.",
+        "That is a big {noun}.",
+        "Give me the {noun}.",
+        "The {noun} fell down.",
+        "My {noun} is gone."
+    ]
+    
     with open(filename, "w") as f:
-        # --- Stage 1: The First 50 Words (Naming) ---
-        # Focus: Nouns, simple verbs. "Ball", "Mom", "Go", "No".
-        # We assume the list is frequency sorted.
-        stage1_vocab = vocab[:50]
-        f.write("---STAGE1--- ")
-        for _ in range(size // 10): # 10% of data
-            # Heavy repetition of single words: "Ball. Ball. Ball."
-            w = random.choice(stage1_vocab)
-            f.write(f"{w} {w} {w} ")
-            
-        # --- Stage 2: Top 100 Words (Attributes) ---
-        # Focus: Adjectives + Noun. "Big Ball", "Good Boy".
-        stage2_vocab = vocab[:100]
-        f.write("---STAGE2--- ")
-        for _ in range(size // 5): # 20% of data
-            w1 = random.choice(stage2_vocab)
-            w2 = random.choice(stage2_vocab)
-            f.write(f"{w1} {w2} ")
-            
-        # --- Stage 3: Top 300 Words (Simple Subject-Verb-Object) ---
-        stage3_vocab = vocab[:300]
-        f.write("---STAGE3--- ")
-        for _ in range(size // 3): # 30% of data
-             # "I go home", "You see dog"
-             w1 = random.choice(stage3_vocab)
-             w2 = random.choice(stage3_vocab)
-             w3 = random.choice(stage3_vocab)
-             f.write(f"{w1} {w2} {w3} ")
-
-        # --- Stage 4: Top 1000 Words (Explosion) ---
-        stage4_vocab = vocab[:1000]
-        f.write("---STAGE4--- ")
-        remaining_size = size - (size//10 + size//5 + size//3)
-        # Just generate tokens roughly to fill
-        # It's okay if exact size isn't perfect, just need lots of data.
-        for _ in range(remaining_size // 5): 
-             # Random 5-word "proto-sentences"
-             s = " ".join([random.choice(stage4_vocab) for _ in range(5)])
-             f.write(s + " ")
-
-def generate_quotes(filename="ndcd/data/level3_quotes.txt", source_file="ndcd/data/english.json", size=200000):
-    """
-    Level 3: Complex Quotes and Proverbs (from english.json).
-    Source: https://github.com/monkeytypegame/monkeytype/blob/master/frontend/static/quotes/english.json
-    """
-    url = "https://raw.githubusercontent.com/monkeytypegame/monkeytype/master/frontend/static/quotes/english.json"
-    download_file(url, source_file)
-    
-    print(f"Generating {filename} from {source_file}...")
-    
-    quotes = []
-    if os.path.exists(source_file):
-        try:
-            with open(source_file, "r") as f:
-                data = json.load(f)
-                # Structure: { "quotes": [ { "text": "...", ... }, ... ] }
-                if "quotes" in data:
-                    quotes = [item["text"] for item in data["quotes"]]
-        except Exception as e:
-            print(f"Error parsing json: {e}")
-            
-    if not quotes:
-        print("Warning: No quotes found. Using fallback.")
-        quotes = ["The quick brown fox jumps over the lazy dog."]
-
-    with open(filename, "w") as f:
-        # Write repeated quotes to learn grammar structure
-        # We want a lot of data. 
-        # Randomly sample quotes until size is reached
         current_size = 0
         while current_size < size:
-             q = random.choice(quotes)
-             f.write(q + " ")
-             current_size += len(q) + 1
+            frame = random.choice(frames)
+            noun = random.choice(nouns)
+            sentence = frame.format(noun=noun)
+            
+            f.write(sentence + " ")
+            current_size += len(sentence) + 1
+
+def generate_complex_constructions(filename="ndcd/data/level3_complex.txt", size=200000):
+    """
+    Phase 3: Complex Constructions and Hierarchical Expansion
+    Gradually introduce multi-clause sentences, varied verb tenses, and conjunctions.
+    """
+    print(f"Generating {filename} (Phase 3: Complex Constructions)...")
+    
+    sentences = [
+        "I want the ball because it is fun to bounce.",
+        "If we go to the slide, I will go first.",
+        "He was running fast and then he fell down.",
+        "We played on the swings until it got dark.",
+        "Because she shared her toy, we are friends.",
+        "Can you push me higher while I hold on?",
+        "When the bell rings, we have to go inside.",
+        "The sandbox is full of wet sand today, so we can build a castle.",
+        "I need to brush my teeth before I go to sleep.",
+        "Read me a story because I am not tired yet.",
+        "When the lights go out, the stars shine bright.",
+        "My blanket is soft, but my pillow is too hard.",
+        "If you sing a song, I will close my eyes.",
+        "He drank some water, and then he laid down.",
+        "Although it is late, I cannot sleep.",
+        "We put the toys away before getting into bed.",
+        "I am eating an apple because I am hungry.",
+        "When dinner is ready, we will sit at the table.",
+        "If you eat your vegetables, you can have dessert.",
+        "She spilled the milk, but she cleaned it up.",
+        "The soup is too hot, so I am blowing on it.",
+        "We baked cookies while it was raining outside.",
+        "Because I like pizza, I asked for another slice.",
+        "He washed his hands before he ate the sandwich."
+    ]
+    
+    with open(filename, "w") as f:
+        current_size = 0
+        while current_size < size:
+            sentence = random.choice(sentences)
+            f.write(sentence + " ")
+            current_size += len(sentence) + 1
+
+def generate_contextual_continuity(filename="ndcd/data/level4_contextual.txt", size=200000):
+    """
+    Phase 4: Contextual Continuity (Simulating Joint Attention)
+    Introduce "topic persistence." Generate 10 to 20 sentences in a row that share a latent theme 
+    or overlapping vocabulary before switching to a new topic.
+    """
+    print(f"Generating {filename} (Phase 4: Contextual Continuity)...")
+    
+    topics = {
+        "playground": [
+            "I want the ball because it is fun to bounce.",
+            "If we go to the slide, I will go first.",
+            "He was running fast and then he fell down.",
+            "We played on the swings until it got dark.",
+            "Because she shared her toy, we are friends.",
+            "Can you push me higher while I hold on?",
+            "When the bell rings, we have to go inside.",
+            "The sandbox is full of wet sand today, so we can build a castle."
+        ],
+        "bedtime": [
+            "I need to brush my teeth before I go to sleep.",
+            "Read me a story because I am not tired yet.",
+            "When the lights go out, the stars shine bright.",
+            "My blanket is soft, but my pillow is too hard.",
+            "If you sing a song, I will close my eyes.",
+            "He drank some water, and then he laid down.",
+            "Although it is late, I cannot sleep.",
+            "We put the toys away before getting into bed."
+        ],
+        "food": [
+            "I am eating an apple because I am hungry.",
+            "When dinner is ready, we will sit at the table.",
+            "If you eat your vegetables, you can have dessert.",
+            "She spilled the milk, but she cleaned it up.",
+            "The soup is too hot, so I am blowing on it.",
+            "We baked cookies while it was raining outside.",
+            "Because I like pizza, I asked for another slice.",
+            "He washed his hands before he ate the sandwich."
+        ]
+    }
+    
+    theme_keys = list(topics.keys())
+    
+    with open(filename, "w") as f:
+        current_size = 0
+        while current_size < size:
+            topic = random.choice(theme_keys)
+            sentences = topics[topic]
+            
+            repeats = random.randint(10, 20)
+            for _ in range(repeats):
+                sentence = random.choice(sentences)
+                f.write(sentence + " ")
+                current_size += len(sentence) + 1
+                if current_size >= size:
+                    break
 
 if __name__ == "__main__":
     os.makedirs("ndcd/data", exist_ok=True)
-    generate_chars()
-    generate_toddler_words()
-    generate_quotes()
+    generate_holophrases()
+    generate_slot_and_frame()
+    generate_complex_constructions()
+    generate_contextual_continuity()
     print("Curriculum data generated.")
