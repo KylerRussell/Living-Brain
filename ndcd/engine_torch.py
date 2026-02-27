@@ -21,7 +21,7 @@ def jit_solve_dynamics_imex(
     sparsity_alpha: float,  # 0.0 = no sparsity, 0.3 = moderate
     damping: float = 0.15,
     implicit_damping: float = 1.2,
-) -> Tuple[torch.Tensor, float]:
+) -> Tuple[torch.Tensor, float, int, float]:
     """
     Semi-implicit (IMEX) dynamics solver for predictive coding.
 
@@ -63,7 +63,17 @@ def jit_solve_dynamics_imex(
         old_state = current_s.clone()
 
         # Compute nonlinear term
-        rho = torch.tanh(current_s)
+        # Layer Normalization per module before activation
+        normed_s = current_s.clone()
+        for m in range(module_starts.size(0)):
+            ms = module_starts[m].item()
+            me = module_ends[m].item()
+            mod_s = current_s[ms:me]
+            mean = mod_s.mean()
+            var = mod_s.var(unbiased=False)
+            normed_s[ms:me] = (mod_s - mean) / torch.sqrt(var + 1e-5)
+            
+        rho = torch.tanh(normed_s)
         synaptic = torch.mv(weights, rho)
         nonlinear = synaptic + biases + input_vector
 
@@ -76,7 +86,7 @@ def jit_solve_dynamics_imex(
         # attractors. At 0.001, nodes can utilize the full dynamic range
         # of tanh, pushing activations into the saturated extremes required
         # to distinctly separate representations for different inputs.
-        current_s -= 0.001 * current_s.sign() * current_dt
+        current_s -= 0.0001 * current_s.sign() * current_dt
 
         # State clamping: ±1.5 keeps tanh ≈ 0.91 (18% gradient headroom)
         current_s = current_s.clamp(-1.5, 1.5)
@@ -104,7 +114,7 @@ def jit_solve_dynamics_imex(
                     topk_vals = torch.topk(mod_s.abs(), k).values
                     threshold = topk_vals[-1]
                     below = mod_s.abs() < threshold
-                    current_s[ms:me] = torch.where(below, mod_s * 0.05, mod_s)
+                    current_s[ms:me] = torch.where(below, mod_s * 0.10, mod_s)
                     current_s[ms:me] = current_s[ms:me].clamp(-1.5, 1.5)
 
         # Convergence check
@@ -125,7 +135,7 @@ def jit_solve_dynamics_imex(
         prev_diff = diff
         step_count += 1
 
-    return current_s, diff
+    return current_s, diff, step_count, current_dt
 
 
 class PredictiveCodingEngine:
@@ -261,11 +271,11 @@ class PredictiveCodingEngine:
 
         # Cascade transfer rates — significantly increased to allow transient
         # syntactic rules to meaningfully accumulate in surface weights.
-        self.tau_surface_to_mid = 10000.0   # was 1000.0
+        self.tau_surface_to_mid = 250.0   # was 500.0
         
         # We now track separate mid-to-deep transfer rates per edge depending on 
         # whether the source node belongs to a hippocampal or neocortical module.
-        self.tau_mid_to_deep = torch.ones_like(self.weight_values) * 50000.0
+        self.tau_mid_to_deep = torch.ones_like(self.weight_values) * 1000.0
 
         # Metaplastic scaling: how much accumulated deep weight
         # reduces surface learning rate. Reduced from 1.0 to 0.1 because
@@ -273,7 +283,7 @@ class PredictiveCodingEngine:
         # omega adding another ~10x). At 0.1, the cascade inertia of
         # w_deep already protects important weights without also killing
         # the effective learning rate.
-        self.meta_scale = 0.1  # was 1.0
+        self.meta_scale = 0.25  # was 0.5
 
         # FIX 1: Track the initial w_deep Frobenius norm as a target.
         # This is the SR-tuned initialization; effective weights should
@@ -343,7 +353,9 @@ class PredictiveCodingEngine:
 
         # Mid → Deep: Continuous leaky integration if enabled
         if include_deep:
-            transfer_md = self.w_mid / self.tau_mid_to_deep
+            gate_mask = self.w_mid.abs() > 0.02
+            transfer_md = torch.zeros_like(self.w_mid)
+            transfer_md[gate_mask] = self.w_mid[gate_mask] / self.tau_mid_to_deep[gate_mask]
             self.w_deep += transfer_md
             self.w_mid -= transfer_md
 
@@ -415,7 +427,7 @@ class PredictiveCodingEngine:
 
         # Single-phase IMEX settling
         # FIX 3: Pass module ranges and sparsity parameter to JIT solver
-        self.state, self.last_settle_diff = jit_solve_dynamics_imex(
+        self.state, self.last_settle_diff, self.last_settle_steps, self.last_settle_dt = jit_solve_dynamics_imex(
             self.state,
             self.indices,
             effective_weights,
@@ -477,12 +489,12 @@ class PredictiveCodingEngine:
             var_change = (rho - rho.mean()).pow(2).clamp(0, 5.0)
             self.temporal_variance_ema = 0.99 * self.temporal_variance_ema + 0.01 * var_change
             
-        # FIX: Drop precision weighting. The EMA was inflating prediction variance
-        # and suppressing top-down gradients to near zero.
-        precision = 1.0
+        # FIX: Rebalancing Generative Predictive Coding: Symmetric Scaling
+        precision = 5.0
         
         # Spatial error = actual state - precision-weighted top-down prediction
-        self.spatial_errors = self.state - precision * topdown_pred
+        # FIX 2: Implement Hebbian Gradient Clipping (± 1.0)
+        self.spatial_errors = (self.state - precision * topdown_pred).clamp(-1.0, 1.0)
 
         # Store top-down prediction variance for diagnostics
         self.topdown_pred_var = topdown_pred[512:].var().item()
@@ -574,9 +586,13 @@ class PredictiveCodingEngine:
             # between generative (TD) and associative (BU) pathways.
             bu_prev_rho_i = prev_rho[idx_i[self.bottomup_edge_mask]]
             bu_rho_j = rho[idx_j[self.bottomup_edge_mask]]
-            bu_w = self.effective_weights[self.bottomup_edge_mask]
+            # Base the decay only on the learned plastic components rather than the massive 
+            # effective_weights baseline.
+            bu_w_plastic = (self.w_surface[self.bottomup_edge_mask] + 
+                            self.w_mid[self.bottomup_edge_mask] + 
+                            self.w_deep[self.bottomup_edge_mask])
             # Pure associative Oja rule: co-occurrence with self-normalization
-            grad[self.bottomup_edge_mask] = 0.1 * (bu_prev_rho_i * bu_rho_j - bu_w * bu_rho_j.pow(2))
+            grad[self.bottomup_edge_mask] = 0.1 * (bu_prev_rho_i * bu_rho_j - bu_w_plastic * bu_rho_j.pow(2))
 
             # FIX 4: Zero out gradients for motor feedback edges so they don't learn independently
             grad[self.fb_motor_idx] = 0.0
@@ -659,7 +675,11 @@ class PredictiveCodingEngine:
                     # subtract the gradient of the penalty (minimize penalty)
                     grad[self.lateral_edge_mask] -= 0.05 * ortho_grad
 
-            # Gradient clipping
+            # Gradient clipping: Explicit max_norm=1.0 limit
+            grad_norm = grad.norm()
+            if grad_norm > 1.0:
+                grad = grad * (1.0 / grad_norm)
+            
             grad = grad.clamp(-1.0, 1.0)
 
             # Combined importance-aware learning rate (metaplastic + SI)
@@ -681,6 +701,15 @@ class PredictiveCodingEngine:
             # becomes excessively overwhelmed by incoming synaptic changes.
             cascade_all = self.w_surface + self.w_mid + self.w_deep
             
+            # Phase 1: Active Spectral Regularization
+            current_frob = cascade_all.norm().item()
+            target_max = 2.0 * self._initial_deep_frob
+            if current_frob > target_max:
+                scale_penalty = target_max / current_frob
+                self.w_surface *= scale_penalty
+                self.w_mid *= scale_penalty
+                cascade_all = self.w_surface + self.w_mid + self.w_deep
+
             # Prevent extreme runaway of cascade weights before RMS
             cascade_all = cascade_all.clamp(-3.0, 3.0)
             self.w_surface = cascade_all - self.w_mid - self.w_deep
@@ -750,8 +779,9 @@ class PredictiveCodingEngine:
                 # Element-wise multiplication for the diagonal approximation
                 a_mod = eta * t_error * prev
                 
-                # Apply the gradient
-                self.temporal_A[mod_idx] += a_mod.clamp(-0.05, 0.05)
+                # Apply the gradient with L2 Gradient Flossing
+                a_mod = a_mod.clamp(-0.05, 0.05) - 0.005 * self.temporal_A[mod_idx]
+                self.temporal_A[mod_idx] += a_mod
                 
                 # Hard clamp the diagonal so absolute value never exceeds 1.0
                 self.temporal_A[mod_idx].clamp_(-1.0, 1.0)
@@ -797,6 +827,45 @@ class PredictiveCodingEngine:
             if sr > target_max:
                 dampening_factor = target_max / sr
                 self.w_surface *= dampening_factor
+                self.w_mid *= dampening_factor
+                self.w_deep *= dampening_factor
+
+    def get_jacobian(self) -> torch.Tensor:
+        """
+        Computes the Jacobian of the temporal transition dynamics at the current state.
+        This enables gradient alignment tracking (Diagnostic Test 2).
+        
+        The temporal transition for a state x_i with the IMEX solver approximated is:
+        dx_i/dt = 1/tau_i * (-x_i + f(W x + b))
+        The Jacobian J_ij = d(dx_i/dt)/dx_j is approximated by:
+        J_ij = 1/tau_i * (-delta_ij + W_ij * f'(x_j))
+        
+        Returns:
+            [N, N] Dense Jacobian matrix tensor.
+        """
+        # Note: This is computationally expensive, use only during diagnostic phases.
+        with torch.no_grad():
+            N = self.num_nodes
+            
+            # f'(x_j) where f = tanh, f'(x) = 1 - tanh^2(x)
+            rho = torch.tanh(self.state)
+            drho = 1.0 - rho.pow(2)
+            
+            # Build sparse weight matrix
+            W_eff = torch.sparse_coo_tensor(
+                self.indices, self.effective_weights, 
+                (N, N)
+            ).to_dense() # Convert to dense for matrix operations
+            
+            # W_ij * f'(x_j)
+            W_drho = W_eff * drho.unsqueeze(0) # broadcast drho across rows
+            
+            # 1/tau_i * (-delta_ij + W_ij * f'(x_j))
+            taus_inv = 1.0 / self.taus.unsqueeze(1) # [N, 1]
+            I = torch.eye(N, dtype=torch.float32, device=self.device)
+            
+            J = taus_inv * (-I + W_drho)
+            return J
             
             self.last_sr = sr
             return sr, dampening_factor

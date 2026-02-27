@@ -1,0 +1,260 @@
+HSA_OVERRIDE_GFX_VERSION=11.0.0 PYTHONPATH=. /home/kyler/.miniconda3/envs/ndcd_env/bin/python ndcd/diagnostic_tests.py --nodes 2000 --modules 20 --train-first 
+Using device: cuda
+Initializing Hierarchical Modular Graph...
+Hierarchical graph: 2000 nodes, 390380 edges, 20 modules across 4 levels
+  Level 0: 8 modules, avg size 75 nodes
+  Level 1: 6 modules, avg size 74 nodes
+  Level 2: 4 modules, avg size 74 nodes
+  Level 3: 2 modules, avg size 74 nodes
+Free-edge spectral radius tuned: 0.8742 -> 1.15
+Edges: 151552 input-proj (2x, outside SR), 238828 free (SR-tuned to 1.15)
+Weight magnitudes: input=0.3720, free=0.0752
+Level 0 lateral edges: 19413 made positive, fan-in normalized (avg fan-in=32)
+Bottom-up edges: 61497 fan-in normalized
+Tied 36864 motor feedback edges to their forward counterparts (W_fb = W_fwd^T).
+CLS: 4 hippocampal modules, 16 neocortical modules
+Linear readout: 600 level-0 = 600 features → 256 classes
+
+Running Full Curriculum (100 steps per phase) before diagnostics...
+
+=== Starting Phase: SlotFrames ===
+Run started at: Fri Feb 27 01:22:02 2026
+--- Epoch 1/1 ---
+DEBUG Step 0: target_byte=32
+  Target node diff= 0.59463, Non-target avg diff= 0.01000
+  Max free state output= 0.31052, Min= -0.31557
+  Motor TD grads mean=|0.000001|
+  Motor BU grads mean=|0.000001|
+Step 0/10000 | Time: 1s | AvgLoss: 5.9428 | Energy: 4.8047 | Acc@1k: 0.00% | Top3@1k: 0.00% | ||s||/√N: 0.1284
+  PredErr: L0: s=0.0430 t=0.0373 | L1: s=0.0382 t=0.0412 | L2: s=0.0232 t=0.0243 | L3: s=0.0000 t=0.0121
+  Cascade: surface=0.0000 mid=0.0000 deep=0.0000 | SR: 0.0000
+  TopDown: L1→L0: μ=-0.0002 σ=0.0945 | L2→L1: μ=0.0000 σ=0.0941 | L3→L2: μ=-0.0010 σ=0.0943
+  Settle: last_diff=0.331405 | TD pred var: 0.000061
+  State var: L0=0.004412 | L1=0.005398 | L2=0.003085 | L3=0.001485
+
+Phase Complete. Avg Loss: 0.0006 | Avg Energy: 0.0005 | Final Acc: 0.00%
+
+=== Starting Phase: Complex ===
+Run started at: Fri Feb 27 01:22:03 2026
+--- Epoch 1/1 ---
+DEBUG Step 0: target_byte=32
+  Target node diff= 0.34165, Non-target avg diff= 0.01006
+  Max free state output= 0.56350, Min= -0.27105
+  Motor TD grads mean=|0.000001|
+  Motor BU grads mean=|0.000001|
+Step 0/10000 | Time: 0s | AvgLoss: 0.0000 | Energy: 5.5772 | Acc@1k: 100.00% | Top3@1k: 100.00% | ||s||/√N: 0.1369
+  PredErr: L0: s=0.0515 t=0.0070 | L1: s=0.0478 t=0.0104 | L2: s=0.0373 t=0.0115 | L3: s=0.0000 t=0.0107
+  Cascade: surface=0.0000 mid=0.0000 deep=0.0000 | SR: 0.0000
+  TopDown: L1→L0: μ=-0.0002 σ=0.0945 | L2→L1: μ=0.0000 σ=0.0941 | L3→L2: μ=-0.0010 σ=0.0943
+  Settle: last_diff=0.334661 | TD pred var: 0.000111
+  State var: L0=0.004899 | L1=0.005709 | L2=0.003583 | L3=0.002659
+
+Phase Complete. Avg Loss: 0.0000 | Avg Energy: 0.0006 | Final Acc: 100.00%
+
+=== Starting Phase: Context ===
+Run started at: Fri Feb 27 01:22:03 2026
+--- Epoch 1/1 ---
+DEBUG Step 0: target_byte=32
+  Target node diff= 0.23291, Non-target avg diff= 0.00917
+  Max free state output= 0.67224, Min= -0.18288
+  Motor TD grads mean=|0.000002|
+  Motor BU grads mean=|0.000002|
+Step 0/10000 | Time: 0s | AvgLoss: 0.0000 | Energy: 6.9159 | Acc@1k: 100.00% | Top3@1k: 100.00% | ||s||/√N: 0.1423
+  PredErr: L0: s=0.0585 t=0.0066 | L1: s=0.0499 t=0.0102 | L2: s=0.0381 t=0.0089 | L3: s=0.0000 t=0.0053
+  Cascade: surface=0.0001 mid=0.0000 deep=0.0000 | SR: 0.0000
+  TopDown: L1→L0: μ=-0.0002 σ=0.0945 | L2→L1: μ=0.0000 σ=0.0941 | L3→L2: μ=-0.0010 σ=0.0943
+  Settle: last_diff=0.317429 | TD pred var: 0.000139
+  State var: L0=0.005632 | L1=0.006054 | L2=0.003697 | L3=0.002749
+
+Phase Complete. Avg Loss: 0.0000 | Avg Energy: 0.0007 | Final Acc: 100.00%
+
+======================================================================
+LIVING-BRAIN DIAGNOSTIC TEST SUITE
+======================================================================
+
+──────────────────────────────────────────────────────────────────────
+TEST 1A: Output Node Prediction (PC hierarchy vs readout)
+──────────────────────────────────────────────────────────────────────
+  Train Readout accuracy: 15.80%
+  Eval Readout accuracy:  19.40%
+  Ratio (eval/train):     1.23x
+
+──────────────────────────────────────────────────────────────────────
+TEST 1B: Top-Down Prediction Quality
+──────────────────────────────────────────────────────────────────────
+  Level 0: correlation=-0.0071, pred_var=0.309630, actual_var=0.005632
+  Level 1: correlation=-0.0401, pred_var=0.002072, actual_var=0.006054
+  Level 2: correlation=0.0397, pred_var=0.000050, actual_var=0.003697
+  >> TOP-DOWN PREDICTIONS UNCORRELATED WITH STATE — predictions not informative
+
+──────────────────────────────────────────────────────────────────────
+TEST 1C: Edge Type Counts
+──────────────────────────────────────────────────────────────────────
+  Total edges: 390,380
+  Top-down (higher→lower): 174,137 (44.6%) | Avg Mag: 0.0000
+  Bottom-up (lower→higher): 174,137 (44.6%) | Avg Mag: 0.0000
+  Lateral (same level):     42,106 (10.8%) | Avg Mag: 0.0006
+
+──────────────────────────────────────────────────────────────────────
+TEST 2: Gradient Alignment by Edge Type
+──────────────────────────────────────────────────────────────────────
+  Jacobian spectral radius (approx via power iter): 35.023956
+  Step 1-3 norms: [29.394147872924805, 22.23642349243164, 40.02201461791992]
+  >> GRADIENTS EXPLODING — network is highly unstable
+
+──────────────────────────────────────────────────────────────────────
+TEST 3A: Cascade Flow Dynamics
+──────────────────────────────────────────────────────────────────────
+  Cascade dynamics over 500 steps:
+    Step    0: surface=0.000074, mid=0.000000, deep=0.000000
+    Step  100: surface=0.001071, mid=0.000184, deep=0.000000
+    Step  200: surface=0.001423, mid=0.000688, deep=0.000003
+    Step  300: surface=0.001422, mid=0.001204, deep=0.000032
+    Step  400: surface=0.001380, mid=0.001656, deep=0.000098
+    Step  450: surface=0.001371, mid=0.001859, deep=0.000143
+  Surface peak: 0.001439
+  Deep growth:  +0.000143
+  >> SURFACE NEVER ACCUMULATES — learning drains to deep too fast
+
+──────────────────────────────────────────────────────────────────────
+TEST 3B: Deep Weight Stability (diversity reg impact)
+──────────────────────────────────────────────────────────────────────
+  w_deep change from one update step:
+    Mean |Δ|: 0.000000
+    Max  |Δ|: 0.000000
+    |w_deep| mean: 0.0000
+    Change/magnitude ratio: 0.0000
+
+──────────────────────────────────────────────────────────────────────
+TEST 4A: Replay Attractor Sparsity
+──────────────────────────────────────────────────────────────────────
+  Attractor sparsity (settled from noise, no input):
+    |tanh(x)| > 0.1: 732/2000 (36.6%)
+    |tanh(x)| > 0.3: 435/2000 (21.8%)
+    |tanh(x)| > 0.5: 242/2000 (12.1%)
+    |tanh(x)| > 0.7: 160/2000 (8.0%)
+    |tanh(x)| > 0.9: 66/2000 (3.3%)
+
+──────────────────────────────────────────────────────────────────────
+TEST 4B: Replay Pattern Diversity
+──────────────────────────────────────────────────────────────────────
+  Replay pattern diversity (10 random inits, len 15):
+    Sample generation 1: '4?J?Q??f?` +?12'
+    Sample generation 2: '??1 e??????5???'
+    Mean normalized Levenshtein: 0.4889
+
+──────────────────────────────────────────────────────────────────────
+TEST 5A: State Distribution (saturation check)
+──────────────────────────────────────────────────────────────────────
+  State distribution (2000 nodes):
+    Near clamp (|s|>1.4):      0.1% (tanh' < 0.035)
+    Moderate (0.5<|s|<1.4):    0.5%
+    Linear region (|s|<0.5):   99.4% (tanh' > 0.79)
+  State histogram:
+    [-1.75, -1.25]:     0 ( 0.0%) 
+    [-1.25, -0.75]:     0 ( 0.0%) 
+    [-0.75, -0.25]:     0 ( 0.0%) 
+    [-0.25, +0.25]:  1946 (97.3%) #################################################################################################
+    [+0.25, +0.75]:    52 ( 2.6%) ##
+    [+0.75, +1.25]:     0 ( 0.0%) 
+    [+1.25, +1.75]:     1 ( 0.1%) 
+
+──────────────────────────────────────────────────────────────────────
+TEST 5B: Input Sensitivity
+──────────────────────────────────────────────────────────────────────
+  'a' vs 'z': L2_diff=5.3659, cos_sim=0.7853
+    L0 cos_sim: 0.5358
+    L1 cos_sim: 0.6788
+    L2 cos_sim: 0.8618
+    L3 cos_sim: 0.9557
+  'a' vs ' ': L2_diff=5.9926, cos_sim=0.7264
+    L0 cos_sim: 0.4120
+    L1 cos_sim: 0.6185
+    L2 cos_sim: 0.8211
+    L3 cos_sim: 0.9362
+  'a' vs 'e': L2_diff=5.2374, cos_sim=0.7931
+    L0 cos_sim: 0.5269
+    L1 cos_sim: 0.6663
+    L2 cos_sim: 0.7906
+    L3 cos_sim: 0.9502
+  'z' vs ' ': L2_diff=5.8260, cos_sim=0.7429
+    L0 cos_sim: 0.4406
+    L1 cos_sim: 0.6141
+    L2 cos_sim: 0.8549
+    L3 cos_sim: 0.9429
+  'z' vs 'e': L2_diff=5.5365, cos_sim=0.7701
+    L0 cos_sim: 0.5022
+    L1 cos_sim: 0.6361
+    L2 cos_sim: 0.7778
+    L3 cos_sim: 0.8913
+  ' ' vs 'e': L2_diff=5.7969, cos_sim=0.7423
+    L0 cos_sim: 0.4195
+    L1 cos_sim: 0.5724
+    L2 cos_sim: 0.8045
+    L3 cos_sim: 0.9310
+
+──────────────────────────────────────────────────────────────────────
+TEST 6: Temporal Prediction Usefulness
+──────────────────────────────────────────────────────────────────────
+  Temporal transition matrices A_l (diagonal approximation):
+  Level 0 (8 modules): A_mean=0.2053, A_std=0.2318, deviation_from_0.9=0.6959
+  Level 1 (6 modules): A_mean=0.2327, A_std=0.2634, deviation_from_0.9=0.6738
+  Level 2 (4 modules): A_mean=0.3181, A_std=0.2868, deviation_from_0.9=0.5900
+  Level 3 (2 modules): A_mean=0.3695, A_std=0.3181, deviation_from_0.9=0.5436
+
+──────────────────────────────────────────────────────────────────────
+TEST 7: CLS Hippocampal vs Neocortical Dynamics
+──────────────────────────────────────────────────────────────────────
+  Mid-to-Deep Transfer (approx): hippo=0.000000, neo=0.000000, ratio=0.00x
+  Deep Weight Mag: hippo=0.000000, neo=0.000000
+
+──────────────────────────────────────────────────────────────────────
+TEST 8: Retention with Re-trained Readout
+──────────────────────────────────────────────────────────────────────
+  Training fresh readout (2000 steps)...
+  Re-trained readout accuracy:  48.10%
+  Original readout accuracy:    5.00%
+  Chance:                       0.39%
+  >> RESERVOIR RETAINS INFO but current readout is miscalibrated
+     Phase boundary reset destroyed readout, not reservoir
+
+──────────────────────────────────────────────────────────────────────
+TEST 9: Runtime Spectral Radius
+──────────────────────────────────────────────────────────────────────
+  Effective spectral radius (cascade sum): 0.57
+  With STP modulation:                     0.23
+  Initial target was:                      0.80
+
+──────────────────────────────────────────────────────────────────────
+TEST 10: IMEX Settle Convergence
+──────────────────────────────────────────────────────────────────────
+  Input 'a': 5.2587 → 0.0008 (converged=True, min_diff=0.0008)
+    Steps 0-4:  ['5.259', '1.978', '1.210', '0.779', '0.531']
+    Steps 45-49: ['0.001', '0.001', '0.001', '0.001', '0.001']
+  Input ' ': 5.2286 → 0.0008 (converged=True, min_diff=0.0008)
+    Steps 0-4:  ['5.229', '1.863', '1.133', '0.730', '0.497']
+    Steps 45-49: ['0.001', '0.001', '0.001', '0.001', '0.001']
+  Input 'z': 5.2894 → 0.0008 (converged=True, min_diff=0.0008)
+    Steps 0-4:  ['5.289', '2.015', '1.237', '0.797', '0.542']
+    Steps 45-49: ['0.001', '0.001', '0.001', '0.001', '0.001']
+
+======================================================================
+DIAGNOSTIC SUMMARY
+======================================================================
+  [OK] Test 1A: Strong generalization (ratio=1.23x, eval=19.4%)
+  [!!] Test 1B: Autonomous Top-down weak (avg |corr|=0.029, pred_var=0.1039)
+  [!!] Test 1C: TD=44.6%, BU_mag=0.00, Lat_mag=0.00
+  [XX] Test 2: Gradients vanish/explode (SR=35.023956)
+  [XX] Test 3A: Surface peak=0.001439 (drains too fast), deep growth=+0.0001
+  [OK] Test 3B: Deep weights stable (change/mag ratio=0.00000)
+  [OK] Test 4A: Attractors are sparse (12% active at |tanh|>0.5)
+  [OK] Test 4B: Diverse generated attractors (mean Lev=0.49)
+  [OK] Test 5A: State not saturated (0% near clamp, 99% linear)
+  [OK] Test 5B: Input-sensitive (avg cos_sim=0.760)
+  [OK] Test 6: Temporal A learned (avg deviation from init = 0.653)
+  [!!] Test 7: Negligible transfer happening
+  [OK] Test 8: Reservoir retains info (retrained=48.1%, original=5.0%)
+  [OK] Test 9: Spectral radius = 0.57 (reasonable range)
+  [OK] Test 10: IMEX converges (avg final diff = 0.0008)
+
+  

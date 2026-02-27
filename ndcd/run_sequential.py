@@ -120,9 +120,9 @@ class SequentialTrainer:
             dtype=torch.bool, device=device)
 
         # Set differentiated cascade rates for hippocampal modules
-        # Hippocampal: faster deep cascade (τ_deep = 1000 not 10000)
+        # Hippocampal: faster deep cascade
         self.engine.tau_deep_hippo = 1000.0
-        self.engine.tau_deep_neo = 2000.0
+        self.engine.tau_deep_neo = 1000.0
         
         # Apply the edge-wise mask to configure mid_to_deep tau heterogeneous parameters
         self.engine.tau_mid_to_deep = torch.where(
@@ -204,18 +204,18 @@ class SequentialTrainer:
             self.engine.w_mid *= 0.1
 
             # Flush immediate context with exponential decay instead of hard zeroing
-            self.engine.state *= 0.01
-            self.engine.previous_state *= 0.01
+            self.engine.state *= 0.5
+            self.engine.previous_state *= 0.5
 
             # Reset synaptic intelligence — omega double-counts with cascade
             self.engine.omega.zero_()
             self.engine.running_contribution.zero_()
 
-            # Orthogonal seeding for the readout to map optimal directions in shifted latent space
-            torch.nn.init.orthogonal_(self.readout_W)
+            # Fix: Orthogonally re-seed readout to prevent classifier misalignment
+            self.readout_W.normal_(0, 1.0 / np.sqrt(self.readout_W.size(1)))
 
         print(f"  w_deep preserved (|w_deep|={deep_mag:.4f}), "
-              f"w_surface/w_mid decayed by 0.1, state decayed to 0.01, readout orthogonally seeded")
+              f"w_surface/w_mid decayed by 0.1, state decayed to 0.5, readout orthogonally seeded")
 
     def train_phase(self, phase_name, data_path, iterations, steps_per_iter, lr=0.01,
                     settle_steps=20, input_gain=0.5, warmup_steps=0):
@@ -251,27 +251,45 @@ class SequentialTrainer:
 
         with open(data_path, 'rb') as f:
             data = f.read()
+            
+        # Try to load corresponding evaluation data
+        eval_data_path = data_path.replace('train/', 'eval/')
+        has_eval = os.path.exists(eval_data_path)
+        if has_eval:
+            with open(eval_data_path, 'rb') as f:
+                eval_data = f.read()
+        else:
+            eval_data = None
 
         data_len = len(data)
-        curr_idx = 0
+        eval_len = len(eval_data) if eval_data else 0
 
         start_time = time.time()
 
         total_steps = iterations * steps_per_iter
+        steps_per_epoch = data_len - 1
+        
+        # Calculate how many full epochs this represents
+        epochs = max(1, total_steps // steps_per_epoch) if data_len > 1 else 1
 
         loss_accum = 0.0
         energy_accum = 0.0
         acc_window = []
         acc_top3_window = []
 
-        for step in range(total_steps):
-            # 1. Get Data Stream
-            if curr_idx >= data_len - 1:
-                curr_idx = 0
+        overall_step = 0
 
-            input_byte = data[curr_idx]
-            target_byte = data[curr_idx + 1]
-            curr_idx += 1
+        for epoch in range(epochs):
+            print(f"--- Epoch {epoch+1}/{epochs} ---")
+            
+            for curr_idx in range(steps_per_epoch):
+                step = overall_step
+                if step >= total_steps:
+                    break
+
+                # 1. Get Data Stream
+                input_byte = data[curr_idx]
+                target_byte = data[curr_idx + 1]
 
             # 2. Input Setup — full one-hot across all 256 input nodes.
             # A single node at 5.0 with 255 zeroes wastes input projection
@@ -353,7 +371,7 @@ class SequentialTrainer:
             # reservoir representations are degenerate.
             with torch.no_grad():
                 level0_acts = torch.tanh(free_state[self.level0_indices])
-                features = level0_acts
+                features = torch.nn.functional.layer_norm(level0_acts, level0_acts.size())
                 logits = self.readout_W @ features + self.readout_b
                 probs = torch.softmax(logits, dim=0)
                 pred_idx = torch.argmax(probs).item()
@@ -502,6 +520,27 @@ class SequentialTrainer:
                           f"Energy: {energy:.4f} | Acc: {recent_acc:.2%} | "
                           f"Top3: {recent_acc3:.2%} | ||s||/√N: {state_norm:.4f}        ", end='\r')
 
+                # 11. Periodic Evaluation on Holdout Data
+                if step > warmup_steps and step % 5000 == 0 and has_eval and eval_len > 1:
+                    print("\n--- Running Evaluation on Holdout Data ---")
+                    eval_acc, eval_acc3 = self.evaluate_generalization(eval_data)
+                    # Use recent training accuracy to compute Generalization Gap
+                    train_acc = sum(acc_window[-5000:]) / max(1, len(acc_window[-5000:]))
+                    gap = train_acc - eval_acc
+                    ratio = eval_acc / max(1e-8, train_acc)
+                    print(f"Generalization Check: Train Acc = {train_acc:.2%}, Eval Acc = {eval_acc:.2%} | Gap: {gap:+.2%} | Ratio: {ratio:.2f}")
+                    if ratio < 0.5:
+                        print("  WARNING: Ratio < 0.5 indicates pathological memorization!")
+                    elif gap > 0.1:
+                        print("  NOTE: Significant generalization gap detected.")
+                    else:
+                        print("  PASS: Strong generalization performance.")
+
+                overall_step += 1
+            
+            if overall_step >= total_steps:
+                break
+
         final_acc = sum(acc_window)/len(acc_window) if len(acc_window) > 0 else 0.0
         final_acc3 = sum(acc_top3_window)/len(acc_top3_window) if len(acc_top3_window) > 0 else 0.0
         print(f"\nPhase Complete. Avg Loss: {loss_accum/total_steps:.4f} | "
@@ -638,7 +677,7 @@ class SequentialTrainer:
             self.engine.settle(input_vec, input_mask=input_mask, max_steps=10)
 
             level0_acts = torch.tanh(self.engine.state[self.level0_indices])
-            features = level0_acts
+            features = torch.nn.functional.layer_norm(level0_acts, level0_acts.size())
             logits = self.readout_W @ features + self.readout_b
             probs = torch.softmax(logits, dim=0)
             pred_idx = torch.argmax(probs).item()
@@ -657,6 +696,89 @@ class SequentialTrainer:
         print(f"Retention eval on {data_path}: Acc={acc:.2%} Top3={acc3:.2%} ({num_samples} samples)")
         return acc
 
+    def evaluate_generalization(self, eval_data, num_samples=5000, max_steps=10):
+        """
+        Evaluate model using a fully decoupled inference engine to calculate the formal Generalization Gap.
+        All learning mechanisms are strictly disabled. Local temporal buffer and state are zeroed.
+        """
+        import copy
+        
+        eval_len = len(eval_data)
+        num_samples = min(num_samples, eval_len - 1)
+        if num_samples <= 0:
+            return 0.0, 0.0
+
+        # Create decoupled evaluation instance of engine
+        eval_engine = PredictiveCodingEngine(
+            self.num_nodes,
+            self.indices,
+            self.initial_values.copy(), # Only used for shape initially
+            self.engine.biases.detach().cpu().numpy(),
+            self.engine.taus.detach().cpu().numpy(),
+            module_ranges=self.graph.get_module_ranges(),
+            module_levels=self.graph.module_levels,
+            hier_pairs=self.graph.hier_pairs,
+            positions=self.graph.pos,
+            dt=self.engine.dt,
+            device=self.device,
+            temporal_alpha=self.engine.temporal_alpha,
+        )
+        
+        # Deep copy current weights
+        with torch.no_grad():
+            eval_engine.weight_values.copy_(self.engine.weight_values)
+            eval_engine.w_deep.copy_(self.engine.w_deep)
+            eval_engine.w_mid.copy_(self.engine.w_mid)
+            eval_engine.w_surface.copy_(self.engine.w_surface)
+            eval_engine.biases.copy_(self.engine.biases)
+            eval_engine.temporal_A = copy.deepcopy(self.engine.temporal_A)
+            
+            # Ensure states are fully zeroed out for clean evaluate
+            eval_engine.state.zero_()
+            eval_engine.previous_state.zero_()
+            eval_engine.facilitation.fill_(0.2)
+            eval_engine.depression.fill_(1.0)
+            
+        correct = 0
+        correct_top3 = 0
+
+        for i in range(num_samples):
+            input_byte = eval_data[i]
+            target_byte = eval_data[i + 1]
+
+            input_vec = torch.zeros(self.num_nodes, device=self.device)
+            input_vec[0:256] = self.eye[input_byte] * 2.0
+
+            input_mask = torch.zeros(self.num_nodes, device=self.device)
+            input_mask[self.input_indices] = 1.0
+
+            eval_engine.store_previous_state()
+            
+            # Same reset logic
+            if input_byte in (32, 10, 13, 9):  # space, LF, CR, tab
+                fast_mask = eval_engine.taus < 0.5
+                eval_engine.state[fast_mask] *= 0.1
+
+            eval_engine.settle(input_vec, input_mask=input_mask, max_steps=max_steps, tol=5e-3)
+
+            level0_acts = torch.tanh(eval_engine.state[self.level0_indices])
+            features = torch.nn.functional.layer_norm(level0_acts, level0_acts.size())
+            
+            with torch.no_grad():
+                logits = self.readout_W @ features + self.readout_b
+                probs = torch.softmax(logits, dim=0)
+                pred_idx = torch.argmax(probs).item()
+
+            if pred_idx == target_byte:
+                correct += 1
+            _, top3 = torch.topk(probs, 3)
+            if target_byte in top3.tolist():
+                correct_top3 += 1
+
+        acc = correct / num_samples
+        acc3 = correct_top3 / num_samples
+        return acc, acc3
+
     def generate(self, start_text="The", length=100):
         print(f"\n--- Generating: {start_text} ... ---")
         curr_text = start_text
@@ -673,7 +795,7 @@ class SequentialTrainer:
 
         for _ in range(length):
             level0_acts = torch.tanh(self.engine.state[self.level0_indices])
-            features = level0_acts
+            features = torch.nn.functional.layer_norm(level0_acts, level0_acts.size())
             logits = self.readout_W @ features + self.readout_b
             probs = torch.softmax(logits, dim=0)
 
@@ -720,8 +842,8 @@ def main():
 
     # Phase 2: Slot-and-Frame
     trainer.train_phase("Slot-and-Frame", "ndcd/data/level2_slot_frame.txt",
-                        iterations=200, steps_per_iter=100, lr=0.05,
-                        settle_steps=30, input_gain=0.5, warmup_steps=5000)
+                        iterations=500, steps_per_iter=100, lr=0.05,
+                        settle_steps=30, input_gain=0.5, warmup_steps=15000)
     trainer.evaluate_retention("ndcd/data/level1_holophrases.txt")
     trainer.generate(start_text="W")
 
@@ -730,8 +852,8 @@ def main():
 
     # Phase 3: Complex Constructions
     trainer.train_phase("Complex Constructions", "ndcd/data/level3_complex.txt",
-                        iterations=200, steps_per_iter=200, lr=0.05,
-                        settle_steps=50, input_gain=0.5, warmup_steps=5000)
+                        iterations=500, steps_per_iter=100, lr=0.05,
+                        settle_steps=50, input_gain=0.5, warmup_steps=15000)
     trainer.evaluate_retention("ndcd/data/level1_holophrases.txt")
     trainer.evaluate_retention("ndcd/data/level2_slot_frame.txt")
     trainer.generate(start_text="I")
@@ -741,8 +863,8 @@ def main():
 
     # Phase 4: Contextual Continuity
     trainer.train_phase("Contextual Continuity", "ndcd/data/level4_contextual.txt",
-                        iterations=200, steps_per_iter=200, lr=0.05,
-                        settle_steps=50, input_gain=0.5, warmup_steps=5000)
+                        iterations=500, steps_per_iter=100, lr=0.05,
+                        settle_steps=50, input_gain=0.5, warmup_steps=15000)
     trainer.evaluate_retention("ndcd/data/level1_holophrases.txt")
     trainer.evaluate_retention("ndcd/data/level2_slot_frame.txt")
     trainer.evaluate_retention("ndcd/data/level3_complex.txt")

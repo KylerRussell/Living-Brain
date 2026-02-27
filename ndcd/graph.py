@@ -258,7 +258,7 @@ class DynamicGraph:
             shape=(num_nodes, num_nodes)
         )
 
-        target_sr = 0.85
+        target_sr = 1.15
         try:
             from scipy.sparse.linalg import eigs as sp_eigs
             eigvals = sp_eigs(free_sparse.astype(np.float64),
@@ -283,7 +283,7 @@ class DynamicGraph:
         # we must multiply the input weights by sqrt(fan_in) for the input projection.
         # With avg fan-in ~250 from I/O nodes, sqrt(250) ≈ 15.8.
         # We cap it at 15.0 to maintain solver stability.
-        weight_vals[input_proj_mask] *= 15.0
+        weight_vals[input_proj_mask] *= 6.5
 
         n_input = int(input_proj_mask.sum())
         n_free = int(free_mask.sum())
@@ -321,14 +321,14 @@ class DynamicGraph:
         # Only boost internal hierarchy (src >= 512), not I/O feedback.
         bu_mask = (src_levels_arr < dst_levels_arr) & free_mask & (edge_rows >= 512)
         
-        # Fan-in normalize the bottom-up edges and scale them so their sum ~ 2.0
+        # Fan-in normalize the bottom-up edges without artificial static amplification.
         bu_dst_nodes = edge_cols[bu_mask]
         unique_bu_dst, bu_dst_counts = np.unique(bu_dst_nodes, return_counts=True)
         bu_fan_in_map = dict(zip(unique_bu_dst, bu_dst_counts))
         bu_fan_in = np.array([bu_fan_in_map.get(d, 1) for d in bu_dst_nodes], dtype=np.float32)
         
-        weight_vals[bu_mask] = (weight_vals[bu_mask] / np.sqrt(bu_fan_in)) * 5.0
-        print(f"Bottom-up edges: {int(bu_mask.sum())} boosted to prevent vanishing activations")
+        weight_vals[bu_mask] = (weight_vals[bu_mask] / np.sqrt(bu_fan_in))
+        print(f"Bottom-up edges: {int(bu_mask.sum())} fan-in normalized")
 
         # FIX 4: Decouple & enforce symmetric motor connections (Motor -> Level 0)
         fwd_motor_mask = (edge_rows >= 512) & (edge_cols >= 256) & (edge_cols < 512)
@@ -401,8 +401,8 @@ class DynamicGraph:
         """Build map of which neocortical modules each hippocampal module connects to."""
         self.hippo_to_neo = {h: set() for h in self.hippocampal_modules}
         for r, c in zip(edge_rows, edge_cols):
-            src_mod = self.node_to_module[r]
-            dst_mod = self.node_to_module[c]
+            src_mod = int(self.node_to_module[r])
+            dst_mod = int(self.node_to_module[c])
             if src_mod in self.hippocampal_modules and dst_mod in self.neocortical_modules:
                 self.hippo_to_neo[src_mod].add(dst_mod)
             elif dst_mod in self.hippocampal_modules and src_mod in self.neocortical_modules:
@@ -447,3 +447,18 @@ class DynamicGraph:
         indices = np.stack([coo.row.astype(np.int64), coo.col.astype(np.int64)])
         values = coo.data.astype(np.float32)
         return indices, values
+
+    @property
+    def hippocampal_modules_set(self):
+        """Returns the set of hippocampal module IDs."""
+        return self.hippocampal_modules
+
+    @property
+    def neocortical_modules_set(self):
+        """Returns the set of neocortical module IDs."""
+        return self.neocortical_modules
+
+    @property
+    def hippo_to_neo_mapping(self):
+        """Returns the mapping of hippocampal to connected neocortical module IDs."""
+        return self.hippo_to_neo

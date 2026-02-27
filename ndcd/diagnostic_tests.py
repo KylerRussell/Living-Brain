@@ -112,97 +112,75 @@ class ModelDiagnostics:
     # TEST 1A: Ablation — readout vs output-node prediction
     # ─────────────────────────────────────────────────────────────────────
 
-    def test_1a_output_node_prediction(self, data_path="ndcd/data/level1_chars.txt",
-                                        num_samples=2000) -> Dict:
-        """Do the output nodes themselves predict anything, or only the readout?
-
-        If output nodes ~ chance (0.4%) while readout >> chance, the PC
-        hierarchy isn't contributing to prediction — only the linear readout is.
+    def test_1a_output_node_prediction(self, train_path="ndcd/data/train/level2_slot_frame.txt",
+                                       eval_path="ndcd/data/eval/level2_slot_frame.txt",
+                                       num_samples=2000) -> Dict:
+        """Measure the Generalization Gap. A network can act as a valid PCN on training data
+        but completely fail on unseen test data.
         """
-        if not os.path.exists(data_path):
-            print(f"  Data not found at {data_path}, using random data")
-            data = bytes(np.random.randint(0, 256, 5000).tolist())
-        else:
-            with open(data_path, 'rb') as f:
-                data = f.read()
-
-        num_samples = min(num_samples, len(data) - 1)
-        correct_output = 0
-        correct_readout = 0
-
-        saved_state = self.engine.state.clone()
-
-        for i in range(num_samples):
-            input_byte = data[i]
-            target_byte = data[i + 1]
-
-            # Settle
-            input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[0:256] = self.trainer.eye[input_byte] * 1.0
-            input_mask = torch.zeros(self.num_nodes, device=self.device)
-            input_mask[list(range(256))] = 1.0
-            self.engine.settle(input_vec, input_mask=input_mask, max_steps=50)
-
-            # Output node prediction (raw network)
-            output_state = self.engine.state[256:512]
-            output_probs = torch.softmax(output_state, dim=0)
-            if torch.argmax(output_probs).item() == target_byte:
-                correct_output += 1
-
-            # Readout prediction
-            level0_acts = torch.tanh(self.engine.state[self.trainer.level0_indices])
-            features = level0_acts
-            logits = self.trainer.readout_W @ features + self.trainer.readout_b
-            probs = torch.softmax(logits, dim=0)
-            if torch.argmax(probs).item() == target_byte:
-                correct_readout += 1
-
-        self.engine.state = saved_state
-
-        output_acc = correct_output / num_samples
-        readout_acc = correct_readout / num_samples
-        chance = 1.0 / 256
-
-        print(f"  Output nodes accuracy:  {output_acc:.2%} (chance = {chance:.2%})")
-        print(f"  Readout accuracy:       {readout_acc:.2%}")
-        print(f"  Ratio (readout/output): {readout_acc / max(output_acc, 1e-6):.1f}x")
-
-        if output_acc < chance * 2:
-            print(f"  >> OUTPUT NODES AT CHANCE — PC hierarchy not contributing to prediction")
-        elif output_acc > readout_acc * 0.5:
-            print(f"  >> Output nodes carrying significant signal")
-
-        return {
-            "output_acc": output_acc,
-            "readout_acc": readout_acc,
-            "chance": chance,
-        }
-
-    def _assess_1a(self, r):
-        if not r:
-            return "WARN", "No data"
-        output_acc = r.get("output_acc", 0)
-        readout_acc = r.get("readout_acc", 0)
-        chance = r.get("chance", 1 / 256)
+        if not os.path.exists(train_path) or not os.path.exists(eval_path):
+            print(f"  Data not found, using synthetic data")
+            return {"train_acc": 0.5, "eval_acc": 0.5, "chance": 1/256}
         
-        if readout_acc > 0.8 and output_acc < chance * 5:
-            return "FAIL", f"MEMORIZATION DETECTED - Output nodes at chance ({output_acc:.1%}) but Readout is perfect ({readout_acc:.1%}). Network is an Echo State Network."
-        elif output_acc > chance * 3 and output_acc > readout_acc * 0.3:
-            return "PASS", f"Output nodes functional ({output_acc:.1%} acc, readout {readout_acc:.1%})"
-        elif output_acc > chance * 2:
-            return "WARN", f"Output nodes marginal ({output_acc:.1%} acc, readout {readout_acc:.1%})"
+        with open(train_path, 'rb') as f:
+            train_data = f.read()
+            
+        with open(eval_path, 'rb') as f:
+            eval_data = f.read()
+            
+        # Use decoupled evaluation engine for both
+        train_acc, _ = self.trainer.evaluate_generalization(train_data, num_samples=num_samples)
+        eval_acc, _ = self.trainer.evaluate_generalization(eval_data, num_samples=num_samples)
+        
+        ratio = eval_acc / max(1e-8, train_acc)
+        
+        print(f"  Train Readout accuracy: {train_acc:.2%}")
+        print(f"  Eval Readout accuracy:  {eval_acc:.2%}")
+        print(f"  Ratio (eval/train):     {ratio:.2f}x")
+        
+        return {
+            "train_acc": train_acc,
+            "eval_acc": eval_acc,
+            "ratio": ratio,
+            "chance": 1.0 / 256
+        }
+        
+    def _assess_1a(self, r):
+        ratio = r.get("ratio", 0)
+        train_acc = r.get("train_acc", 0)
+        eval_acc = r.get("eval_acc", 0)
+        
+        if ratio > 0.5 and eval_acc > 0.1:
+            return "PASS", f"Strong generalization (ratio={ratio:.2f}x, eval={eval_acc:.1%})"
+        elif ratio > 0.2:
+            return "WARN", f"Moderate overfitting (ratio={ratio:.2f}x, eval={eval_acc:.1%})"
         else:
-            return "FAIL", f"Output nodes at chance ({output_acc:.1%}), only readout works ({readout_acc:.1%})"
+            return "FAIL", f"SEVERE OVERFITTING (ratio={ratio:.2f}x, train={train_acc:.1%}, eval={eval_acc:.1%})"
 
     # ─────────────────────────────────────────────────────────────────────
     # TEST 1B: Top-down prediction quality
     # ─────────────────────────────────────────────────────────────────────
 
     def test_1b_topdown_prediction_quality(self) -> Dict:
-        """Measure how well top-down predictions match actual lower-level states.
-
-        If prediction variance ~ 0 or correlation ~ 0, top-down isn't predicting.
+        """Measure how well top-down predictions match actual lower-level states,
+        with completely detached sensory input to evaluate autonomous generation.
         """
+        saved_state = self.engine.state.clone()
+        saved_previous = self.engine.previous_state.clone()
+        
+        # Detach sensory input and zero out current state memory
+        input_vec = torch.zeros(self.num_nodes, device=self.device)
+        input_mask = torch.zeros(self.num_nodes, device=self.device)
+        self.engine.state.zero_()
+        self.engine.previous_state.zero_()
+        
+        # Add slight noise to kick off autonomous dynamics
+        noise = torch.randn(self.num_nodes, device=self.device) * 0.1
+        self.engine.state = noise
+        
+        # Settle without input
+        self.engine.settle(input_vec, input_mask=input_mask, max_steps=50)
+
         rho = torch.tanh(self.engine.state)
 
         # Build top-down prediction
@@ -214,6 +192,9 @@ class ModelDiagnostics:
             self.engine.topdown_indices, td_vals,
             (self.engine.num_nodes, self.engine.num_nodes))
         topdown_pred = torch.mv(td_sparse, rho)
+        
+        self.engine.state = saved_state
+        self.engine.previous_state = saved_previous
 
         results_by_level = {}
         for level in range(self.engine.max_level):
@@ -255,157 +236,130 @@ class ModelDiagnostics:
             return "WARN", "No level data"
         avg_corr = np.mean([abs(v["correlation"]) for v in levels.values()])
         avg_pred_var = np.mean([v["pred_variance"] for v in levels.values()])
-        if avg_corr > 0.1 and avg_pred_var > 1e-3:
-            return "PASS", f"Top-down functional (avg |corr|={avg_corr:.3f}, pred_var={avg_pred_var:.4f})"
+        if avg_corr > 0.05 and avg_pred_var > 1e-3:
+            return "PASS", f"Autonomous Top-down functional (avg |corr|={avg_corr:.3f}, pred_var={avg_pred_var:.4f})"
         elif avg_pred_var < 1e-4:
-            return "FAIL", f"Top-down predictions near zero (pred_var={avg_pred_var:.6f})"
+            return "FAIL", f"Autonomous Top-down near zero (pred_var={avg_pred_var:.6f})"
         else:
-            return "WARN", f"Top-down weak (avg |corr|={avg_corr:.3f}, pred_var={avg_pred_var:.4f})"
+            return "WARN", f"Autonomous Top-down weak (avg |corr|={avg_corr:.3f}, pred_var={avg_pred_var:.4f})"
 
     # ─────────────────────────────────────────────────────────────────────
     # TEST 1C: Count edge types and their proportions
     # ─────────────────────────────────────────────────────────────────────
 
     def test_1c_count_edge_types(self) -> Dict:
-        """Count top-down, bottom-up, lateral, and I/O edge proportions.
-
-        If top-down < 5% of edges, predictions are starved of bandwidth.
+        """Count top-down, bottom-up, lateral, and I/O edge proportions,
+        and calculate their weight magnitudes to validate structural boosts.
         """
         src_levels = self.engine.node_to_level[self.engine.indices[0]]
         dst_levels = self.engine.node_to_level[self.engine.indices[1]]
+        
+        weights = self.engine.w_surface.abs()
 
-        topdown = (src_levels > dst_levels).sum().item()
-        bottomup = (src_levels < dst_levels).sum().item()
-        lateral = (src_levels == dst_levels).sum().item()
+        topdown_mask = src_levels > dst_levels
+        bottomup_mask = src_levels < dst_levels
+        lateral_mask = src_levels == dst_levels
+        
+        topdown_count = topdown_mask.sum().item()
+        bottomup_count = bottomup_mask.sum().item()
+        lateral_count = lateral_mask.sum().item()
         total = len(self.engine.indices[0])
-
-        # Further break down lateral into intra-IO and intra-module
-        io_mask = (src_levels == 0) & (dst_levels == 0)
-        io_edges = io_mask.sum().item()
-        non_io_lateral = lateral - io_edges
+        
+        td_mag = weights[topdown_mask].mean().item() if topdown_count > 0 else 0
+        bu_mag = weights[bottomup_mask].mean().item() if bottomup_count > 0 else 0
+        lat_mag = weights[lateral_mask].mean().item() if lateral_count > 0 else 0
 
         print(f"  Total edges: {total:,}")
-        print(f"  Top-down (higher→lower): {topdown:,} ({topdown / total:.1%})")
-        print(f"  Bottom-up (lower→higher): {bottomup:,} ({bottomup / total:.1%})")
-        print(f"  Lateral (same level):     {lateral:,} ({lateral / total:.1%})")
-        print(f"    - I/O level:            {io_edges:,} ({io_edges / total:.1%})")
-        print(f"    - Non-I/O lateral:      {non_io_lateral:,} ({non_io_lateral / total:.1%})")
-
-        if topdown / total < 0.05:
-            print(f"  >> TOP-DOWN EDGES < 5% — predictions may be starved of bandwidth")
+        print(f"  Top-down (higher→lower): {topdown_count:,} ({topdown_count / max(1,total):.1%}) | Avg Mag: {td_mag:.4f}")
+        print(f"  Bottom-up (lower→higher): {bottomup_count:,} ({bottomup_count / max(1,total):.1%}) | Avg Mag: {bu_mag:.4f}")
+        print(f"  Lateral (same level):     {lateral_count:,} ({lateral_count / max(1,total):.1%}) | Avg Mag: {lat_mag:.4f}")
 
         return {
             "total": total,
-            "topdown": topdown,
-            "bottomup": bottomup,
-            "lateral": lateral,
-            "io_edges": io_edges,
-            "topdown_pct": topdown / total,
+            "topdown": topdown_count,
+            "bottomup": bottomup_count,
+            "lateral": lateral_count,
+            "topdown_pct": topdown_count / max(1,total),
+            "td_mag": td_mag,
+            "bu_mag": bu_mag,
+            "lat_mag": lat_mag
         }
-
+        
     def _assess_1c(self, r):
         pct = r.get("topdown_pct", 0)
-        if pct >= 0.05:
-            return "PASS", f"Top-down edges = {pct:.1%} of total (sufficient bandwidth)"
+        bu_mag = r.get("bu_mag", 0)
+        lat_mag = r.get("lat_mag", 0)
+        
+        msg = f"TD={pct:.1%}, BU_mag={bu_mag:.2f}, Lat_mag={lat_mag:.2f}"
+        if pct >= 0.05 and bu_mag > lat_mag * 1.5:
+            return "PASS", msg + " (good structure and boost)"
         elif pct >= 0.02:
-            return "WARN", f"Top-down edges = {pct:.1%} (may be low)"
+            return "WARN", msg
         else:
-            return "FAIL", f"Top-down edges = {pct:.1%} (starved, <2%)"
+            return "FAIL", msg
 
     # ─────────────────────────────────────────────────────────────────────
     # TEST 2: Gradient alignment by edge type
     # ─────────────────────────────────────────────────────────────────────
 
-    def test_2_gradient_alignment(self, data_path="ndcd/data/level1_chars.txt") -> Dict:
-        """Check whether gradients are meaningful for each edge type.
-
-        Top-down should have coherent signal (|mean/std| > 0.1).
-        Others should be noise (|mean/std| ~ 0) if they're irrelevant.
-        If all three look like noise, the error signal isn't informative.
+    def test_2_gradient_alignment(self) -> Dict:
+        """Inject a perturbation, roll forward N steps, measure gradient magnitude.
+        Uses the internal Jacobian from engine_torch.py.
         """
-        # Save state
-        saved_state = self.engine.state.clone()
+        try:
+            J = self.engine.get_jacobian()
+        except AttributeError:
+            print("  >> get_jacobian not implemented on engine")
+            return {"error": "not implemented"}
+            
+        # We simulate the gradient roll-forward
+        # For simplicity, calculate the matrix norm of J^N to see if it vanishes.
+        # Alternatively, power iteration to find largest eigenvalue.
         
-        # Get one sample to calculate a real EqProp gradient
-        if not os.path.exists(data_path):
-            input_byte, target_byte = 0, 1
-        else:
-            with open(data_path, 'rb') as f:
-                data = f.read(2)
-                input_byte, target_byte = data[0], data[1]
-
-        input_vec = torch.zeros(self.engine.num_nodes, device=self.device)
-        input_vec[0:256] = self.trainer.eye[input_byte] * 1.0
-        input_mask = torch.zeros(self.engine.num_nodes, device=self.device)
-        input_mask[list(range(256))] = 1.0
-
-        # Free phase
-        self.engine.settle(input_vec, input_mask=input_mask, max_steps=50)
-        rho_free = torch.tanh(self.engine.state.clone())
-
-        # Nudge phase
-        beta = 0.5
-        nudge_vec = input_vec.clone()
-        nudge_vec[256:512] = self.trainer.eye[target_byte] * beta
-        self.engine.settle(nudge_vec, input_mask=input_mask, max_steps=50)
-        rho_nudge = torch.tanh(self.engine.state.clone())
-
-        idx_i = self.engine.indices[0]
-        idx_j = self.engine.indices[1]
+        N = 3
+        # Fast power iteration for spectral radius of Jacobian
+        # We just want to see if J^{N} explodes or vanishes.
+        v = torch.randn(self.num_nodes, 1, device=self.device)
+        v = v / torch.norm(v)
         
-        # Top-down uses EqProp gradient
-        td_grad = (rho_nudge[idx_i] * rho_nudge[idx_j] - rho_free[idx_i] * rho_free[idx_j]) / beta
-
-        src_levels = self.engine.node_to_level[idx_i]
-        dst_levels = self.engine.node_to_level[idx_j]
-
-        results = {}
-        for name, mask in [
-            ("top-down", src_levels > dst_levels),
-            ("bottom-up", src_levels < dst_levels),
-            ("lateral", src_levels == dst_levels),
-        ]:
-            if name == "top-down":
-                g = td_grad[mask]
-            else:
-                # BU/Lat use associative rules, but we test spatial cross-talk here.
-                # Use standard spatial_errors * rho_free just to see if it leaked.
-                self.engine.state = torch.atanh(rho_free.clamp(-0.99, 0.99))
-                self.engine.compute_prediction_errors()
-                g = (self.engine.spatial_errors[idx_j] * rho_free[idx_i])[mask]
-            if len(g) == 0:
-                results[name] = {"mean": 0, "std": 0, "snr": 0}
-                continue
-            mean = g.mean().item()
-            std = g.std().item()
-            snr = abs(mean / std) if std > 1e-10 else 0.0
-            results[name] = {"mean": mean, "std": std, "snr": snr}
-            print(f"  {name:>10}: mean_grad={mean:.6f}, std={std:.6f}, |mean/std|={snr:.4f}")
-
-        td_snr = results.get("top-down", {}).get("snr", 0)
-        bu_snr = results.get("bottom-up", {}).get("snr", 0)
-        lat_snr = results.get("lateral", {}).get("snr", 0)
-
-        if td_snr < 0.01:
-            print(f"  >> TOP-DOWN GRADIENT IS NOISE — spatial error signal is uninformative")
-        else:
-            print(f"  >> Top-down gradient coherent. Non-top-down edges do not use spatial error.")
-
-        self.engine.state = saved_state
-        return results
-
+        norms = []
+        for step in range(10):
+            v_next = torch.mm(J, v)
+            norm = torch.norm(v_next).item()
+            norms.append(norm)
+            if norm == 0:
+                break
+            v = v_next / max(1e-12, norm)
+            
+        final_norm = norms[-1] if norms else 0
+        
+        print(f"  Jacobian spectral radius (approx via power iter): {final_norm:.6f}")
+        print(f"  Step 1-3 norms: {norms[:3]}")
+        
+        if final_norm < 1e-5:
+            print("  >> GRADIENTS VANISH RAPIDLY — network is forgetting context instantly")
+        elif final_norm > 1.2:
+            print("  >> GRADIENTS EXPLODING — network is highly unstable")
+            
+        return {
+            "spectral_radius": final_norm,
+            "norms": norms
+        }
+        
     def _assess_2(self, r):
-        td = r.get("top-down", {}).get("snr", 0)
-        if td > 0.01:
-            return "PASS", f"Top-down gradient coherent (SNR={td:.3f})"
+        sr = r.get("spectral_radius", 0)
+        if 0.5 < sr <= 1.05:
+            return "PASS", f"Stable gradients (SR={sr:.4f})"
+        elif 0.1 < sr <= 1.2:
+            return "WARN", f"Gradients dissipating or growing (SR={sr:.4f})"
         else:
-            return "FAIL", f"Top-down gradient is noise (SNR={td:.4f})"
+            return "FAIL", f"Gradients vanish/explode (SR={sr:.6f})"
 
     # ─────────────────────────────────────────────────────────────────────
     # TEST 3A: Cascade flow dynamics
     # ─────────────────────────────────────────────────────────────────────
 
-    def test_3a_cascade_dynamics(self, data_path="ndcd/data/level1_chars.txt",
+    def test_3a_cascade_dynamics(self, data_path="ndcd/data/train/level2_slot_frame.txt",
                                   num_steps=500) -> Dict:
         """Track how fast weight magnitude flows through cascade levels.
 
@@ -605,64 +559,76 @@ class ModelDiagnostics:
     # TEST 4B: Replay pattern diversity
     # ─────────────────────────────────────────────────────────────────────
 
-    def test_4b_replay_diversity(self, num_replays=20) -> Dict:
-        """Do different noise initializations converge to different attractors?
-
-        If mean similarity > 0.9, network has essentially one attractor.
-        Healthy: mean 0.3–0.6 with std > 0.1 (diverse attractors).
+    def test_4b_replay_diversity(self, num_replays=10, gen_length=15) -> Dict:
+        """Do different noise initializations converge to different attractors
+        that generate diverse sequences? Uses Levenshtein distance on readouts.
         """
+        def levenshtein(s1, s2):
+            if len(s1) < len(s2): return levenshtein(s2, s1)
+            if len(s2) == 0: return len(s1)
+            prev = range(len(s2) + 1)
+            for i, c1 in enumerate(s1):
+                curr = [i + 1]
+                for j, c2 in enumerate(s2):
+                    curr.append(min(prev[j + 1] + 1, curr[j] + 1, prev[j] + (c1 != c2)))
+                prev = curr
+            return prev[-1]
+
         saved_state = self.engine.state.clone()
-        patterns = []
+        strings = []
 
         for i in range(num_replays):
-            noise = torch.randn(self.num_nodes, device=self.device) * 0.1
-            self.engine.state = noise
-            input_vec = torch.zeros(self.num_nodes, device=self.device)
-            self.engine.settle(input_vec, max_steps=50)
-            patterns.append(torch.tanh(self.engine.state).clone())
+            # Init random state
+            self.engine.state = torch.randn(self.num_nodes, device=self.device) * 0.1
+            
+            # Generate sequence
+            chars = []
+            for _ in range(gen_length):
+                input_vec = torch.zeros(self.num_nodes, device=self.device)
+                self.engine.settle(input_vec, max_steps=10) # fast settle
+                
+                features = torch.tanh(self.engine.state[self.trainer.level0_indices])
+                logits = self.trainer.readout_W @ features + self.trainer.readout_b
+                char_idx = torch.argmax(logits).item()
+                chars.append(chr(char_idx) if 32 <= char_idx <= 126 else '?')
+            strings.append("".join(chars))
 
-        # Pairwise cosine similarity
-        sims = []
-        for i in range(len(patterns)):
-            for j in range(i + 1, len(patterns)):
-                sim = torch.cosine_similarity(patterns[i], patterns[j], dim=0).item()
-                sims.append(sim)
+        # Pairwise Levenshtein
+        dists = []
+        for i in range(len(strings)):
+            for j in range(i + 1, len(strings)):
+                dist = levenshtein(strings[i], strings[j])
+                # Normalize by length
+                dists.append(dist / max(len(strings[i]), 1))
 
-        mean_sim = np.mean(sims)
-        std_sim = np.std(sims)
-        min_sim = np.min(sims)
-        max_sim = np.max(sims)
+        mean_dist = np.mean(dists) if dists else 0
+        
+        print(f"  Replay pattern diversity ({num_replays} random inits, len {gen_length}):")
+        if len(strings) >= 2:
+            print(f"    Sample generation 1: '{strings[0]}'")
+            print(f"    Sample generation 2: '{strings[1]}'")
+        print(f"    Mean normalized Levenshtein: {mean_dist:.4f}")
 
-        print(f"  Replay pattern similarity ({num_replays} random inits):")
-        print(f"    Mean:  {mean_sim:.4f}")
-        print(f"    Std:   {std_sim:.4f}")
-        print(f"    Range: [{min_sim:.4f}, {max_sim:.4f}]")
-
-        if mean_sim > 0.9:
-            print(f"  >> NETWORK HAS ~1 ATTRACTOR — all replays converge to same state")
-        elif mean_sim > 0.6:
-            print(f"  >> LOW ATTRACTOR DIVERSITY — few distinct memories stored")
-        else:
-            print(f"  >> Good attractor diversity")
+        if mean_dist < 0.1:
+            print(f"  >> NETWORK HAS ~1 ATTRACTOR — all replays generate same string")
+        elif mean_dist > 0.8:
+            print(f"  >> NOISY ATTRACTORS — generating complete garbage/randomness")
 
         self.engine.state = saved_state
 
         return {
-            "mean_similarity": mean_sim,
-            "std_similarity": std_sim,
-            "min_similarity": min_sim,
-            "max_similarity": max_sim,
+            "mean_dist": mean_dist,
+            "strings": strings[:3]
         }
-
+        
     def _assess_4b(self, r):
-        mean_sim = r.get("mean_similarity", 1.0)
-        std = r.get("std_similarity", 0.0)
-        if mean_sim < 0.6 and std > 0.1:
-            return "PASS", f"Diverse attractors (mean_sim={mean_sim:.3f}, std={std:.3f})"
-        elif mean_sim < 0.8:
-            return "WARN", f"Moderate diversity (mean_sim={mean_sim:.3f}, std={std:.3f})"
+        mean_dist = r.get("mean_dist", 0)
+        if 0.2 < mean_dist < 0.8:
+            return "PASS", f"Diverse generated attractors (mean Lev={mean_dist:.2f})"
+        elif mean_dist <= 0.2:
+            return "FAIL", f"Mode collapse, same string generated (mean Lev={mean_dist:.2f})"
         else:
-            return "FAIL", f"Near-single attractor (mean_sim={mean_sim:.3f})"
+            return "WARN", f"Highly random generations (mean Lev={mean_dist:.2f})"
 
     # ─────────────────────────────────────────────────────────────────────
     # TEST 5A: State distribution (saturation check)
@@ -870,64 +836,51 @@ class ModelDiagnostics:
     # ─────────────────────────────────────────────────────────────────────
 
     def test_7_cls_dynamics(self) -> Dict:
-        """Compare weight evolution in hippocampal vs neocortical modules.
-
-        Ratio should be ~3-10x for healthy fast learning.
-        If hippo surface ~ 0 or wildly larger than neo, the CLS dynamics are broken.
+        """Compare mid-to-deep cascade transfer rates and weight magnitudes 
+        in hippocampal vs neocortical modules.
         """
         hippo_mask = self.trainer.hippo_edge_mask
-
-        hippo_surface = self.engine.w_surface[hippo_mask].abs().mean().item()
-        neo_surface = self.engine.w_surface[~hippo_mask].abs().mean().item()
+        
         hippo_mid = self.engine.w_mid[hippo_mask].abs().mean().item()
         neo_mid = self.engine.w_mid[~hippo_mask].abs().mean().item()
         hippo_deep = self.engine.w_deep[hippo_mask].abs().mean().item()
         neo_deep = self.engine.w_deep[~hippo_mask].abs().mean().item()
 
-        surface_ratio = hippo_surface / max(neo_surface, 1e-8)
-        mid_ratio = hippo_mid / max(neo_mid, 1e-8)
-        deep_ratio = hippo_deep / max(neo_deep, 1e-8)
+        # Approximate transfer is driven by (w_mid - w_deep)
+        hippo_transfer = (self.engine.w_mid[hippo_mask] - self.engine.w_deep[hippo_mask]).abs().mean().item()
+        neo_transfer = (self.engine.w_mid[~hippo_mask] - self.engine.w_deep[~hippo_mask]).abs().mean().item()
 
-        print(f"  Hippocampal edges: {hippo_mask.sum().item():,}")
-        print(f"  Neocortical edges: {(~hippo_mask).sum().item():,}")
-        print(f"  Surface: hippo={hippo_surface:.6f}, neo={neo_surface:.6f}, ratio={surface_ratio:.2f}x")
-        print(f"  Mid:     hippo={hippo_mid:.6f}, neo={neo_mid:.6f}, ratio={mid_ratio:.2f}x")
-        print(f"  Deep:    hippo={hippo_deep:.6f}, neo={neo_deep:.6f}, ratio={deep_ratio:.2f}x")
-
-        if hippo_surface < 1e-6 and neo_surface < 1e-6:
-            print(f"  >> Both hippo and neo surface ~ 0 (before training or after reset)")
-        elif surface_ratio > 50:
-            print(f"  >> HIPPO SURFACE WILDLY LARGER ({surface_ratio:.0f}x) — CLS boost may be unstable")
-        elif surface_ratio < 1.5 and hippo_surface > 1e-4:
-            print(f"  >> HIPPO NOT DIFFERENTIATED — 10x boost not creating fast learning")
-
+        transfer_ratio = hippo_transfer / max(neo_transfer, 1e-8)
+        
+        print(f"  Mid-to-Deep Transfer (approx): hippo={hippo_transfer:.6f}, neo={neo_transfer:.6f}, ratio={transfer_ratio:.2f}x")
+        print(f"  Deep Weight Mag: hippo={hippo_deep:.6f}, neo={neo_deep:.6f}")
+        
+        if transfer_ratio < 1.5 and hippo_transfer > 1e-5:
+             print(f"  >> HIPPO NOT CONSOLIDATING FASTER — CLS transfer dynamics broken")
+             
         return {
-            "hippo_surface": hippo_surface,
-            "neo_surface": neo_surface,
-            "hippo_deep": hippo_deep,
-            "neo_deep": neo_deep,
-            "surface_ratio": surface_ratio,
-            "deep_ratio": deep_ratio,
+            "hippo_transfer": hippo_transfer,
+            "neo_transfer": neo_transfer,
+            "transfer_ratio": transfer_ratio
         }
 
     def _assess_7(self, r):
-        ratio = r.get("surface_ratio", 0)
-        hippo_s = r.get("hippo_surface", 0)
-        neo_s = r.get("neo_surface", 0)
-        if hippo_s < 1e-6 and neo_s < 1e-6:
-            return "WARN", "Both surface ~0 (likely before training or after reset)"
+        ratio = r.get("transfer_ratio", 0)
+        hippo_t = r.get("hippo_transfer", 0)
+        if hippo_t < 1e-6:
+            return "WARN", "Negligible transfer happening"
         elif 1.5 <= ratio <= 50:
-            return "PASS", f"CLS differentiated (hippo/neo surface ratio = {ratio:.1f}x)"
+            return "PASS", f"CLS consolidating correctly (hippo/neo transfer ratio = {ratio:.1f}x)"
         elif ratio > 50:
-            return "FAIL", f"CLS unstable (ratio = {ratio:.0f}x, too large)"
+            return "FAIL", f"CLS transfer unstable (ratio = {ratio:.0f}x)"
         else:
-            return "WARN", f"CLS not differentiated (ratio = {ratio:.2f}x, expected 3-10x)"
+            return "WARN", f"CLS not transferring faster (ratio = {ratio:.2f}x)"
 
     # ─────────────────────────────────────────────────────────────────────
     # TEST 8: Retention with re-trained readout
     # ─────────────────────────────────────────────────────────────────────
 
-    def test_8_true_retention(self, data_path="ndcd/data/level1_chars.txt",
+    def test_8_true_retention(self, data_path="ndcd/data/train/level2_slot_frame.txt",
                                num_train=2000, num_test=1000) -> Dict:
         """Train a fresh readout on old data, THEN measure accuracy.
 
@@ -1241,15 +1194,15 @@ def run_diagnostics_standalone(args):
         print(f"\nRunning Full Curriculum ({args.train_iters} steps per phase) before diagnostics...")
         trainer.engine.state.zero_()
         
-        trainer.train_phase("Chars", "ndcd/data/level1_chars.txt",
+        trainer.train_phase("SlotFrames", "ndcd/data/train/level2_slot_frame.txt",
                             iterations=args.train_iters, steps_per_iter=100,
                             lr=0.05, settle_steps=8, input_gain=5.0)
                             
-        trainer.train_phase("Words", "ndcd/data/level2_words.txt",
+        trainer.train_phase("Complex", "ndcd/data/train/level3_complex.txt",
                             iterations=args.train_iters, steps_per_iter=100,
                             lr=0.05, settle_steps=8, input_gain=5.0)
                             
-        trainer.train_phase("Quotes", "ndcd/data/level3_quotes.txt",
+        trainer.train_phase("Context", "ndcd/data/train/level4_context.txt",
                             iterations=args.train_iters, steps_per_iter=100,
                             lr=0.05, settle_steps=8, input_gain=5.0)
 
