@@ -245,6 +245,18 @@ class PredictiveCodingEngine:
         self.fwd_motor_idx = fwd_idx[torch.argsort(fwd_ids)]
         self.fb_motor_idx = fb_idx[torch.argsort(fb_ids)]
 
+        # --- Free-edge mask for spectral radius enforcement ---
+        # I/O projection edges (source or dest < 512) are external forcing,
+        # not autonomous recurrence. They are 6.5x boosted and constitute
+        # ~39% of edges. Including them in spectral radius estimation
+        # inflates the measured SR from ~0.57 (free edges) to ~29 (full
+        # matrix), causing enforce_spectral_radius to multiply all learned
+        # weights by 0.95/29 ≈ 0.033 every 100 steps — zeroing them out.
+        # This mask matches graph.py's initialization, which tunes SR on
+        # free edges only.
+        self.free_edge_mask = (self.indices[0] >= 512) & (self.indices[1] >= 512)
+        self.free_edge_indices = self.indices[:, self.free_edge_mask]
+
         # --- Temporal prediction state ---
         # Previous state buffer per module (for temporal prediction errors)
         self.previous_state = torch.zeros(num_nodes, dtype=torch.float32, device=device)
@@ -288,7 +300,8 @@ class PredictiveCodingEngine:
         # FIX 1: Track the initial w_deep Frobenius norm as a target.
         # This is the SR-tuned initialization; effective weights should
         # never exceed ~2x this norm during training.
-        self._initial_deep_frob = self.weight_values.norm().item()
+        # CHANGED: Compute on free edges only, matching graph.py's tuning.
+        self._initial_deep_frob = self.weight_values[self.free_edge_mask].norm().item()
 
         # --- Synaptic intelligence (Zenke et al., 2017) ---
         self.omega = torch.zeros_like(self.weight_values)       # accumulated importance
@@ -364,10 +377,11 @@ class PredictiveCodingEngine:
         # (to encode learned structure) but no further. Proportional
         # scaling preserves relative weight patterns (the actual
         # "memory") while preventing magnitude blow-up.
-        deep_frob = self.w_deep.norm().item()
+        # CHANGED: Use free-edge norm only to match initialization.
+        deep_frob = self.w_deep[self.free_edge_mask].norm().item()
         max_deep_frob = self._initial_deep_frob
         if deep_frob > max_deep_frob:
-            self.w_deep *= max_deep_frob / deep_frob
+            self.w_deep[self.free_edge_mask] *= max_deep_frob / deep_frob
 
     def update_synaptic_intelligence(self, current_loss):
         """Call after each weight update with the current prediction error.
@@ -579,15 +593,8 @@ class PredictiveCodingEngine:
             prev_rho = torch.tanh(self.previous_state)
 
             # Bottom-up edges: pure associative Oja rule (no spatial error).
-            # The spatial prediction error must be gated strictly through
-            # topdown_edge_mask. Bottom-up edges build structural feature
-            # representations via co-occurrence, not generative modeling.
-            # Using spatial error here caused destructive interference
-            # between generative (TD) and associative (BU) pathways.
             bu_prev_rho_i = prev_rho[idx_i[self.bottomup_edge_mask]]
             bu_rho_j = rho[idx_j[self.bottomup_edge_mask]]
-            # Base the decay only on the learned plastic components rather than the massive 
-            # effective_weights baseline.
             bu_w_plastic = (self.w_surface[self.bottomup_edge_mask] + 
                             self.w_mid[self.bottomup_edge_mask] + 
                             self.w_deep[self.bottomup_edge_mask])
@@ -598,18 +605,6 @@ class PredictiveCodingEngine:
             grad[self.fb_motor_idx] = 0.0
 
             # FIX 4: Lateral edges — anti-Hebbian inhibitory + Oja excitatory.
-            #
-            # The old pure Oja (0.1 * (rho_i*rho_j - w*rho_j^2)) still drove
-            # all lateral weights uniformly positive because with L1 saturation,
-            # rho_i*rho_j ≈ constant for all pairs. The self-normalizing -w*rho_j^2
-            # term balances each weight individually but doesn't create
-            # competition between nodes.
-            #
-            # Fix: Add an inhibitory component that depends on MODULE-LEVEL
-            # mean activity. When the module mean is high (all nodes active),
-            # inhibition dominates and lateral weights decrease. When the
-            # module mean is moderate (sparse code), Oja excitation dominates
-            # for co-active pairs. This creates genuine competition.
             lat_i = idx_i[self.lateral_edge_mask]
             lat_j = idx_j[self.lateral_edge_mask]
             lat_prev_rho_i = prev_rho[lat_i]
@@ -621,8 +616,6 @@ class PredictiveCodingEngine:
             for mod_idx, (start, end) in enumerate(self.module_ranges):
                 module_mean_act[mod_idx] = rho[start:end].abs().mean()
 
-            # Retrieve mapped module levels from index mapping directly via node_to_module
-            # rather than nested loops, fixing gradient leak.
             lat_src_mod = torch.zeros(lat_i.size(0), dtype=torch.long, device=self.device)
             if hasattr(self, 'node_to_module'):
                 lat_src_mod = self.node_to_module[lat_i]
@@ -633,9 +626,6 @@ class PredictiveCodingEngine:
 
             mod_act = module_mean_act[lat_src_mod]
 
-            # Inhibition strength increases with module mean activity.
-            # At mod_act=0.2 (sparse): inhibition ≈ 0, Oja dominates
-            # At mod_act=0.7 (dense): inhibition ≈ 0.5, suppresses co-activation
             inhibition_strength = torch.clamp(mod_act - 0.3, min=0.0)
 
             oja_excitatory = lat_prev_rho_i * lat_rho_j - lat_w * lat_rho_j.pow(2)
@@ -651,7 +641,6 @@ class PredictiveCodingEngine:
                     mod_size = end - start
                     if mod_size <= 1: continue
                     
-                    # Only restrict to intra-module lateral edges properly
                     mask = (lat_i >= start) & (lat_i < end) & (lat_j >= start) & (lat_j < end)
                     if not mask.any(): continue
                     
@@ -672,7 +661,6 @@ class PredictiveCodingEngine:
                     
                 if isinstance(total_penalty, torch.Tensor) and total_penalty.requires_grad:
                     ortho_grad = torch.autograd.grad(total_penalty, lat_w_var)[0]
-                    # subtract the gradient of the penalty (minimize penalty)
                     grad[self.lateral_edge_mask] -= 0.05 * ortho_grad
 
             # Gradient clipping: Explicit max_norm=1.0 limit
@@ -700,14 +688,20 @@ class PredictiveCodingEngine:
             # across all edges. Grouping by destination node ensures no neuron
             # becomes excessively overwhelmed by incoming synaptic changes.
             cascade_all = self.w_surface + self.w_mid + self.w_deep
-            
-            # Phase 1: Active Spectral Regularization
-            current_frob = cascade_all.norm().item()
+
+            # Phase 1: Active Spectral Regularization (free edges only)
+            # Must match enforce_spectral_radius by excluding I/O projection
+            # edges from the norm computation. I/O weights are fixed external
+            # forcing — including them makes the ceiling effectively ~0.3x
+            # the actual free-edge norm, crushing all learned structure.
+            free_cascade = cascade_all[self.free_edge_mask]
+            current_frob = free_cascade.norm().item()
             target_max = 2.0 * self._initial_deep_frob
             if current_frob > target_max:
                 scale_penalty = target_max / current_frob
-                self.w_surface *= scale_penalty
-                self.w_mid *= scale_penalty
+                # Only scale the free edges of w_surface, preserve I/O projections
+                self.w_surface[self.free_edge_mask] *= scale_penalty
+                self.w_mid[self.free_edge_mask] *= scale_penalty
                 cascade_all = self.w_surface + self.w_mid + self.w_deep
 
             # Prevent extreme runaway of cascade weights before RMS
@@ -725,9 +719,6 @@ class PredictiveCodingEngine:
             dst_rms = torch.sqrt(dst_sq_sums / dst_counts.clamp(min=1))
 
             # Target RMS per destination node.
-            # With avg fan-in ~150, RMS=0.15 gives total input magnitude
-            # ≈ sqrt(150) * 0.15 ≈ 1.84 — well within the ±1.5 clamp range
-            # when multiplied by tanh activations (which are ≤1).
             max_rms = 0.15
             scale_per_dst = torch.where(
                 dst_rms > max_rms,
@@ -762,28 +753,21 @@ class PredictiveCodingEngine:
             self.w_surface[td_idx] -= correction
 
             # --- Bias update from prediction errors + IP ---
-            # EqProp bias update: Δb_i ∝ (rho_nudge_i - rho_free_i) / beta
-            # + temporal errors
-            # + intrinsic plasticity correction
             bias_grad = (rho_nudge - rho_free) / beta + self.temporal_alpha * self.temporal_errors + ip_gradient
             self.biases += learning_rate * 0.1 * bias_grad
             self.biases.clamp_(-1.0, 1.0)
 
             # --- Temporal transition matrix update ---
-            # ΔA_ℓ ∝ eta * ε_temporal * x_prev (diagonal approximation)
             eta = learning_rate * 25.0  # Dedicated temporal learning rate (η)
             for mod_idx, (start, end) in enumerate(self.module_ranges):
                 t_error = self.temporal_errors[start:end]
-                prev = self.previous_state[start:end]  # Match linear state used in prediction
+                prev = self.previous_state[start:end]
 
-                # Element-wise multiplication for the diagonal approximation
                 a_mod = eta * t_error * prev
                 
-                # Apply the gradient with L2 Gradient Flossing
                 a_mod = a_mod.clamp(-0.05, 0.05) - 0.005 * self.temporal_A[mod_idx]
                 self.temporal_A[mod_idx] += a_mod
                 
-                # Hard clamp the diagonal so absolute value never exceeds 1.0
                 self.temporal_A[mod_idx].clamp_(-1.0, 1.0)
 
     def store_previous_state(self):
@@ -792,83 +776,80 @@ class PredictiveCodingEngine:
 
     def enforce_spectral_radius(self, target_max=0.95):
         """
-        Estimate dominant eigenvalue of effective weights using power iteration,
-        and dampen w_surface if the spectral radius exceeds target_max.
+        Estimate dominant eigenvalue of FREE (non-I/O) effective weights
+        using power iteration, and dampen w_surface if the spectral
+        radius exceeds target_max.
+
+        Critical: Only uses free edges (src >= 512 AND dst >= 512).
+        I/O projection edges are clamped external forcing, not autonomous
+        recurrence. Including them inflates SR by ~50x and annihilates
+        all learned weights.
+
+        Only dampens w_surface — w_mid and w_deep are protected long-term
+        memory that must never be rescaled by a transient SR measurement.
         """
         with torch.no_grad():
+            # Power iteration vector (persistent across calls for convergence)
             if getattr(self, '_power_iter_v', None) is None:
                 self._power_iter_v = torch.randn(self.num_nodes, device=self.device)
                 norm = torch.norm(self._power_iter_v)
                 if norm > 0:
                     self._power_iter_v /= norm
 
-            # Build sparse effective weight matrix
-            W_eff = torch.sparse_coo_tensor(
-                self.indices, self.effective_weights, 
+            # Build sparse matrix from FREE edges only
+            free_weights = self.effective_weights[self.free_edge_mask]
+            W_free = torch.sparse_coo_tensor(
+                self.free_edge_indices, free_weights,
                 (self.num_nodes, self.num_nodes)
             )
 
-            # Power iteration
+            # Power iteration (5 steps)
             v = self._power_iter_v
             for _ in range(5):
-                v_next = torch.mv(W_eff, v)
+                v_next = torch.mv(W_free, v)
                 norm = torch.norm(v_next)
                 if norm > 1e-8:
                     v = v_next / norm
 
             self._power_iter_v = v
-            
-            # Rayleigh quotient to estimate dominant eigenvalue
-            Wv = torch.mv(W_eff, v)
+
+            # Rayleigh quotient estimate
+            Wv = torch.mv(W_free, v)
             eigenvalue = torch.dot(v, Wv)
             sr = torch.abs(eigenvalue).item()
+            self.last_sr = sr
 
-            dampening_factor = 1.0
+            # Only dampen w_surface (fast transient weights)
             if sr > target_max:
                 dampening_factor = target_max / sr
                 self.w_surface *= dampening_factor
-                self.w_mid *= dampening_factor
-                self.w_deep *= dampening_factor
 
     def get_jacobian(self) -> torch.Tensor:
         """
         Computes the Jacobian of the temporal transition dynamics at the current state.
         This enables gradient alignment tracking (Diagnostic Test 2).
         
-        The temporal transition for a state x_i with the IMEX solver approximated is:
-        dx_i/dt = 1/tau_i * (-x_i + f(W x + b))
-        The Jacobian J_ij = d(dx_i/dt)/dx_j is approximated by:
-        J_ij = 1/tau_i * (-delta_ij + W_ij * f'(x_j))
-        
         Returns:
             [N, N] Dense Jacobian matrix tensor.
         """
-        # Note: This is computationally expensive, use only during diagnostic phases.
         with torch.no_grad():
             N = self.num_nodes
             
-            # f'(x_j) where f = tanh, f'(x) = 1 - tanh^2(x)
             rho = torch.tanh(self.state)
             drho = 1.0 - rho.pow(2)
             
-            # Build sparse weight matrix
             W_eff = torch.sparse_coo_tensor(
                 self.indices, self.effective_weights, 
                 (N, N)
-            ).to_dense() # Convert to dense for matrix operations
+            ).to_dense()
             
-            # W_ij * f'(x_j)
-            W_drho = W_eff * drho.unsqueeze(0) # broadcast drho across rows
+            W_drho = W_eff * drho.unsqueeze(0)
             
-            # 1/tau_i * (-delta_ij + W_ij * f'(x_j))
-            taus_inv = 1.0 / self.taus.unsqueeze(1) # [N, 1]
+            taus_inv = 1.0 / self.taus.unsqueeze(1)
             I = torch.eye(N, dtype=torch.float32, device=self.device)
             
             J = taus_inv * (-I + W_drho)
             return J
-            
-            self.last_sr = sr
-            return sr, dampening_factor
 
     def _update_short_term_plasticity(self):
         """
@@ -931,9 +912,6 @@ class PredictiveCodingEngine:
     def get_topdown_weight_stats(self):
         """
         Returns mean and std of top-down weights grouped by (src_level, dst_level).
-
-        If L1 spatial error is stuck high, these stats reveal whether
-        top-down weights are actually updating or frozen.
         """
         with torch.no_grad():
             td_weights = self.effective_weights[self.topdown_edge_mask]
@@ -941,7 +919,6 @@ class PredictiveCodingEngine:
             dst_levels = self.node_to_level[self.topdown_indices[1]]
 
             stats = {}
-            # Group by (src_level, dst_level) pair
             for src_l in range(self.max_level + 1):
                 for dst_l in range(src_l):
                     mask = (src_levels == src_l) & (dst_levels == dst_l)

@@ -1196,15 +1196,15 @@ def run_diagnostics_standalone(args):
         
         trainer.train_phase("SlotFrames", "ndcd/data/train/level2_slot_frame.txt",
                             iterations=args.train_iters, steps_per_iter=100,
-                            lr=0.05, settle_steps=8, input_gain=5.0)
+                            lr=0.05, settle_steps=30, input_gain=0.5)
                             
         trainer.train_phase("Complex", "ndcd/data/train/level3_complex.txt",
                             iterations=args.train_iters, steps_per_iter=100,
-                            lr=0.05, settle_steps=8, input_gain=5.0)
+                            lr=0.05, settle_steps=30, input_gain=0.5)
                             
-        trainer.train_phase("Context", "ndcd/data/train/level4_context.txt",
+        trainer.train_phase("Context", "ndcd/data/train/level4_contextual.txt",
                             iterations=args.train_iters, steps_per_iter=100,
-                            lr=0.05, settle_steps=8, input_gain=5.0)
+                            lr=0.05, settle_steps=30, input_gain=0.5)
 
     diag = ModelDiagnostics(trainer)
     results = diag.run_all()
