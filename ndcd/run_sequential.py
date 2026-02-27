@@ -1,4 +1,3 @@
-
 import torch
 import numpy as np
 import os
@@ -291,251 +290,255 @@ class SequentialTrainer:
                 input_byte = data[curr_idx]
                 target_byte = data[curr_idx + 1]
 
-            # 2. Input Setup — full one-hot across all 256 input nodes.
-            # A single node at 5.0 with 255 zeroes wastes input projection
-            # bandwidth and gets drowned by ~500 recurrent neighbors.
-            input_mask = torch.zeros(self.num_nodes, device=self.device)
-            input_mask[self.input_indices] = 1.0
+                # 2. Input Setup — full one-hot across all 256 input nodes.
+                # A single node at 5.0 with 255 zeroes wastes input projection
+                # bandwidth and gets drowned by ~500 recurrent neighbors.
+                input_mask = torch.zeros(self.num_nodes, device=self.device)
+                input_mask[self.input_indices] = 1.0
 
-            input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[0:256] = self.eye[input_byte] * input_gain
+                input_vec = torch.zeros(self.num_nodes, device=self.device)
+                input_vec[0:256] = self.eye[input_byte] * input_gain
 
-            # 3. Store previous state for temporal prediction
-            self.engine.store_previous_state()
+                # 3. Store previous state for temporal prediction
+                self.engine.store_previous_state()
 
-            # 4. Reset fast nodes only at word boundaries (space/newline/tab).
-            # Previously reset every step, destroying intra-word context that
-            # word-level and sentence-level tasks depend on. For chars (same
-            # repeating sequence) this didn't matter, but for words/quotes the
-            # accumulated context within a word is critical for prediction.
-            if input_byte in (32, 10, 13, 9):  # space, LF, CR, tab
-                fast_mask = self.engine.taus < 0.5
-                self.engine.state[fast_mask] *= 0.1
+                # 4. Reset fast nodes only at word boundaries (space/newline/tab).
+                # Previously reset every step, destroying intra-word context that
+                # word-level and sentence-level tasks depend on. For chars (same
+                # repeating sequence) this didn't matter, but for words/quotes the
+                # accumulated context within a word is critical for prediction.
+                if input_byte in (32, 10, 13, 9):  # space, LF, CR, tab
+                    fast_mask = self.engine.taus < 0.5
+                    self.engine.state[fast_mask] *= 0.1
 
-            # 5. Single-phase settle (IMEX) -> FREE PHASE
-            # Dynamic tolerance: relax to 1e-2 during the first 2000 steps
-            # of each phase, preventing the solver from fruitlessly exhausting
-            # max_steps during transient reorganization after phase boundaries.
-            settle_tol = 1e-2 if step < 2000 else 5e-3
-            self.engine.settle(
-                input_vec,
-                input_mask=input_mask,
-                max_steps=settle_steps,
-                tol=settle_tol,
-            )
-            free_state = self.engine.state.clone()
-            free_diff = self.engine.last_settle_diff
+                # 5. Single-phase settle (IMEX) -> FREE PHASE
+                # Dynamic tolerance: relax to 1e-2 during the first 2000 steps
+                # of each phase, preventing the solver from fruitlessly exhausting
+                # max_steps during transient reorganization after phase boundaries.
+                settle_tol = 1e-2 if step < 2000 else 5e-3
+                self.engine.settle(
+                    input_vec,
+                    input_mask=input_mask,
+                    max_steps=settle_steps,
+                    tol=settle_tol,
+                )
+                free_state = self.engine.state.clone()
+                free_diff = self.engine.last_settle_diff
 
-            # 6. Compute prediction errors (top-down only; I/O zeroed) based on free state
-            energy = self.engine.compute_prediction_errors()
+                # 6. Compute prediction errors (top-down only; I/O zeroed) based on free state
+                energy = self.engine.compute_prediction_errors()
 
-            # 6b. EqProp Nudge Phase with Error-Proportional Beta
-            output_actual = torch.tanh(free_state[256:512])         # evaluate on free_state
-            output_target = self.eye[target_byte]                   # one-hot [256]
-            output_error = output_target - output_actual            # observation error
-            
-            # Calculate Absolute Error Magnitude
-            error_magnitude = torch.sum(torch.abs(output_error)).item()
-            
-            # Scale Beta by Error
-            self.dynamic_beta = min(2.0, error_magnitude)
-            beta = self.dynamic_beta
-            
-            nudge_vec = input_vec.clone()
-            nudge_vec[256:512] = output_target * beta
-            
-            self.engine.settle(
-                nudge_vec,
-                input_mask=input_mask,
-                max_steps=settle_steps,
-                tol=settle_tol,
-            )
-            nudge_state = self.engine.state.clone()
-            nudge_diff = self.engine.last_settle_diff
-            
-            energy += 0.5 * torch.sum(output_error ** 2).item()
-            energy_accum += energy
-
-            if step < 5:
-                # Debug output nodes 
-                rho_free = torch.tanh(free_state)
-                rho_nudge = torch.tanh(nudge_state)
-                target_diff = rho_nudge[256:512] - rho_free[256:512]
-                print(f"DEBUG Step {step}: target_byte={target_byte}")
-                print(f"  Target node diff= {target_diff[target_byte].item():.5f}, Non-target avg diff= {target_diff.mean().item():.5f}")
-                print(f"  Max free state output= {rho_free[256:512].max().item():.5f}, Min= {rho_free[256:512].min().item():.5f}")
-
-            # 7. Measure Prediction via linear readout (not output nodes).
-            # Readout sees reservoir state + raw input (standard ESN practice).
-            # This gives a direct linear path from input to prediction even if
-            # reservoir representations are degenerate.
-            with torch.no_grad():
-                level0_acts = torch.tanh(free_state[self.level0_indices])
-                features = torch.nn.functional.layer_norm(level0_acts, level0_acts.size())
-                logits = self.readout_W @ features + self.readout_b
-                probs = torch.softmax(logits, dim=0)
-                pred_idx = torch.argmax(probs).item()
-
-            state_norm = torch.norm(free_state) / np.sqrt(self.num_nodes)
-
-            is_correct = (pred_idx == target_byte)
-            acc_window.append(1.0 if is_correct else 0.0)
-
-            _, top3_indices = torch.topk(probs, 3)
-            if target_byte in top3_indices.tolist():
-                acc_top3_window.append(1.0)
-            else:
-                acc_top3_window.append(0.0)
-
-            loss = -torch.log(probs[target_byte] + 1e-8).item()
-            loss_accum += loss
-
-            # 8. Cosine LR schedule (used by readout, recurrent update, CLS)
-            lr_mult = 0.5 * (1.0 + np.cos(np.pi * step / total_steps))
-            effective_lr = lr * max(lr_mult, 0.1)
-
-            # 8a. Train readout with cross-entropy gradient descent.
-            with torch.no_grad():
-                target_one_hot = self.eye[target_byte]
-                readout_grad = probs - target_one_hot  # softmax CE gradient
-                self.readout_W -= effective_lr * torch.outer(readout_grad, features)
-                self.readout_b -= effective_lr * readout_grad
-
-            # 8b-8e: Skip recurrent weight updates during warmup period.
-            # During warmup, only the readout adapts to the new task distribution.
-            # This prevents the reservoir from being pulled in random directions
-            # before the readout has calibrated to the new data statistics.
-            if step >= warmup_steps:
-                # 8b. Update recurrent weights using EqProp rule
-                self.engine.update_weights_predictive(
-                    free_state,
-                    nudge_state,
-                    beta=beta,
-                    learning_rate=effective_lr,
-                    hippo_edge_mask=self.hippo_edge_mask)
+                # 6b. EqProp Nudge Phase with Error-Proportional Beta
+                output_actual = torch.tanh(free_state[256:512])         # evaluate on free_state
+                output_target = self.eye[target_byte]                   # one-hot [256]
+                output_error = output_target - output_actual            # observation error
                 
+                # Calculate Absolute Error Magnitude
+                error_magnitude = torch.sum(torch.abs(output_error)).item()
+                
+                # Scale Beta by Error
+                self.dynamic_beta = min(2.0, error_magnitude)
+                beta = self.dynamic_beta
+                
+                nudge_vec = input_vec.clone()
+                nudge_vec[256:512] = output_target * beta
+                
+                self.engine.settle(
+                    nudge_vec,
+                    input_mask=input_mask,
+                    max_steps=settle_steps,
+                    tol=settle_tol,
+                )
+                nudge_state = self.engine.state.clone()
+                nudge_diff = self.engine.last_settle_diff
+                
+                energy += 0.5 * torch.sum(output_error ** 2).item()
+                energy_accum += energy
+
                 if step < 5:
-                    # Inspect the motor weights
-                    t_mask = self.engine.topdown_edge_mask
-                    b_mask = self.engine.bottomup_edge_mask
-                    td_motor = (self.engine.indices[1][t_mask] >= 256) & (self.engine.indices[1][t_mask] < 512)
-                    bu_motor = (self.engine.indices[0][b_mask] >= 256) & (self.engine.indices[0][b_mask] < 512)
-                    print(f"  Motor TD grads mean=|{self.engine.w_surface[t_mask][td_motor].abs().mean().item():.6f}|")
-                    print(f"  Motor BU grads mean=|{self.engine.w_surface[b_mask][bu_motor].abs().mean().item():.6f}|")
+                    # Debug output nodes 
+                    rho_free = torch.tanh(free_state)
+                    rho_nudge = torch.tanh(nudge_state)
+                    target_diff = rho_nudge[256:512] - rho_free[256:512]
+                    print(f"DEBUG Step {step}: target_byte={target_byte}")
+                    print(f"  Target node diff= {target_diff[target_byte].item():.5f}, Non-target avg diff= {target_diff.mean().item():.5f}")
+                    print(f"  Max free state output= {rho_free[256:512].max().item():.5f}, Min= {rho_free[256:512].min().item():.5f}")
 
-                # 8d. Cascade transfer — step-count + magnitude gated.
-                # Surface must integrate gradients autonomously for at least
-                # 500 steps before any magnitude bleeds into mid-layer.
-                # Magnitude gating (>0.02 threshold) is handled inside
-                # cascade_transfer() to ensure w_surface accumulates a
-                # substantial structural representation before transfer.
-                if step < 500:
-                    pass  # No transfer — let surface accumulate first
-                elif step < 5000:
-                    # Surface→mid only (magnitude-gated inside)
-                    self.engine.cascade_transfer(include_deep=False)
+                # 7. Measure Prediction via linear readout (not output nodes).
+                # Readout sees reservoir state + raw input (standard ESN practice).
+                # This gives a direct linear path from input to prediction even if
+                # reservoir representations are degenerate.
+                with torch.no_grad():
+                    level0_acts = torch.tanh(free_state[self.level0_indices])
+                    features = torch.nn.functional.layer_norm(level0_acts, level0_acts.size())
+                    logits = self.readout_W @ features + self.readout_b
+                    probs = torch.softmax(logits, dim=0)
+                    pred_idx = torch.argmax(probs).item()
+
+                state_norm = torch.norm(free_state) / np.sqrt(self.num_nodes)
+
+                is_correct = (pred_idx == target_byte)
+                acc_window.append(1.0 if is_correct else 0.0)
+
+                _, top3_indices = torch.topk(probs, 3)
+                if target_byte in top3_indices.tolist():
+                    acc_top3_window.append(1.0)
                 else:
-                    # Full cascade (magnitude-gated inside)
-                    self.engine.cascade_transfer()
+                    acc_top3_window.append(0.0)
 
-                # 8e. Synaptic intelligence tracking
-                self.engine.update_synaptic_intelligence(current_loss=energy)
+                loss = -torch.log(probs[target_byte] + 1e-8).item()
+                loss_accum += loss
 
-                # Periodic spectral radius enforcement
-                if step % 100 == 0:
-                    self.engine.enforce_spectral_radius(target_max=0.95)
+                # 8. Cosine LR schedule (used by readout, recurrent update, CLS)
+                lr_mult = 0.5 * (1.0 + np.cos(np.pi * step / total_steps))
+                effective_lr = lr * max(lr_mult, 0.1)
 
-            # 8f. Periodic synaptic intelligence consolidation
-            if step >= warmup_steps and step > 0 and step % self.si_consolidation_interval == 0:
-                self.engine.consolidate_importance()
+                # 8a. Train readout with cross-entropy gradient descent.
+                with torch.no_grad():
+                    target_one_hot = self.eye[target_byte]
+                    readout_grad = probs - target_one_hot  # softmax CE gradient
+                    self.readout_W -= effective_lr * torch.outer(readout_grad, features)
+                    self.readout_b -= effective_lr * readout_grad
 
-            # 8g. Sleep replay phase for memory consolidation
-            if step >= warmup_steps and step > 0 and step % self.sleep_interval == 0:
-                self.sleep_phase(num_replay_cycles=200, replay_lr_mult=0.1)
+                # 8b-8e: Skip recurrent weight updates during warmup period.
+                # During warmup, only the readout adapts to the new task distribution.
+                # This prevents the reservoir from being pulled in random directions
+                # before the readout has calibrated to the new data statistics.
+                if step >= warmup_steps:
+                    # 8b. Update recurrent weights using EqProp rule
+                    self.engine.update_weights_predictive(
+                        free_state,
+                        nudge_state,
+                        beta=beta,
+                        learning_rate=effective_lr,
+                        hippo_edge_mask=self.hippo_edge_mask)
+                    
+                    if step < 5:
+                        # Inspect the motor weights
+                        t_mask = self.engine.topdown_edge_mask
+                        b_mask = self.engine.bottomup_edge_mask
+                        td_motor = (self.engine.indices[1][t_mask] >= 256) & (self.engine.indices[1][t_mask] < 512)
+                        bu_motor = (self.engine.indices[0][b_mask] >= 256) & (self.engine.indices[0][b_mask] < 512)
+                        print(f"  Motor TD grads mean=|{self.engine.w_surface[t_mask][td_motor].abs().mean().item():.6f}|")
+                        print(f"  Motor BU grads mean=|{self.engine.w_surface[b_mask][bu_motor].abs().mean().item():.6f}|")
 
-            # 9. VICReg Regularization logic removed.
-            # The previous logic incorrectly subtracted a scalar positive loss 
-            # value directly from the network biases, driving all biases to -1.0 
-            # after ~8000 steps and destroying network activations.
-            # Representational decorrelation is already properly handled by
-            # the anti-Hebbian Oja rule and k-WTA inside engine_torch.py.
-
-            # 10. Logging
-            if step % 100 == 0:
-                if len(acc_window) > 1000: acc_window = acc_window[-1000:]
-                if len(acc_top3_window) > 1000: acc_top3_window = acc_top3_window[-1000:]
-
-                elapsed = time.time() - start_time
-
-                if step % 1000 == 0:
-                    acc_1k = sum(acc_window) / len(acc_window) if acc_window else 0.0
-                    acc3_1k = sum(acc_top3_window) / len(acc_top3_window) if acc_top3_window else 0.0
-                    avg_loss = loss_accum / max(step, 1)
-                    avg_energy = energy_accum / max(step, 1)
-
-                    # Per-level error breakdown
-                    level_errors = self.engine.get_prediction_error_by_level()
-                    err_str = " | ".join(
-                        f"L{l}: s={d['spatial']:.4f} t={d['temporal']:.4f}"
-                        for l, d in sorted(level_errors.items())
-                    )
-
-                    print(f"Step {step}/{total_steps} | Time: {elapsed:.0f}s | "
-                          f"AvgLoss: {avg_loss:.4f} | Energy: {avg_energy:.4f} | "
-                          f"Acc@1k: {acc_1k:.2%} | Top3@1k: {acc3_1k:.2%} | "
-                          f"||s||/√N: {state_norm:.4f}")
-                    print(f"  PredErr: {err_str}")
-
-                    # Cascade distribution diagnostic
-                    cstats = self.engine.cascade_stats()
-                    sr_val = getattr(self.engine, 'last_sr', 0.0)
-                    print(f"  Cascade: surface={cstats['surface']:.4f} "
-                          f"mid={cstats['mid']:.4f} deep={cstats['deep']:.4f} | "
-                          f"SR: {sr_val:.4f}")
-
-                    # Diagnostic: top-down weight stats per level pair.
-                    # If L1 spatial error is stuck high (~5.4), check whether
-                    # top-down weights from L1→L0 are actually updating.
-                    td_stats = self.engine.get_topdown_weight_stats()
-                    td_parts = [f"L{s}→L{d}: μ={v['mean']:.4f} σ={v['std']:.4f}"
-                                for (s, d), v in sorted(td_stats.items())]
-                    if td_parts:
-                        print(f"  TopDown: {' | '.join(td_parts)}")
-
-                    # Convergence and top-down prediction diagnostics
-                    print(f"  Settle: last_diff={self.engine.last_settle_diff:.6f} | "
-                          f"TD pred var: {self.engine.topdown_pred_var:.6f}")
-
-                    # Per-level state variance after settling
-                    level_vars = []
-                    for level in range(self.engine.max_level + 1):
-                        lmask = self.engine.node_to_level == level
-                        lvar = self.engine.state[lmask].var().item()
-                        level_vars.append(f"L{level}={lvar:.6f}")
-                    print(f"  State var: {' | '.join(level_vars)}")
-                else:
-                    recent_acc = sum(acc_window[-100:]) / min(len(acc_window), 100)
-                    recent_acc3 = sum(acc_top3_window[-100:]) / min(len(acc_top3_window), 100)
-                    print(f"  step {step}/{total_steps} | Loss: {loss:.4f} | "
-                          f"Energy: {energy:.4f} | Acc: {recent_acc:.2%} | "
-                          f"Top3: {recent_acc3:.2%} | ||s||/√N: {state_norm:.4f}        ", end='\r')
-
-                # 11. Periodic Evaluation on Holdout Data
-                if step > warmup_steps and step % 5000 == 0 and has_eval and eval_len > 1:
-                    print("\n--- Running Evaluation on Holdout Data ---")
-                    eval_acc, eval_acc3 = self.evaluate_generalization(eval_data)
-                    # Use recent training accuracy to compute Generalization Gap
-                    train_acc = sum(acc_window[-5000:]) / max(1, len(acc_window[-5000:]))
-                    gap = train_acc - eval_acc
-                    ratio = eval_acc / max(1e-8, train_acc)
-                    print(f"Generalization Check: Train Acc = {train_acc:.2%}, Eval Acc = {eval_acc:.2%} | Gap: {gap:+.2%} | Ratio: {ratio:.2f}")
-                    if ratio < 0.5:
-                        print("  WARNING: Ratio < 0.5 indicates pathological memorization!")
-                    elif gap > 0.1:
-                        print("  NOTE: Significant generalization gap detected.")
+                    # 8d. Cascade transfer — step-count + magnitude gated.
+                    # Surface must integrate gradients autonomously for at least
+                    # 500 steps before any magnitude bleeds into mid-layer.
+                    # Magnitude gating (>0.02 threshold) is handled inside
+                    # cascade_transfer() to ensure w_surface accumulates a
+                    # substantial structural representation before transfer.
+                    if step < 500:
+                        pass  # No transfer — let surface accumulate first
+                    elif step < 5000:
+                        # Surface→mid only (magnitude-gated inside)
+                        self.engine.cascade_transfer(include_deep=False)
                     else:
-                        print("  PASS: Strong generalization performance.")
+                        # Full cascade (magnitude-gated inside)
+                        self.engine.cascade_transfer()
 
+                    # 8e. Synaptic intelligence tracking
+                    self.engine.update_synaptic_intelligence(current_loss=energy)
+
+                    # Periodic spectral radius enforcement
+                    if step % 100 == 0:
+                        self.engine.enforce_spectral_radius(target_max=0.95)
+
+                # 8f. Periodic synaptic intelligence consolidation
+                if step >= warmup_steps and step > 0 and step % self.si_consolidation_interval == 0:
+                    self.engine.consolidate_importance()
+
+                # 8g. Sleep replay phase for memory consolidation
+                if step >= warmup_steps and step > 0 and step % self.sleep_interval == 0:
+                    self.sleep_phase(num_replay_cycles=200, replay_lr_mult=0.1)
+
+                # 9. VICReg Regularization logic removed.
+                # The previous logic incorrectly subtracted a scalar positive loss 
+                # value directly from the network biases, driving all biases to -1.0 
+                # after ~8000 steps and destroying network activations.
+                # Representational decorrelation is already properly handled by
+                # the anti-Hebbian Oja rule and k-WTA inside engine_torch.py.
+
+                # 10. Logging
+                if step % 100 == 0:
+                    if len(acc_window) > 1000: acc_window = acc_window[-1000:]
+                    if len(acc_top3_window) > 1000: acc_top3_window = acc_top3_window[-1000:]
+
+                    elapsed = time.time() - start_time
+
+                    if step % 1000 == 0:
+                        acc_1k = sum(acc_window) / len(acc_window) if acc_window else 0.0
+                        acc3_1k = sum(acc_top3_window) / len(acc_top3_window) if acc_top3_window else 0.0
+                        avg_loss = loss_accum / max(step, 1)
+                        avg_energy = energy_accum / max(step, 1)
+
+                        # Per-level error breakdown
+                        level_errors = self.engine.get_prediction_error_by_level()
+                        err_str = " | ".join(
+                            f"L{l}: s={d['spatial']:.4f} t={d['temporal']:.4f}"
+                            for l, d in sorted(level_errors.items())
+                        )
+
+                        print(f"Step {step}/{total_steps} | Time: {elapsed:.0f}s | "
+                              f"AvgLoss: {avg_loss:.4f} | Energy: {avg_energy:.4f} | "
+                              f"Acc@1k: {acc_1k:.2%} | Top3@1k: {acc3_1k:.2%} | "
+                              f"||s||/√N: {state_norm:.4f}")
+                        print(f"  PredErr: {err_str}")
+
+                        # Cascade distribution diagnostic
+                        cstats = self.engine.cascade_stats()
+                        sr_val = getattr(self.engine, 'last_sr', 0.0)
+                        print(f"  Cascade: surface={cstats['surface']:.4f} "
+                              f"mid={cstats['mid']:.4f} deep={cstats['deep']:.4f} | "
+                              f"SR: {sr_val:.4f}")
+
+                        # Diagnostic: top-down weight stats per level pair.
+                        # If L1 spatial error is stuck high (~5.4), check whether
+                        # top-down weights from L1→L0 are actually updating.
+                        td_stats = self.engine.get_topdown_weight_stats()
+                        td_parts = [f"L{s}→L{d}: μ={v['mean']:.4f} σ={v['std']:.4f}"
+                                    for (s, d), v in sorted(td_stats.items())]
+                        if td_parts:
+                            print(f"  TopDown: {' | '.join(td_parts)}")
+
+                        # Convergence and top-down prediction diagnostics
+                        print(f"  Settle: last_diff={self.engine.last_settle_diff:.6f} | "
+                              f"TD pred var: {self.engine.topdown_pred_var:.6f}")
+
+                        # Per-level state variance after settling
+                        level_vars = []
+                        for level in range(self.engine.max_level + 1):
+                            lmask = self.engine.node_to_level == level
+                            lvar = self.engine.state[lmask].var().item()
+                            level_vars.append(f"L{level}={lvar:.6f}")
+                        print(f"  State var: {' | '.join(level_vars)}")
+                    else:
+                        recent_acc = sum(acc_window[-100:]) / min(len(acc_window), 100)
+                        recent_acc3 = sum(acc_top3_window[-100:]) / min(len(acc_top3_window), 100)
+                        print(f"  step {step}/{total_steps} | Loss: {loss:.4f} | "
+                              f"Energy: {energy:.4f} | Acc: {recent_acc:.2%} | "
+                              f"Top3: {recent_acc3:.2%} | ||s||/√N: {state_norm:.4f}        ", end='\r')
+
+                    # 11. Periodic Evaluation on Holdout Data
+                    if step > warmup_steps and step % 5000 == 0 and has_eval and eval_len > 1:
+                        print("\n--- Running Evaluation on Holdout Data ---")
+                        eval_acc, eval_acc3 = self.evaluate_generalization(eval_data)
+                        # Use recent training accuracy to compute Generalization Gap
+                        train_acc = sum(acc_window[-5000:]) / max(1, len(acc_window[-5000:]))
+                        gap = train_acc - eval_acc
+                        ratio = eval_acc / max(1e-8, train_acc)
+                        print(f"Generalization Check: Train Acc = {train_acc:.2%}, Eval Acc = {eval_acc:.2%} | Gap: {gap:+.2%} | Ratio: {ratio:.2f}")
+                        if ratio < 0.5:
+                            print("  WARNING: Ratio < 0.5 indicates pathological memorization!")
+                        elif gap > 0.1:
+                            print("  NOTE: Significant generalization gap detected.")
+                        else:
+                            print("  PASS: Strong generalization performance.")
+
+                # FIX 2: overall_step must increment EVERY iteration, not just
+                # when step % 100 == 0. Previously it was trapped inside the
+                # logging conditional, causing the step counter to freeze at 1
+                # after the first increment (since 1 % 100 != 0).
                 overall_step += 1
             
             if overall_step >= total_steps:
