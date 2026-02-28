@@ -210,8 +210,12 @@ class SequentialTrainer:
             self.engine.omega.zero_()
             self.engine.running_contribution.zero_()
 
-            # Fix: Orthogonally re-seed readout to prevent classifier misalignment
-            self.readout_W.normal_(0, 1.0 / np.sqrt(self.readout_W.size(1)))
+            # Scale down readout instead of re-seeding: preserves learned
+            # alignment with reservoir features while reducing magnitude so
+            # the readout can adapt to the new phase's distribution.
+            # Re-seeding with .normal_() destroyed all prior alignment,
+            # wasting ~26 pp of reservoir discriminative capacity.
+            self.readout_W *= 0.5
 
         print(f"  w_deep preserved (|w_deep|={deep_mag:.4f}), "
               f"w_surface/w_mid decayed by 0.1, state decayed to 0.5, readout orthogonally seeded")
@@ -396,11 +400,16 @@ class SequentialTrainer:
                 effective_lr = lr * max(lr_mult, 0.1)
 
                 # 8a. Train readout with cross-entropy gradient descent.
+                # Readout uses a constant LR (not cosine-decayed) so it can
+                # continuously track the shifting reservoir representations.
+                # The cosine schedule is appropriate for recurrent weights that
+                # need to stabilize, but the readout must stay adaptive.
+                readout_lr = lr * 0.5
                 with torch.no_grad():
                     target_one_hot = self.eye[target_byte]
                     readout_grad = probs - target_one_hot  # softmax CE gradient
-                    self.readout_W -= effective_lr * torch.outer(readout_grad, features)
-                    self.readout_b -= effective_lr * readout_grad
+                    self.readout_W -= readout_lr * torch.outer(readout_grad, features)
+                    self.readout_b -= readout_lr * readout_grad
 
                 # 8b-8e: Skip recurrent weight updates during warmup period.
                 # During warmup, only the readout adapts to the new task distribution.
@@ -442,9 +451,14 @@ class SequentialTrainer:
                     # 8e. Synaptic intelligence tracking
                     self.engine.update_synaptic_intelligence(current_loss=energy)
 
-                    # Periodic spectral radius enforcement
-                    if step % 100 == 0:
-                        self.engine.enforce_spectral_radius(target_max=0.95)
+                    # Periodic spectral radius enforcement REMOVED:
+                    # The Frobenius ceiling (2x initial norm) and per-destination
+                    # RMS normalization (max_rms=0.15) in update_weights_predictive
+                    # already control SR. The power-iteration enforcement was
+                    # redundant and specifically destructive to surface weights:
+                    # mid+deep grow and consume the SR budget, then enforcement
+                    # dampens only w_surface, draining it faster than learning
+                    # can replenish it (surface peak crushed to ~0.0003).
 
                 # 8f. Periodic synaptic intelligence consolidation
                 if step >= warmup_steps and step > 0 and step % self.si_consolidation_interval == 0:
