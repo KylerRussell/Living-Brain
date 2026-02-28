@@ -860,6 +860,15 @@ class PredictiveCodingEngine:
             I = torch.eye(N, dtype=torch.float32, device=self.device)
             
             J = taus_inv * (-I + W_drho)
+
+            # Zero out I/O node rows/columns (nodes 0-511).
+            # I/O nodes have tau=0.1 which amplifies their Jacobian rows
+            # by 10x, inflating the measured spectral radius. Since I/O
+            # nodes are clamped during settling, their Jacobian
+            # contribution is meaningless but dominates the eigenvalue.
+            J[:512, :] = 0
+            J[:, :512] = 0
+
             return J
 
     def _update_short_term_plasticity(self):
