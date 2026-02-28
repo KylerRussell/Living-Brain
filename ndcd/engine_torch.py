@@ -283,7 +283,7 @@ class PredictiveCodingEngine:
 
         # Cascade transfer rates — significantly increased to allow transient
         # syntactic rules to meaningfully accumulate in surface weights.
-        self.tau_surface_to_mid = 250.0   # was 500.0
+        self.tau_surface_to_mid = 1000.0   # was 250.0; let surface integrate longer
         
         # We now track separate mid-to-deep transfer rates per edge depending on 
         # whether the source node belongs to a hippocampal or neocortical module.
@@ -776,14 +776,18 @@ class PredictiveCodingEngine:
 
     def enforce_spectral_radius(self, target_max=0.95):
         """
-        Estimate dominant eigenvalue of FREE (non-I/O) effective weights
-        using power iteration, and dampen w_surface if the spectral
-        radius exceeds target_max.
+        Estimate dominant eigenvalue of the CASCADE-ONLY weights (learned
+        deltas: w_surface + w_mid + w_deep) on FREE edges, and dampen
+        w_surface if the cascade spectral radius exceeds target_max.
 
-        Critical: Only uses free edges (src >= 512 AND dst >= 512).
-        I/O projection edges are clamped external forcing, not autonomous
-        recurrence. Including them inflates SR by ~50x and annihilates
-        all learned weights.
+        Decoupled from base weights: The base weight_values were already
+        SR-tuned at initialization (graph.py). Enforcing on the total
+        effective weight (base + cascade) was crushing learned structure
+        because the base SR (~0.90) consumed most of the budget, leaving
+        almost no room for the cascade to add meaningful structure.
+
+        By enforcing on cascade-only, the learned weights are constrained
+        independently, and the base initialization is preserved.
 
         Only dampens w_surface — w_mid and w_deep are protected long-term
         memory that must never be rescaled by a transient SR measurement.
@@ -796,17 +800,24 @@ class PredictiveCodingEngine:
                 if norm > 0:
                     self._power_iter_v /= norm
 
-            # Build sparse matrix from FREE edges only
-            free_weights = self.effective_weights[self.free_edge_mask]
-            W_free = torch.sparse_coo_tensor(
-                self.free_edge_indices, free_weights,
+            # Build sparse matrix from FREE edges of CASCADE ONLY (not base weights)
+            cascade_weights = (self.w_surface + self.w_mid + self.w_deep)[self.free_edge_mask]
+
+            # Skip if cascade is negligible
+            cascade_norm = cascade_weights.norm().item()
+            if cascade_norm < 1e-6:
+                self.last_sr = 0.0
+                return
+
+            W_cascade = torch.sparse_coo_tensor(
+                self.free_edge_indices, cascade_weights,
                 (self.num_nodes, self.num_nodes)
             )
 
             # Power iteration (5 steps)
             v = self._power_iter_v
             for _ in range(5):
-                v_next = torch.mv(W_free, v)
+                v_next = torch.mv(W_cascade, v)
                 norm = torch.norm(v_next)
                 if norm > 1e-8:
                     v = v_next / norm
@@ -814,7 +825,7 @@ class PredictiveCodingEngine:
             self._power_iter_v = v
 
             # Rayleigh quotient estimate
-            Wv = torch.mv(W_free, v)
+            Wv = torch.mv(W_cascade, v)
             eigenvalue = torch.dot(v, Wv)
             sr = torch.abs(eigenvalue).item()
             self.last_sr = sr
@@ -822,7 +833,7 @@ class PredictiveCodingEngine:
             # Only dampen w_surface (fast transient weights)
             if sr > target_max:
                 dampening_factor = target_max / sr
-                self.w_surface *= dampening_factor
+                self.w_surface[self.free_edge_mask] *= dampening_factor
 
     def get_jacobian(self) -> torch.Tensor:
         """
