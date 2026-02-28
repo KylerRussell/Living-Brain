@@ -62,31 +62,25 @@ def jit_solve_dynamics_imex(
 
         old_state = current_s.clone()
 
-        # Compute nonlinear term
-        # Layer Normalization per module before activation
-        normed_s = current_s.clone()
-        for m in range(module_starts.size(0)):
-            ms = module_starts[m].item()
-            me = module_ends[m].item()
-            mod_s = current_s[ms:me]
-            mean = mod_s.mean()
-            var = mod_s.var(unbiased=False)
-            normed_s[ms:me] = (mod_s - mean) / torch.sqrt(var + 1e-5)
-            
-        rho = torch.tanh(normed_s)
+        # Compute nonlinear term — pointwise activation only.
+        # Layer norm was here previously but it couples ρᵢ to all nodes in the
+        # module (∂ρᵢ/∂sⱼ ≠ 0), breaking the symmetric Jacobian required for
+        # energy descent.  Bias centering in update_weights_predictive handles
+        # covariate shift over training time instead.
+        rho = torch.tanh(current_s)
         synaptic = torch.mv(weights, rho)
         nonlinear = synaptic + biases + input_vector
 
         # Semi-implicit update: treats -x/tau implicitly, rest explicitly
         current_s = (current_s + current_dt * nonlinear / taus) / imex_denom
 
-        # Homeostatic sparsity (L1 penalty) — reduced from 0.01 to 0.001.
-        # The old 0.01 coefficient was excessively punitive, driving 33% of
-        # nodes into the linear regime of tanh and suppressing distinct
-        # attractors. At 0.001, nodes can utilize the full dynamic range
-        # of tanh, pushing activations into the saturated extremes required
-        # to distinctly separate representations for different inputs.
-        current_s -= 0.0001 * current_s.sign() * current_dt
+        # Smooth sparsity penalty (replaces both L1 sign() and k-WTA).
+        # Energy contribution: λ · Σ log(cosh(α·sᵢ)) / α
+        # Gradient: λ · tanh(α·sᵢ), which ≈ λ·sign(sᵢ) for large |s|
+        # but is smooth everywhere, preserving the energy landscape.
+        # The 0.01 factor keeps the penalty gentle relative to synaptic dynamics.
+        if sparsity_alpha > 0.0:
+            current_s = current_s - sparsity_alpha * 0.01 * torch.tanh(current_s * 3.0) * current_dt
 
         # State clamping: ±1.5 keeps tanh ≈ 0.91 (18% gradient headroom)
         current_s = current_s.clamp(-1.5, 1.5)
@@ -94,28 +88,6 @@ def jit_solve_dynamics_imex(
         # Hard clamp input nodes after update
         if input_mask is not None:
             current_s = current_s * (1.0 - input_mask) + input_vector * input_mask
-
-        # k-Winner-Take-All (k-WTA) lateral inhibition every 5 steps.
-        # Replaces the old soft mean-field approach that was insufficient
-        # to break representational singularity (cosine similarity ~0.98).
-        # Strict k-WTA forces modules to explicitly select disparate
-        # sub-populations of active nodes for differing sensory inputs,
-        # generating the orthogonal state vectors needed to separate
-        # representations. Top 20% by magnitude win; losers are suppressed
-        # to 5% residual (not hard zero, to avoid settling oscillation).
-        if sparsity_alpha > 0.0 and step_count % 5 == 4:
-            for m in range(module_starts.size(0)):
-                ms = module_starts[m].item()
-                me = module_ends[m].item()
-                mod_s = current_s[ms:me]
-                mod_size = me - ms
-                k = max(1, mod_size // 5)  # 20% winners
-                if mod_size > k:
-                    topk_vals = torch.topk(mod_s.abs(), k).values
-                    threshold = topk_vals[-1]
-                    below = mod_s.abs() < threshold
-                    current_s[ms:me] = torch.where(below, mod_s * 0.10, mod_s)
-                    current_s[ms:me] = current_s[ms:me].clamp(-1.5, 1.5)
 
         # Convergence check
         diff = torch.norm(current_s - old_state).item()
