@@ -221,7 +221,7 @@ class SequentialTrainer:
               f"w_surface/w_mid decayed by 0.1, state decayed to 0.5, readout orthogonally seeded")
 
     def train_phase(self, phase_name, data_path, iterations, steps_per_iter, lr=0.01,
-                    settle_steps=20, input_gain=0.5, warmup_steps=0):
+                    settle_steps=20, input_gain=3.0, warmup_steps=0):
         """
         Predictive Coding training loop.
 
@@ -853,7 +853,7 @@ def main():
     # Phase 1: Holophrases
     trainer.train_phase("Holophrases", "ndcd/data/level1_holophrases.txt",
                         iterations=500, steps_per_iter=100, lr=0.05,
-                        settle_steps=30, input_gain=0.5)
+                        settle_steps=30, input_gain=3.0)
     trainer.generate(start_text="L")
 
     # --- Phase boundary: Holophrases → Slot-and-Frame ---
@@ -862,7 +862,7 @@ def main():
     # Phase 2: Slot-and-Frame
     trainer.train_phase("Slot-and-Frame", "ndcd/data/level2_slot_frame.txt",
                         iterations=500, steps_per_iter=100, lr=0.05,
-                        settle_steps=30, input_gain=0.5, warmup_steps=15000)
+                        settle_steps=30, input_gain=3.0, warmup_steps=15000)
     trainer.evaluate_retention("ndcd/data/level1_holophrases.txt")
     trainer.generate(start_text="W")
 
@@ -872,7 +872,7 @@ def main():
     # Phase 3: Complex Constructions
     trainer.train_phase("Complex Constructions", "ndcd/data/level3_complex.txt",
                         iterations=500, steps_per_iter=100, lr=0.05,
-                        settle_steps=50, input_gain=0.5, warmup_steps=15000)
+                        settle_steps=50, input_gain=3.0, warmup_steps=15000)
     trainer.evaluate_retention("ndcd/data/level1_holophrases.txt")
     trainer.evaluate_retention("ndcd/data/level2_slot_frame.txt")
     trainer.generate(start_text="I")
@@ -883,7 +883,7 @@ def main():
     # Phase 4: Contextual Continuity
     trainer.train_phase("Contextual Continuity", "ndcd/data/level4_contextual.txt",
                         iterations=500, steps_per_iter=100, lr=0.05,
-                        settle_steps=50, input_gain=0.5, warmup_steps=15000)
+                        settle_steps=50, input_gain=3.0, warmup_steps=15000)
     trainer.evaluate_retention("ndcd/data/level1_holophrases.txt")
     trainer.evaluate_retention("ndcd/data/level2_slot_frame.txt")
     trainer.evaluate_retention("ndcd/data/level3_complex.txt")

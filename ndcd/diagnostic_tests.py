@@ -388,7 +388,7 @@ class ModelDiagnostics:
             target_byte = data[idx + 1]
 
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[0:256] = self.trainer.eye[input_byte] * 1.0
+            input_vec[0:256] = self.trainer.eye[input_byte] * 3.0
             input_mask = torch.zeros(self.num_nodes, device=self.device)
             input_mask[list(range(256))] = 1.0
 
@@ -701,7 +701,7 @@ class ModelDiagnostics:
         for b in test_bytes:
             self.engine.state.zero_()
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[0:256] = self.trainer.eye[b] * 1.0
+            input_vec[0:256] = self.trainer.eye[b] * 3.0
             input_mask = torch.zeros(self.num_nodes, device=self.device)
             input_mask[list(range(256))] = 1.0
             self.engine.settle(input_vec, input_mask=input_mask, max_steps=50)
@@ -921,7 +921,7 @@ class ModelDiagnostics:
             target_byte = data[idx + 1]
 
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[0:256] = self.trainer.eye[input_byte] * 1.0
+            input_vec[0:256] = self.trainer.eye[input_byte] * 3.0
             input_mask = torch.zeros(self.num_nodes, device=self.device)
             input_mask[list(range(256))] = 1.0
             self.engine.settle(input_vec, input_mask=input_mask, max_steps=50)
@@ -945,7 +945,7 @@ class ModelDiagnostics:
             target_byte = data[idx + 1]
 
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[0:256] = self.trainer.eye[input_byte] * 1.0
+            input_vec[0:256] = self.trainer.eye[input_byte] * 3.0
             input_mask = torch.zeros(self.num_nodes, device=self.device)
             input_mask[list(range(256))] = 1.0
             self.engine.settle(input_vec, input_mask=input_mask, max_steps=50)
@@ -1093,7 +1093,7 @@ class ModelDiagnostics:
             self.engine.state.zero_()
 
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            input_vec[0:256] = self.trainer.eye[input_byte] * 1.0
+            input_vec[0:256] = self.trainer.eye[input_byte] * 3.0
             input_mask = torch.zeros(self.num_nodes, device=self.device)
             input_mask[list(range(256))] = 1.0
 
@@ -1196,15 +1196,15 @@ def run_diagnostics_standalone(args):
         
         trainer.train_phase("SlotFrames", "ndcd/data/train/level2_slot_frame.txt",
                             iterations=args.train_iters, steps_per_iter=100,
-                            lr=0.05, settle_steps=30, input_gain=0.5)
-                            
+                            lr=0.05, settle_steps=30, input_gain=3.0)
+
         trainer.train_phase("Complex", "ndcd/data/train/level3_complex.txt",
                             iterations=args.train_iters, steps_per_iter=100,
-                            lr=0.05, settle_steps=30, input_gain=0.5)
-                            
+                            lr=0.05, settle_steps=30, input_gain=3.0)
+
         trainer.train_phase("Context", "ndcd/data/train/level4_contextual.txt",
                             iterations=args.train_iters, steps_per_iter=100,
-                            lr=0.05, settle_steps=30, input_gain=0.5)
+                            lr=0.05, settle_steps=30, input_gain=3.0)
 
     diag = ModelDiagnostics(trainer)
     results = diag.run_all()
