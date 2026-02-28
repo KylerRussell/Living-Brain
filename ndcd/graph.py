@@ -107,7 +107,7 @@ class DynamicGraph:
         # At 200, lateral recurrence outnumbered inter-level edges 25:1,
         # making the hierarchy structurally disconnected — higher levels
         # were completely input-invariant. Target ~3:1 lateral:hierarchical.
-        target_connections_per_node = 50
+        target_connections_per_node = 25
         for mod in self.modules:
             idx = mod['indices']
             n = len(idx)
@@ -163,7 +163,7 @@ class DynamicGraph:
         # ~2-3 inter-level edges, making the hierarchy structurally disconnected.
         # L1-L3 settled to input-invariant states (cos_sim=1.0) because signal
         # couldn't climb or descend. 15% density gives real pathways.
-        hier_density = 0.15
+        hier_density = 0.08
         for level in range(num_levels - 1):
             lower_mods = self.level_modules[level]
             upper_mods = self.level_modules[level + 1]
@@ -258,7 +258,7 @@ class DynamicGraph:
             shape=(num_nodes, num_nodes)
         )
 
-        target_sr = 1.15
+        target_sr = 0.90
         try:
             from scipy.sparse.linalg import eigs as sp_eigs
             eigvals = sp_eigs(free_sparse.astype(np.float64),

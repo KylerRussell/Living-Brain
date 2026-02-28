@@ -321,6 +321,7 @@ class SequentialTrainer:
                     input_mask=input_mask,
                     max_steps=settle_steps,
                     tol=settle_tol,
+                    implicit_damping=3.0,  # was 1.2; needed to handle SR > 1
                 )
                 free_state = self.engine.state.clone()
                 free_diff = self.engine.last_settle_diff
@@ -348,6 +349,7 @@ class SequentialTrainer:
                     input_mask=input_mask,
                     max_steps=settle_steps,
                     tol=settle_tol,
+                    implicit_damping=3.0,  # was 1.2; needed to handle SR > 1
                 )
                 nudge_state = self.engine.state.clone()
                 nudge_diff = self.engine.last_settle_diff
