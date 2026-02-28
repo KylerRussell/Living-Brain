@@ -344,40 +344,41 @@ class PredictiveCodingEngine:
         """Effective weight is base topology + learned cascade deltas."""
         return self.weight_values + self.w_surface + self.w_mid + self.w_deep
 
-    def cascade_transfer(self, include_deep=True):
-        """Call once per training step after weight update.
+    def cascade_transfer(self, include_deep=True, surface_floor=0.003):
+        """Call periodically (every ~500 steps) after weight update.
 
         Transfers weight magnitude downward through the cascade:
-        surface → mid (fast) and optionally mid → deep (slow).
+        surface → mid (above floor) and optionally mid → deep (gated).
 
-        Magnitude-gated: transfers only occur when the source level has
-        accumulated sufficient structural magnitude (> 0.02), ensuring
-        the surface layer integrates gradients autonomously before any
-        content bleeds into deeper timescales.
+        The surface floor ensures that fast transient weights always retain
+        a minimum magnitude for hierarchical signal propagation. Without
+        this, continuous proportional drain drives TD/BU surface weights
+        to zero, making higher levels input-invariant.
 
         Args:
-            include_deep: If False, only surface→mid transfer occurs
-                (used during early training steps 500-5000).
+            include_deep: If False, only surface→mid transfer occurs.
+            surface_floor: Minimum surface magnitude to retain (default 0.003).
         """
-        # Surface → Mid: Continuous leaky integration
-        transfer_sm = self.w_surface / self.tau_surface_to_mid
-        self.w_mid += transfer_sm
-        self.w_surface -= transfer_sm
+        # Surface → Mid: Transfer only excess above floor
+        surface_abs = self.w_surface.abs()
+        excess_mask = surface_abs > surface_floor
+        if excess_mask.any():
+            excess = (surface_abs - surface_floor) * self.w_surface.sign()
+            # Transfer 20% of excess per call (called every ~500 steps)
+            transfer_sm = torch.zeros_like(self.w_surface)
+            transfer_sm[excess_mask] = excess[excess_mask] * 0.2
+            self.w_mid += transfer_sm
+            self.w_surface -= transfer_sm
 
         # Mid → Deep: Continuous leaky integration if enabled
         if include_deep:
-            gate_mask = self.w_mid.abs() > 0.02
+            gate_mask = self.w_mid.abs() > 0.005  # lowered from 0.02
             transfer_md = torch.zeros_like(self.w_mid)
             transfer_md[gate_mask] = self.w_mid[gate_mask] / self.tau_mid_to_deep[gate_mask]
             self.w_deep += transfer_md
             self.w_mid -= transfer_md
 
-        # Gentle w_deep norm control — prevent SR explosion.
-        # Soft ceiling: w_deep can grow up to its initial baseline norm
-        # (to encode learned structure) but no further. Proportional
-        # scaling preserves relative weight patterns (the actual
-        # "memory") while preventing magnitude blow-up.
-        # CHANGED: Use free-edge norm only to match initialization.
+        # Gentle w_deep norm control (unchanged)
         deep_frob = self.w_deep[self.free_edge_mask].norm().item()
         max_deep_frob = self._initial_deep_frob
         if deep_frob > max_deep_frob:
