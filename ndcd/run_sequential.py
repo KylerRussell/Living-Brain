@@ -332,6 +332,15 @@ class SequentialTrainer:
 
         overall_step = 0
 
+        # Readout gradient buffer for word-boundary-aligned updates (Strategy 1).
+        # Gradients accumulate across within-word characters and are flushed
+        # as a batch-average at each word boundary, aligning the readout's
+        # credit signal with the word-level consolidation phase.
+        accumulated_readout_grad_W = torch.zeros_like(self.readout_W)
+        accumulated_readout_grad_b = torch.zeros_like(self.readout_b)
+        readout_acc_count = 0
+        readout_lr = lr * 0.5
+
         for epoch in range(epochs):
             print(f"--- Epoch {epoch+1}/{epochs} ---")
             
@@ -343,6 +352,11 @@ class SequentialTrainer:
                 # 1. Get Data Stream
                 input_byte = data[curr_idx]
                 target_byte = data[curr_idx + 1]
+
+                # Boundary classification for level-gated updates (Strategy 2).
+                # Sentence boundaries are a strict superset of word boundaries.
+                is_sentence_boundary = input_byte in (46, 63, 33)  # . ? !
+                is_word_boundary = (input_byte in (32, 10, 13, 9)) or is_sentence_boundary
 
                 # 2. Input Setup — full one-hot across all 256 input nodes.
                 # A single node at 5.0 with 255 zeroes wastes input projection
@@ -360,7 +374,7 @@ class SequentialTrainer:
                 # gradual EMA decay instead of harsh 90% reset.
                 self.engine.update_context_ema()
 
-                if input_byte in (32, 10, 13, 9):  # space, LF, CR, tab
+                if is_word_boundary:  # space, LF, CR, tab, or sentence-ending punctuation
                     fast_mask = self.engine.taus < 0.5
                     # EMA: retain 50% of fast node state instead of 10%
                     # Preserves cross-clause contextual linking
@@ -455,25 +469,28 @@ class SequentialTrainer:
                 lr_mult = 0.5 * (1.0 + np.cos(np.pi * step / total_steps))
                 effective_lr = lr * max(lr_mult, 0.1)
 
-                # 8a. Train readout with cross-entropy gradient descent.
-                # Readout uses a constant LR (not cosine-decayed) so it can
-                # continuously track the shifting reservoir representations.
-                # The cosine schedule is appropriate for recurrent weights that
-                # need to stabilize, but the readout must stay adaptive.
-                readout_lr = lr * 0.5
+                # 8a. Buffer readout gradient for word-boundary-aligned updates (Strategy 1).
+                # Accumulating per-character gradients and flushing their average at each
+                # word boundary aligns the readout's credit signal with the word-level
+                # consolidation phase rather than injecting per-character noise.
                 with torch.no_grad():
                     target_one_hot = self.eye[target_byte]
                     readout_grad = probs - target_one_hot  # softmax CE gradient
-                    self.readout_W -= readout_lr * torch.outer(readout_grad, features)
-                    self.readout_b -= readout_lr * readout_grad
+                    accumulated_readout_grad_W += torch.outer(readout_grad, features)
+                    accumulated_readout_grad_b += readout_grad
+                    readout_acc_count += 1
 
-                # 8b. Update recurrent weights using EqProp rule
+                # 8b. Update L0 recurrent weights per-character (Strategy 2).
+                # L1-L3 edges are frozen at character timescale; they receive updates
+                # only at word and sentence boundaries via consolidated states, ensuring
+                # each level's credit assignment matches its natural temporal scale.
                 self.engine.update_weights_predictive(
                     free_state,
                     nudge_state,
                     beta=beta,
                     learning_rate=effective_lr,
-                    hippo_edge_mask=self.hippo_edge_mask)
+                    hippo_edge_mask=self.hippo_edge_mask,
+                    active_level_max=0)
 
                 if step < 5:
                     # Inspect the motor weights
@@ -484,15 +501,59 @@ class SequentialTrainer:
                     print(f"  Motor TD grads mean=|{self.engine.w_surface[t_mask][td_motor].abs().mean().item():.6f}|")
                     print(f"  Motor BU grads mean=|{self.engine.w_surface[b_mask][bu_motor].abs().mean().item():.6f}|")
 
-                # 8d. Cascade transfer — step-count + magnitude gated.
-                if step < 500:
-                    pass  # No transfer — let surface accumulate first
-                elif step < 5000:
-                    # Surface→mid only (magnitude-gated inside)
-                    self.engine.cascade_transfer(include_deep=False)
-                else:
-                    # Full cascade (magnitude-gated inside)
-                    self.engine.cascade_transfer()
+                # 8d. Level-gated boundary updates (Strategies 1, 2, 3 composed).
+                #
+                # Word boundary: extended autonomous settling (Strategy 3) lets L2/L3
+                # form stable attractors representing the completed word, then L1+L2
+                # weights update from that consolidated state (Strategy 2), and the
+                # buffered readout gradient is flushed (Strategy 1).
+                if is_word_boundary:
+                    _zero = torch.zeros(self.num_nodes, device=self.device)
+                    self.engine.settle(_zero, input_mask=None, max_steps=40,
+                                       tol=settle_tol, implicit_damping=3.0)
+                    word_free_state = self.engine.state.clone()
+                    # Nudge target at word boundary: first char of next word (= target_byte)
+                    word_nudge_vec = torch.zeros(self.num_nodes, device=self.device)
+                    word_nudge_vec[256:512] = self.eye[target_byte] * beta
+                    self.engine.settle(word_nudge_vec, input_mask=None,
+                                       max_steps=settle_steps, tol=settle_tol,
+                                       implicit_damping=3.0)
+                    word_nudge_state = self.engine.state.clone()
+                    self.engine.update_weights_predictive(
+                        word_free_state, word_nudge_state, beta=beta,
+                        learning_rate=effective_lr, hippo_edge_mask=self.hippo_edge_mask,
+                        active_level_max=2)
+                    # Flush buffered readout gradient (Strategy 1)
+                    if readout_acc_count > 0:
+                        self.readout_W -= readout_lr * accumulated_readout_grad_W / readout_acc_count
+                        self.readout_b -= readout_lr * accumulated_readout_grad_b / readout_acc_count
+                        accumulated_readout_grad_W.zero_()
+                        accumulated_readout_grad_b.zero_()
+                        readout_acc_count = 0
+
+                # Sentence boundary: longest settling + L3 update + cascade transfer + SI.
+                # Cascade transfer is now boundary-triggered rather than per-step so that
+                # surface weights have time to accumulate meaningful signal before draining.
+                if is_sentence_boundary:
+                    _zero = torch.zeros(self.num_nodes, device=self.device)
+                    self.engine.settle(_zero, input_mask=None, max_steps=75,
+                                       tol=settle_tol, implicit_damping=3.0)
+                    sent_free_state = self.engine.state.clone()
+                    sent_nudge_vec = torch.zeros(self.num_nodes, device=self.device)
+                    sent_nudge_vec[256:512] = self.eye[target_byte] * beta
+                    self.engine.settle(sent_nudge_vec, input_mask=None,
+                                       max_steps=settle_steps, tol=settle_tol,
+                                       implicit_damping=3.0)
+                    sent_nudge_state = self.engine.state.clone()
+                    self.engine.update_weights_predictive(
+                        sent_free_state, sent_nudge_state, beta=beta,
+                        learning_rate=effective_lr, hippo_edge_mask=self.hippo_edge_mask,
+                        active_level_max=self.engine.max_level)
+                    # Cascade transfer at sentence boundary (not per-step)
+                    if step >= 500:
+                        self.engine.cascade_transfer(include_deep=(step >= 5000))
+                    # SI consolidation at sentence boundary
+                    self.engine.consolidate_importance()
 
                 # 8e. Synaptic intelligence tracking
                 self.engine.update_synaptic_intelligence(current_loss=energy)

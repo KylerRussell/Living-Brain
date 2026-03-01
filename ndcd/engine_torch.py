@@ -563,7 +563,7 @@ class PredictiveCodingEngine:
 
         return total_energy
 
-    def update_weights_predictive(self, free_state, nudge_state, beta=0.5, learning_rate=0.01, hippo_edge_mask=None):
+    def update_weights_predictive(self, free_state, nudge_state, beta=0.5, learning_rate=0.01, hippo_edge_mask=None, active_level_max=None):
         """
         Local Hebbian weight update based on True Equilibrium Propagation.
 
@@ -700,6 +700,16 @@ class PredictiveCodingEngine:
             if hippo_edge_mask is not None:
                 meta_lr = meta_lr * (1.0 + hippo_edge_mask.float() * 9.0)
 
+            # Level gate (Strategy 2): restrict updates to edges whose max endpoint
+            # level is <= active_level_max.  L0-only per-character, L1+L2 at word
+            # boundaries, L3 at sentence boundaries.
+            if active_level_max is not None:
+                src_lvls = self.node_to_level[self.indices[0]]
+                dst_lvls = self.node_to_level[self.indices[1]]
+                edge_max_lvl = torch.maximum(src_lvls, dst_lvls)
+                level_gate = (edge_max_lvl <= active_level_max).float()
+                grad = grad * level_gate
+
             # Apply update only to surface level
             self.w_surface += meta_lr * grad
 
@@ -773,20 +783,26 @@ class PredictiveCodingEngine:
 
             # --- Bias update from prediction errors + IP ---
             bias_grad = (rho_nudge - rho_free) / beta + self.temporal_alpha * self.temporal_errors + ip_gradient
+            if active_level_max is not None:
+                node_gate = (self.node_to_level <= active_level_max).float()
+                bias_grad = bias_grad * node_gate
             self.biases += learning_rate * 0.1 * bias_grad
             self.biases.clamp_(-1.0, 1.0)
 
             # --- Temporal transition matrix update ---
             eta = learning_rate * 25.0  # Dedicated temporal learning rate (η)
             for mod_idx, (start, end) in enumerate(self.module_ranges):
+                # Level gate: skip modules above the active update threshold
+                if active_level_max is not None and self.module_levels[mod_idx] > active_level_max:
+                    continue
                 t_error = self.temporal_errors[start:end]
                 prev = self.previous_state[start:end]
 
                 a_mod = eta * t_error * prev
-                
+
                 a_mod = a_mod.clamp(-0.05, 0.05) - 0.005 * self.temporal_A[mod_idx]
                 self.temporal_A[mod_idx] += a_mod
-                
+
                 self.temporal_A[mod_idx].clamp_(-1.0, 1.0)
 
     def store_previous_state(self):
