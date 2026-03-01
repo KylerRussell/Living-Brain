@@ -210,18 +210,76 @@ class SequentialTrainer:
             self.engine.omega.zero_()
             self.engine.running_contribution.zero_()
 
-            # Scale down readout instead of re-seeding: preserves learned
-            # alignment with reservoir features while reducing magnitude so
-            # the readout can adapt to the new phase's distribution.
-            # Re-seeding with .normal_() destroyed all prior alignment,
-            # wasting ~26 pp of reservoir discriminative capacity.
-            self.readout_W *= 0.5
+            # Readout is preserved intact — dedicated SGD realignment
+            # (realign_readout) is called after phase_boundary_reset to
+            # properly recalibrate against the new task distribution.
 
         print(f"  w_deep preserved (|w_deep|={deep_mag:.4f}), "
-              f"w_surface/w_mid decayed by 0.1, state decayed to 0.5, readout orthogonally seeded")
+              f"w_surface/w_mid decayed by 0.1, state decayed to 0.5, readout preserved for realignment")
+
+    def realign_readout(self, data_path, num_iterations=2000, lr=0.01):
+        """Dedicated high-iteration SGD realignment of the linear readout.
+
+        Freezes all recurrent weights and runs SGD on just the readout layer
+        to align it with the current reservoir representations. Called at
+        phase boundaries and after significant topological shifts in the
+        core recurrent reservoir.
+        """
+        ensure_data(data_path, "readout_realignment")
+        if not os.path.exists(data_path):
+            print(f"  Cannot realign readout: {data_path} not found")
+            return
+
+        with open(data_path, 'rb') as f:
+            data = f.read()
+        data_len = len(data)
+        if data_len < 2:
+            return
+
+        print(f"  Realigning readout ({num_iterations} SGD steps on {data_path})...")
+
+        saved_state = self.engine.state.clone()
+        self.engine.state.zero_()
+
+        acc_count = 0
+        for i in range(num_iterations):
+            idx = i % (data_len - 1)
+            input_byte = data[idx]
+            target_byte = data[idx + 1]
+
+            input_vec = torch.zeros(self.num_nodes, device=self.device)
+            input_vec[0:256] = self.eye[input_byte] * 0.5
+            input_mask = torch.zeros(self.num_nodes, device=self.device)
+            input_mask[self.input_indices] = 1.0
+
+            # Word boundary EMA reset (consistent with training loop)
+            if input_byte in (32, 10, 13, 9):
+                fast_mask = self.engine.taus < 0.5
+                self.engine.state[fast_mask] *= 0.5
+
+            self.engine.store_previous_state()
+            self.engine.settle(input_vec, input_mask=input_mask, max_steps=15, tol=5e-3)
+
+            with torch.no_grad():
+                level0_acts = torch.tanh(self.engine.state[self.level0_indices])
+                features = torch.nn.functional.layer_norm(level0_acts, level0_acts.size())
+                logits = self.readout_W @ features + self.readout_b
+                probs = torch.softmax(logits, dim=0)
+
+                target_one_hot = self.eye[target_byte]
+                grad = probs - target_one_hot
+                self.readout_W -= lr * torch.outer(grad, features)
+                self.readout_b -= lr * grad
+
+                if torch.argmax(probs).item() == target_byte:
+                    acc_count += 1
+
+        self.engine.state = saved_state
+        acc = acc_count / num_iterations
+        print(f"  Readout realignment complete. Acc={acc:.2%}")
 
     def train_phase(self, phase_name, data_path, iterations, steps_per_iter, lr=0.01,
-                    settle_steps=20, input_gain=0.5, warmup_steps=0):
+                    settle_steps=20, input_gain=0.5):
         """
         Predictive Coding training loop.
 
@@ -235,17 +293,9 @@ class SequentialTrainer:
         7. Log metrics
 
         No nudging, no beta, no three-phase settling.
-
-        warmup_steps: Number of initial steps where only the readout is
-            trained and recurrent weight updates are frozen. This lets the
-            readout adapt to the new task's distribution before the reservoir
-            starts shifting, preventing the reservoir from being pulled in
-            random directions by a misaligned readout gradient.
         """
         print(f"\n=== Starting Phase: {phase_name} ===")
         print(f"Run started at: {time.ctime()}")
-        if warmup_steps > 0:
-            print(f"Readout-only warmup for first {warmup_steps} steps (recurrent weights frozen)")
         ensure_data(data_path, phase_name)
 
         if not os.path.exists(data_path):
@@ -306,14 +356,20 @@ class SequentialTrainer:
                 # 3. Store previous state for temporal prediction
                 self.engine.store_previous_state()
 
-                # 4. Reset fast nodes only at word boundaries (space/newline/tab).
-                # Previously reset every step, destroying intra-word context that
-                # word-level and sentence-level tasks depend on. For chars (same
-                # repeating sequence) this didn't matter, but for words/quotes the
-                # accumulated context within a word is critical for prediction.
+                # 4. Update context EMA before boundary reset, then apply
+                # gradual EMA decay instead of harsh 90% reset.
+                self.engine.update_context_ema()
+
                 if input_byte in (32, 10, 13, 9):  # space, LF, CR, tab
                     fast_mask = self.engine.taus < 0.5
-                    self.engine.state[fast_mask] *= 0.1
+                    # EMA: retain 50% of fast node state instead of 10%
+                    # Preserves cross-clause contextual linking
+                    self.engine.state[fast_mask] *= 0.5
+                    # Slower nodes (L1+) get gentler decay for long-range context
+                    mid_mask = (self.engine.taus >= 0.5) & (self.engine.taus < 2.0)
+                    self.engine.state[mid_mask] *= 0.8
+                    # Blend context EMA back for continuity
+                    self.engine.blend_context(blend_factor=0.2)
 
                 # 5. Single-phase settle (IMEX) -> FREE PHASE
                 # Dynamic tolerance: relax to 1e-2 during the first 2000 steps
@@ -411,61 +467,46 @@ class SequentialTrainer:
                     self.readout_W -= readout_lr * torch.outer(readout_grad, features)
                     self.readout_b -= readout_lr * readout_grad
 
-                # 8b-8e: Skip recurrent weight updates during warmup period.
-                # During warmup, only the readout adapts to the new task distribution.
-                # This prevents the reservoir from being pulled in random directions
-                # before the readout has calibrated to the new data statistics.
-                if step >= warmup_steps:
-                    # 8b. Update recurrent weights using EqProp rule
-                    self.engine.update_weights_predictive(
-                        free_state,
-                        nudge_state,
-                        beta=beta,
-                        learning_rate=effective_lr,
-                        hippo_edge_mask=self.hippo_edge_mask)
-                    
-                    if step < 5:
-                        # Inspect the motor weights
-                        t_mask = self.engine.topdown_edge_mask
-                        b_mask = self.engine.bottomup_edge_mask
-                        td_motor = (self.engine.indices[1][t_mask] >= 256) & (self.engine.indices[1][t_mask] < 512)
-                        bu_motor = (self.engine.indices[0][b_mask] >= 256) & (self.engine.indices[0][b_mask] < 512)
-                        print(f"  Motor TD grads mean=|{self.engine.w_surface[t_mask][td_motor].abs().mean().item():.6f}|")
-                        print(f"  Motor BU grads mean=|{self.engine.w_surface[b_mask][bu_motor].abs().mean().item():.6f}|")
+                # 8b. Update recurrent weights using EqProp rule
+                self.engine.update_weights_predictive(
+                    free_state,
+                    nudge_state,
+                    beta=beta,
+                    learning_rate=effective_lr,
+                    hippo_edge_mask=self.hippo_edge_mask)
 
-                    # 8d. Cascade transfer — step-count + magnitude gated.
-                    # Surface must integrate gradients autonomously for at least
-                    # 500 steps before any magnitude bleeds into mid-layer.
-                    # Magnitude gating (>0.02 threshold) is handled inside
-                    # cascade_transfer() to ensure w_surface accumulates a
-                    # substantial structural representation before transfer.
-                    if step < 500:
-                        pass  # No transfer — let surface accumulate first
-                    elif step < 5000:
-                        # Surface→mid only (magnitude-gated inside)
-                        self.engine.cascade_transfer(include_deep=False)
-                    else:
-                        # Full cascade (magnitude-gated inside)
-                        self.engine.cascade_transfer()
+                if step < 5:
+                    # Inspect the motor weights
+                    t_mask = self.engine.topdown_edge_mask
+                    b_mask = self.engine.bottomup_edge_mask
+                    td_motor = (self.engine.indices[1][t_mask] >= 256) & (self.engine.indices[1][t_mask] < 512)
+                    bu_motor = (self.engine.indices[0][b_mask] >= 256) & (self.engine.indices[0][b_mask] < 512)
+                    print(f"  Motor TD grads mean=|{self.engine.w_surface[t_mask][td_motor].abs().mean().item():.6f}|")
+                    print(f"  Motor BU grads mean=|{self.engine.w_surface[b_mask][bu_motor].abs().mean().item():.6f}|")
 
-                    # 8e. Synaptic intelligence tracking
-                    self.engine.update_synaptic_intelligence(current_loss=energy)
+                # 8d. Cascade transfer — step-count + magnitude gated.
+                if step < 500:
+                    pass  # No transfer — let surface accumulate first
+                elif step < 5000:
+                    # Surface→mid only (magnitude-gated inside)
+                    self.engine.cascade_transfer(include_deep=False)
+                else:
+                    # Full cascade (magnitude-gated inside)
+                    self.engine.cascade_transfer()
 
-                    # Periodic spectral radius enforcement REMOVED:
-                    # The Frobenius ceiling (2x initial norm) and per-destination
-                    # RMS normalization (max_rms=0.15) in update_weights_predictive
-                    # already control SR. The power-iteration enforcement was
-                    # redundant and specifically destructive to surface weights:
-                    # mid+deep grow and consume the SR budget, then enforcement
-                    # dampens only w_surface, draining it faster than learning
-                    # can replenish it (surface peak crushed to ~0.0003).
+                # 8e. Synaptic intelligence tracking
+                self.engine.update_synaptic_intelligence(current_loss=energy)
+
+                # Periodic Jacobian-based spectral radius enforcement.
+                if step % 200 == 0:
+                    self.engine.enforce_jacobian_spectral_radius(target_max=0.95)
 
                 # 8f. Periodic synaptic intelligence consolidation
-                if step >= warmup_steps and step > 0 and step % self.si_consolidation_interval == 0:
+                if step > 0 and step % self.si_consolidation_interval == 0:
                     self.engine.consolidate_importance()
 
                 # 8g. Sleep replay phase for memory consolidation
-                if step >= warmup_steps and step > 0 and step % self.sleep_interval == 0:
+                if step > 0 and step % self.sleep_interval == 0:
                     self.sleep_phase(num_replay_cycles=200, replay_lr_mult=0.1)
 
                 # 9. VICReg Regularization logic removed.
@@ -536,7 +577,7 @@ class SequentialTrainer:
                               f"Top3: {recent_acc3:.2%} | ||s||/√N: {state_norm:.4f}        ", end='\r')
 
                     # 11. Periodic Evaluation on Holdout Data
-                    if step > warmup_steps and step % 5000 == 0 and has_eval and eval_len > 1:
+                    if step > 0 and step % 5000 == 0 and has_eval and eval_len > 1:
                         print("\n--- Running Evaluation on Holdout Data ---")
                         eval_acc, eval_acc3 = self.evaluate_generalization(eval_data)
                         # Use recent training accuracy to compute Generalization Gap
@@ -550,6 +591,18 @@ class SequentialTrainer:
                             print("  NOTE: Significant generalization gap detected.")
                         else:
                             print("  PASS: Strong generalization performance.")
+
+                # 12. Topological shift detection — trigger readout realignment
+                # when Jacobian SR shifts by >30%, indicating the reservoir's
+                # representational structure has changed significantly.
+                if step > 0 and step % 5000 == 0:
+                    current_sr = getattr(self.engine, 'last_jacobian_sr', 0.0)
+                    prev_sr = getattr(self, '_prev_checkpoint_sr', current_sr)
+                    sr_shift = abs(current_sr - prev_sr) / max(prev_sr, 1e-6)
+                    if sr_shift > 0.3:
+                        print(f"\n  Topological shift detected (SR: {prev_sr:.3f} -> {current_sr:.3f})")
+                        self.realign_readout(data_path, num_iterations=500, lr=0.005)
+                    self._prev_checkpoint_sr = current_sr
 
                 # FIX 2: overall_step must increment EVERY iteration, not just
                 # when step % 100 == 0. Previously it was trapped inside the
@@ -833,8 +886,8 @@ class SequentialTrainer:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--nodes", type=int, default=2000)
-    parser.add_argument("--modules", type=int, default=20)
+    parser.add_argument("--nodes", type=int, default=25000)
+    parser.add_argument("--modules", type=int, default=50)
     args = parser.parse_args()
 
     device = args.device
@@ -858,32 +911,35 @@ def main():
 
     # --- Phase boundary: Holophrases → Slot-and-Frame ---
     trainer.phase_boundary_reset("Holophrases", "Slot-and-Frame")
+    trainer.realign_readout("ndcd/data/train/level2_slot_frame.txt", num_iterations=2000, lr=0.01)
 
     # Phase 2: Slot-and-Frame
     trainer.train_phase("Slot-and-Frame", "ndcd/data/level2_slot_frame.txt",
                         iterations=500, steps_per_iter=100, lr=0.05,
-                        settle_steps=30, input_gain=0.5, warmup_steps=15000)
+                        settle_steps=30, input_gain=0.5)
     trainer.evaluate_retention("ndcd/data/level1_holophrases.txt")
     trainer.generate(start_text="W")
 
     # --- Phase boundary: Slot-and-Frame → Complex Constructions ---
     trainer.phase_boundary_reset("Slot-and-Frame", "Complex Constructions")
+    trainer.realign_readout("ndcd/data/train/level3_complex.txt", num_iterations=2000, lr=0.01)
 
     # Phase 3: Complex Constructions
     trainer.train_phase("Complex Constructions", "ndcd/data/level3_complex.txt",
                         iterations=500, steps_per_iter=100, lr=0.05,
-                        settle_steps=50, input_gain=0.5, warmup_steps=15000)
+                        settle_steps=50, input_gain=0.5)
     trainer.evaluate_retention("ndcd/data/level1_holophrases.txt")
     trainer.evaluate_retention("ndcd/data/level2_slot_frame.txt")
     trainer.generate(start_text="I")
 
     # --- Phase boundary: Complex Constructions → Contextual Continuity ---
     trainer.phase_boundary_reset("Complex Constructions", "Contextual Continuity")
+    trainer.realign_readout("ndcd/data/train/level4_contextual.txt", num_iterations=2000, lr=0.01)
 
     # Phase 4: Contextual Continuity
     trainer.train_phase("Contextual Continuity", "ndcd/data/level4_contextual.txt",
                         iterations=500, steps_per_iter=100, lr=0.05,
-                        settle_steps=50, input_gain=0.5, warmup_steps=15000)
+                        settle_steps=50, input_gain=0.5)
     trainer.evaluate_retention("ndcd/data/level1_holophrases.txt")
     trainer.evaluate_retention("ndcd/data/level2_slot_frame.txt")
     trainer.evaluate_retention("ndcd/data/level3_complex.txt")

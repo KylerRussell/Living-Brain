@@ -75,6 +75,20 @@ def jit_solve_dynamics_imex(
             
         rho = torch.tanh(normed_s)
         synaptic = torch.mv(weights, rho)
+
+        # Jacobian gain control: bound the effective spectral radius
+        # of the linearized dynamics to prevent ρ(J)≈2.63 explosion.
+        # Compute sech²(x) = 1 - tanh²(x) for local Jacobian scaling.
+        drho = 1.0 - rho * rho  # tanh derivative = sech^2
+        jacobian_input = torch.mv(weights, rho * drho)
+        jacobian_norm = jacobian_input.norm()
+        state_norm = rho.norm().clamp(min=1e-6)
+        effective_sr = jacobian_norm / state_norm
+        target_max_sr: float = 0.95
+        if effective_sr > target_max_sr:
+            sr_scale = target_max_sr / effective_sr
+            synaptic = synaptic * sr_scale
+
         nonlinear = synaptic + biases + input_vector
 
         # Semi-implicit update: treats -x/tau implicitly, rest explicitly
@@ -121,7 +135,7 @@ def jit_solve_dynamics_imex(
         diff = torch.norm(current_s - old_state).item()
 
         # Relax tolerance slightly during internal steps to avoid infinite halving deadlocks
-        if diff <= tol * 1.5:
+        if diff <= tol * 1.2:
             break
 
         # Adaptive dt: smaller steps during volatile phases, larger as it nears steady-state
@@ -191,6 +205,10 @@ class PredictiveCodingEngine:
 
         # State
         self.state = torch.zeros(num_nodes, dtype=torch.float32, device=device)
+
+        # Context EMA buffer for cross-boundary context preservation
+        self.context_ema = torch.zeros(num_nodes, dtype=torch.float32, device=device)
+        self.context_ema_alpha = 0.1  # Blend rate: 10% new, 90% old
 
         # Module metadata
         self.module_ranges = module_ranges  # [(start, end), ...]
@@ -283,7 +301,7 @@ class PredictiveCodingEngine:
 
         # Cascade transfer rates — significantly increased to allow transient
         # syntactic rules to meaningfully accumulate in surface weights.
-        self.tau_surface_to_mid = 1000.0   # was 250.0; let surface integrate longer
+        self.tau_surface_to_mid = 2000.0   # was 1000.0; slower drain lets surface accumulate
         
         # We now track separate mid-to-deep transfer rates per edge depending on 
         # whether the source node belongs to a hippocampal or neocortical module.
@@ -295,7 +313,7 @@ class PredictiveCodingEngine:
         # omega adding another ~10x). At 0.1, the cascade inertia of
         # w_deep already protects important weights without also killing
         # the effective learning rate.
-        self.meta_scale = 0.25  # was 0.5
+        self.meta_scale = 0.1  # was 0.25; reduce inertia so surface LR isn't crushed by w_deep
 
         # FIX 1: Track the initial w_deep Frobenius norm as a target.
         # This is the SR-tuned initialization; effective weights should
@@ -344,7 +362,7 @@ class PredictiveCodingEngine:
         """Effective weight is base topology + learned cascade deltas."""
         return self.weight_values + self.w_surface + self.w_mid + self.w_deep
 
-    def cascade_transfer(self, include_deep=True, surface_floor=0.003):
+    def cascade_transfer(self, include_deep=True, surface_floor=0.01):
         """Call periodically (every ~500 steps) after weight update.
 
         Transfers weight magnitude downward through the cascade:
@@ -836,6 +854,43 @@ class PredictiveCodingEngine:
                 dampening_factor = target_max / sr
                 self.w_surface[self.free_edge_mask] *= dampening_factor
 
+    def enforce_jacobian_spectral_radius(self, target_max=0.95):
+        """
+        Enforce spectral radius on the actual Jacobian J = (1/τ)(-I + W*diag(sech²(x))),
+        not just weight norms. This bounds the true dynamical instability.
+
+        Uses power iteration on the full Jacobian (with I/O rows/cols zeroed)
+        and dampens w_surface on free edges when SR exceeds target.
+        """
+        with torch.no_grad():
+            J = self.get_jacobian()  # Already zeros I/O rows/cols
+
+            # Power iteration on J (5 steps, persistent vector)
+            if getattr(self, '_jac_power_v', None) is None:
+                self._jac_power_v = torch.randn(self.num_nodes, device=self.device)
+                norm = self._jac_power_v.norm()
+                if norm > 0:
+                    self._jac_power_v /= norm
+
+            v = self._jac_power_v
+            for _ in range(5):
+                v_next = J @ v
+                norm = v_next.norm()
+                if norm > 1e-8:
+                    v = v_next / norm
+
+            self._jac_power_v = v
+
+            # Rayleigh quotient estimate of spectral radius
+            Jv = J @ v
+            sr = torch.abs(torch.dot(v, Jv)).item()
+            self.last_jacobian_sr = sr
+
+            # Only dampen w_surface (fast transient weights) on free edges
+            if sr > target_max:
+                dampening = target_max / sr
+                self.w_surface[self.free_edge_mask] *= dampening
+
     def get_jacobian(self) -> torch.Tensor:
         """
         Computes the Jacobian of the temporal transition dynamics at the current state.
@@ -892,6 +947,14 @@ class PredictiveCodingEngine:
 
             self.facilitation.clamp_(0.0, 1.0)
             self.depression.clamp_(0.0, 1.0)
+
+    def update_context_ema(self):
+        """Update running EMA of state for cross-boundary context preservation."""
+        self.context_ema = (1 - self.context_ema_alpha) * self.context_ema + self.context_ema_alpha * self.state
+
+    def blend_context(self, blend_factor=0.2):
+        """Blend stored context EMA back into state after boundary reset."""
+        self.state = (1 - blend_factor) * self.state + blend_factor * self.context_ema
 
     def damp_weights(self, factor=0.9):
         """Damps recurrent weights by a factor (applied to deep level)."""
