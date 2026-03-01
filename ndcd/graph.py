@@ -47,9 +47,9 @@ class DynamicGraph:
         self.association_indices = np.arange(n_io, num_nodes)
 
         # --- Assign modules to hierarchical levels ---
-        # Distribution: more modules at lower levels (pyramid shape)
-        # Level 0: 40%, Level 1: 30%, Level 2: 20%, Level 3: 10%
-        level_fractions = [0.40, 0.30, 0.20, 0.10]
+        # Distribution: flattened to expand L2/L3 representational capacity
+        # for contextual and semantic persistence (was pyramidal [40,30,20,10])
+        level_fractions = [0.25, 0.25, 0.25, 0.25]
         level_module_counts = []
         remaining = num_modules
         for i in range(num_levels - 1):
@@ -107,7 +107,7 @@ class DynamicGraph:
         # At 200, lateral recurrence outnumbered inter-level edges 25:1,
         # making the hierarchy structurally disconnected — higher levels
         # were completely input-invariant. Target ~3:1 lateral:hierarchical.
-        target_connections_per_node = 25
+        target_connections_per_node = 50
         for mod in self.modules:
             idx = mod['indices']
             n = len(idx)
@@ -283,7 +283,15 @@ class DynamicGraph:
         # we must multiply the input weights by sqrt(fan_in) for the input projection.
         # With avg fan-in ~250 from I/O nodes, sqrt(250) ≈ 15.8.
         # We cap it at 15.0 to maintain solver stability.
-        weight_vals[input_proj_mask] *= 6.5
+        # Dynamically calibrate input boost against lateral recurrence strength
+        # instead of hardcoded 6.5x which overwhelmed lateral recurrence
+        lateral_rms = np.sqrt(np.mean(weight_vals[free_mask] ** 2)) if free_mask.sum() > 0 else 0.1
+        input_target_rms = 3.0 * lateral_rms  # 3x lateral (reduced from 6.5x)
+        input_current_rms = np.sqrt(np.mean(weight_vals[input_proj_mask] ** 2)) if input_proj_mask.sum() > 0 else 0.1
+        input_boost = input_target_rms / max(input_current_rms, 1e-8)
+        input_boost = np.clip(input_boost, 1.0, 6.0)  # Safety bounds
+        weight_vals[input_proj_mask] *= input_boost
+        print(f"Input boost: {input_boost:.2f}x (calibrated to 3x lateral RMS={lateral_rms:.4f})")
 
         n_input = int(input_proj_mask.sum())
         n_free = int(free_mask.sum())
@@ -308,7 +316,13 @@ class DynamicGraph:
         fan_in_map = dict(zip(unique_dst, dst_counts))
 
         lat_fan_in = np.array([fan_in_map.get(d, 1) for d in lat_dst_nodes], dtype=np.float32)
-        weight_vals[lat_l0_mask] = np.abs(weight_vals[lat_l0_mask]) / np.sqrt(lat_fan_in)
+        # Bound fan-in normalization to prevent weights decaying to 0.00
+        max_effective_fan_in_lat = 64.0
+        bounded_lat_fan_in = np.minimum(lat_fan_in, max_effective_fan_in_lat)
+        weight_vals[lat_l0_mask] = np.abs(weight_vals[lat_l0_mask]) / np.sqrt(bounded_lat_fan_in)
+        # Enforce minimum weight magnitude for lateral signal propagation
+        lat_min_magnitude = 0.01
+        weight_vals[lat_l0_mask] = np.maximum(weight_vals[lat_l0_mask], lat_min_magnitude)
         
         n_lat = int(lat_l0_mask.sum())
         if len(fan_in_map) > 0:
@@ -327,8 +341,17 @@ class DynamicGraph:
         bu_fan_in_map = dict(zip(unique_bu_dst, bu_dst_counts))
         bu_fan_in = np.array([bu_fan_in_map.get(d, 1) for d in bu_dst_nodes], dtype=np.float32)
         
-        weight_vals[bu_mask] = (weight_vals[bu_mask] / np.sqrt(bu_fan_in))
-        print(f"Bottom-up edges: {int(bu_mask.sum())} fan-in normalized")
+        # Bound fan-in normalization to prevent weights decaying to 0.00
+        # for high fan-in nodes. Cap the effective fan-in divisor at 64.
+        max_effective_fan_in_bu = 64.0
+        bounded_bu_fan_in = np.minimum(bu_fan_in, max_effective_fan_in_bu)
+        weight_vals[bu_mask] = weight_vals[bu_mask] / np.sqrt(bounded_bu_fan_in)
+        # Enforce minimum weight magnitude to guarantee upward signal flow
+        bu_min_magnitude = 0.01
+        bu_signs = np.sign(weight_vals[bu_mask])
+        bu_signs[bu_signs == 0] = 1.0  # default to positive for zero weights
+        weight_vals[bu_mask] = np.maximum(np.abs(weight_vals[bu_mask]), bu_min_magnitude) * bu_signs
+        print(f"Bottom-up edges: {int(bu_mask.sum())} fan-in normalized (bounded, min_mag={bu_min_magnitude})")
 
         # FIX 4: Decouple & enforce symmetric motor connections (Motor -> Level 0)
         fwd_motor_mask = (edge_rows >= 512) & (edge_cols >= 256) & (edge_cols < 512)
