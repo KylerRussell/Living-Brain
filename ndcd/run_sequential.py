@@ -242,6 +242,9 @@ class SequentialTrainer:
         self.engine.state.zero_()
 
         acc_count = 0
+        
+        accum_grad_W = torch.zeros_like(self.readout_W)
+        accum_grad_b = torch.zeros_like(self.readout_b)
         for i in range(num_iterations):
             idx = i % (data_len - 1)
             input_byte = data[idx]
@@ -268,8 +271,15 @@ class SequentialTrainer:
 
                 target_one_hot = self.eye[target_byte]
                 grad = probs - target_one_hot
-                self.readout_W -= lr * torch.outer(grad, features)
-                self.readout_b -= lr * grad
+                
+                accum_grad_W += torch.outer(grad, features)
+                accum_grad_b += grad
+                
+                if input_byte in (32, 10, 13, 9):
+                    self.readout_W -= lr * accum_grad_W
+                    self.readout_b -= lr * accum_grad_b
+                    accum_grad_W.zero_()
+                    accum_grad_b.zero_()
 
                 if torch.argmax(probs).item() == target_byte:
                     acc_count += 1
@@ -355,7 +365,7 @@ class SequentialTrainer:
 
                 # Boundary classification for level-gated updates (Strategy 2).
                 # Sentence boundaries are a strict superset of word boundaries.
-                is_sentence_boundary = input_byte in (46, 63, 33)  # . ? !
+                is_sentence_boundary = input_byte in (46, 63)  # . ?
                 is_word_boundary = (input_byte in (32, 10, 13, 9)) or is_sentence_boundary
 
                 # 2. Input Setup — full one-hot across all 256 input nodes.
@@ -490,7 +500,7 @@ class SequentialTrainer:
                     beta=beta,
                     learning_rate=effective_lr,
                     hippo_edge_mask=self.hippo_edge_mask,
-                    active_level_max=0)
+                    active_level_max=1)
 
                 if step < 5:
                     # Inspect the motor weights
@@ -509,7 +519,7 @@ class SequentialTrainer:
                 # buffered readout gradient is flushed (Strategy 1).
                 if is_word_boundary:
                     _zero = torch.zeros(self.num_nodes, device=self.device)
-                    self.engine.settle(_zero, input_mask=None, max_steps=40,
+                    self.engine.settle(_zero, input_mask=None, max_steps=50,
                                        tol=settle_tol, implicit_damping=3.0)
                     word_free_state = self.engine.state.clone()
                     # Nudge target at word boundary: first char of next word (= target_byte)
@@ -536,7 +546,7 @@ class SequentialTrainer:
                 # surface weights have time to accumulate meaningful signal before draining.
                 if is_sentence_boundary:
                     _zero = torch.zeros(self.num_nodes, device=self.device)
-                    self.engine.settle(_zero, input_mask=None, max_steps=75,
+                    self.engine.settle(_zero, input_mask=None, max_steps=100,
                                        tol=settle_tol, implicit_damping=3.0)
                     sent_free_state = self.engine.state.clone()
                     sent_nudge_vec = torch.zeros(self.num_nodes, device=self.device)
