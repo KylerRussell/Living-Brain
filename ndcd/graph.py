@@ -59,7 +59,7 @@ class DynamicGraph:
         level_module_counts.append(max(1, remaining))
 
         # Build module metadata
-        self.modules = []  # List of dicts: {level, start_idx, end_idx, node_indices}
+        self.modules = []  # List of dicts: {level, start_idx, end_idx, node_indices, l4_indices, l23_indices, l56_indices}
         self.module_levels = []  # level per module
         self.level_modules = {l: [] for l in range(num_levels)}  # modules per level
 
@@ -77,13 +77,32 @@ class DynamicGraph:
                 end = current_node + n_in_module
                 node_indices = np.arange(start, end)
 
+                # Laminar Architecture sub-populations
+                # Layer 4 (L4): ~20% of nodes (sensory/bottom-up recipient)
+                # Layer 2/3 (L2/3): ~40% of nodes (error/surprisal)
+                # Layer 5/6 (L5/6): ~40% of nodes (predictions/top-down source)
+                n_l4 = max(1, int(n_in_module * 0.2))
+                n_l23 = max(1, int(n_in_module * 0.4))
+                n_l56 = n_in_module - n_l4 - n_l23
+
+                l4_start = start
+                l23_start = l4_start + n_l4
+                l56_start = l23_start + n_l23
+
+                l4_indices = np.arange(l4_start, l4_start + n_l4)
+                l23_indices = np.arange(l23_start, l23_start + n_l23)
+                l56_indices = np.arange(l56_start, l56_start + n_l56)
+
                 self.modules.append({
                     'id': module_id,
                     'level': level,
                     'start': start,
                     'end': end,
                     'indices': node_indices,
-                    'size': n_in_module
+                    'size': n_in_module,
+                    'l4_indices': l4_indices,
+                    'l23_indices': l23_indices,
+                    'l56_indices': l56_indices
                 })
                 self.module_levels.append(level)
                 self.level_modules[level].append(module_id)
@@ -94,6 +113,23 @@ class DynamicGraph:
         self.num_actual_modules = module_id
         self.module_levels = np.array(self.module_levels)
 
+        # --- Functional Lateralization ---
+        # Selectively designate ~15% of intermediate modules as Broca and ~15% as Wernicke
+        self.broca_modules = set()
+        self.wernicke_modules = set()
+        for level in range(1, num_levels):
+            level_mods = self.level_modules[level]
+            n_special = max(1, int(len(level_mods) * 0.15))
+            
+            # First batch -> Broca
+            for mod_id in level_mods[:n_special]:
+                self.broca_modules.add(mod_id)
+            # Second batch -> Wernicke
+            for mod_id in level_mods[n_special:2*n_special]:
+                self.wernicke_modules.add(mod_id)
+        
+        print(f"Lateralization: {len(self.broca_modules)} Broca (seq), {len(self.wernicke_modules)} Wernicke (sem)")
+
         # --- Spatial Embedding ---
         self.pos = np.random.rand(num_nodes, 3)
 
@@ -103,67 +139,85 @@ class DynamicGraph:
         edge_cols = []
 
         # 1. INTRA-module connectivity
-        # Reduced from 200 connections/node (60% density) to 50 (25%).
-        # At 200, lateral recurrence outnumbered inter-level edges 25:1,
-        # making the hierarchy structurally disconnected — higher levels
-        # were completely input-invariant. Target ~3:1 lateral:hierarchical.
-        target_connections_per_node = 50
+        # Structural sparsity constraint: Target < 1% connectivity internally
+        # L4 -> L2/3, L2/3 -> L5/6, L5/6 -> L5/6 (recurrent), L5/6 -> L4
+        target_connections_per_node = 10  # Reduced significantly for <1% sparsity
         for mod in self.modules:
-            idx = mod['indices']
-            n = len(idx)
-            if n < 2:
-                continue
-            # Adaptive density: min(0.25, target_conn / (n-1))
-            intra_density = min(0.25, target_connections_per_node / max(1, n - 1))
+            # We want connections between specific layers
+            l4 = mod['l4_indices']
+            l23 = mod['l23_indices']
+            l56 = mod['l56_indices']
+            
+            # L4 -> L2/3
+            if len(l4) > 0 and len(l23) > 0:
+                n_edges = int(len(l4) * target_connections_per_node)
+                src = np.random.choice(l4, n_edges, replace=True)
+                dst = np.random.choice(l23, n_edges, replace=True)
+                edge_rows.extend(src.tolist())
+                edge_cols.extend(dst.tolist())
+                
+            # L2/3 -> L5/6
+            if len(l23) > 0 and len(l56) > 0:
+                n_edges = int(len(l23) * target_connections_per_node)
+                src = np.random.choice(l23, n_edges, replace=True)
+                dst = np.random.choice(l56, n_edges, replace=True)
+                edge_rows.extend(src.tolist())
+                edge_cols.extend(dst.tolist())
+                
+            # L5/6 -> L5/6 (recurrent)
+            if len(l56) > 0:
+                n_edges = int(len(l56) * target_connections_per_node)
+                src = np.random.choice(l56, n_edges, replace=True)
+                dst = np.random.choice(l56, n_edges, replace=True)
+                valid = src != dst
+                edge_rows.extend(src[valid].tolist())
+                edge_cols.extend(dst[valid].tolist())
+                
+            # L5/6 -> L4 (feedback within column)
+            if len(l56) > 0 and len(l4) > 0:
+                n_edges = int(len(l56) * target_connections_per_node)
+                src = np.random.choice(l56, n_edges, replace=True)
+                dst = np.random.choice(l4, n_edges, replace=True)
+                edge_rows.extend(src.tolist())
+                edge_cols.extend(dst.tolist())
 
-            if n <= 300:
-                # Small module: use dense random matrix
-                conn = np.random.rand(n, n) < intra_density
-                np.fill_diagonal(conn, False)
-                local_rows, local_cols = np.nonzero(conn)
-            else:
-                # Large module: sample edges directly to avoid n*n memory
-                n_edges_target = int(n * target_connections_per_node)
-                local_rows = np.random.randint(0, n, n_edges_target)
-                local_cols = np.random.randint(0, n, n_edges_target)
-                # Remove self-loops
-                valid = local_rows != local_cols
-                local_rows = local_rows[valid]
-                local_cols = local_cols[valid]
-
-            edge_rows.extend(idx[local_rows].tolist())
-            edge_cols.extend(idx[local_cols].tolist())
-
-        # 2. Sparse INTER-module connectivity at same level (~3%)
-        inter_same_density_default = 0.03
+        # 2. Sparse INTER-module connectivity at same level (~1%)
+        inter_same_density_default = 0.01
         for level in range(num_levels):
-            inter_same_density = 0.10 if level == 0 else inter_same_density_default
+            inter_same_density = 0.02 if level == 0 else inter_same_density_default
             mods_at_level = self.level_modules[level]
             for i in range(len(mods_at_level)):
                 for j in range(i + 1, len(mods_at_level)):
                     mod_i = self.modules[mods_at_level[i]]
                     mod_j = self.modules[mods_at_level[j]]
-                    idx_i = mod_i['indices']
-                    idx_j = mod_j['indices']
-                    # Sparse random connections between module pairs
-                    n_possible = len(idx_i) * len(idx_j)
-                    n_connections = max(1, int(n_possible * inter_same_density))
-                    # Cap to avoid excessive edges between large modules
-                    n_connections = min(n_connections, max(10, len(idx_i) + len(idx_j)))
-                    src_picks = np.random.choice(idx_i, n_connections, replace=True)
-                    dst_picks = np.random.choice(idx_j, n_connections, replace=True)
-                    edge_rows.extend(src_picks.tolist())
-                    edge_cols.extend(dst_picks.tolist())
-                    # Bidirectional
-                    edge_rows.extend(dst_picks.tolist())
-                    edge_cols.extend(src_picks.tolist())
+                    
+                    pair_density = inter_same_density
+                    if mod_i['id'] in getattr(self, 'wernicke_modules', set()) or mod_j['id'] in getattr(self, 'wernicke_modules', set()):
+                        pair_density *= 2.0
+                        
+                    # Lateral connections primarily go L2/3 <-> L2/3 and L5/6 <-> L5/6
+                    for layer in ['l23_indices', 'l56_indices']:
+                        idx_i = mod_i[layer]
+                        idx_j = mod_j[layer]
+                        
+                        if len(idx_i) == 0 or len(idx_j) == 0: continue
+                        
+                        n_possible = len(idx_i) * len(idx_j)
+                        n_connections = max(1, int(n_possible * pair_density))
+                        n_connections = min(n_connections, max(5, min(len(idx_i), len(idx_j))))
+                        
+                        src_picks = np.random.choice(idx_i, n_connections, replace=True)
+                        dst_picks = np.random.choice(idx_j, n_connections, replace=True)
+                        edge_rows.extend(src_picks.tolist())
+                        edge_cols.extend(dst_picks.tolist())
+                        # Bidirectional
+                        edge_rows.extend(dst_picks.tolist())
+                        edge_cols.extend(src_picks.tolist())
 
-        # 3. Hierarchical connections between levels — MUCH denser than lateral.
-        # At 2% density with aggressive capping, each module pair had only
-        # ~2-3 inter-level edges, making the hierarchy structurally disconnected.
-        # L1-L3 settled to input-invariant states (cos_sim=1.0) because signal
-        # couldn't climb or descend. 15% density gives real pathways.
-        hier_density = 0.08
+        # 3. Hierarchical connections between levels.
+        # Bottom-up: L2/3 (lower) -> L4 (upper)
+        # Top-down: L5/6 (upper) -> L2/3 and L5/6 (lower)
+        hier_density = 0.02  # Sparsified from 0.08
         for level in range(num_levels - 1):
             lower_mods = self.level_modules[level]
             upper_mods = self.level_modules[level + 1]
@@ -171,40 +225,53 @@ class DynamicGraph:
                 for um_id in upper_mods:
                     mod_lower = self.modules[lm_id]
                     mod_upper = self.modules[um_id]
-                    idx_lower = mod_lower['indices']
-                    idx_upper = mod_upper['indices']
-                    n_possible = len(idx_lower) * len(idx_upper)
-                    n_connections = max(5, int(n_possible * hier_density))
-                    # Let density control the count — no aggressive cap
-                    n_connections = min(n_connections, n_possible)
-                    # Top-down: upper -> lower
-                    src_picks = np.random.choice(idx_upper, n_connections, replace=True)
-                    dst_picks = np.random.choice(idx_lower, n_connections, replace=True)
-                    edge_rows.extend(src_picks.tolist())
-                    edge_cols.extend(dst_picks.tolist())
-                    # Bottom-up: lower -> upper
-                    edge_rows.extend(dst_picks.tolist())
-                    edge_cols.extend(src_picks.tolist())
+                    
+                    pair_density = hier_density
+                    if mod_lower['id'] in getattr(self, 'wernicke_modules', set()) or mod_upper['id'] in getattr(self, 'wernicke_modules', set()):
+                        pair_density *= 2.0
+                        
+                    # Bottom-up (lower L2/3 -> upper L4)
+                    l_l23 = mod_lower['l23_indices']
+                    u_l4 = mod_upper['l4_indices']
+                    if len(l_l23) > 0 and len(u_l4) > 0:
+                        n_possible = len(l_l23) * len(u_l4)
+                        n_connections = max(5, int(n_possible * pair_density))
+                        src = np.random.choice(l_l23, n_connections, replace=True)
+                        dst = np.random.choice(u_l4, n_connections, replace=True)
+                        edge_rows.extend(src.tolist())
+                        edge_cols.extend(dst.tolist())
+                        
+                    # Top-down (upper L5/6 -> lower L2/3 and L5/6)
+                    u_l56 = mod_upper['l56_indices']
+                    l_l2356 = np.concatenate([mod_lower['l23_indices'], mod_lower['l56_indices']])
+                    if len(u_l56) > 0 and len(l_l2356) > 0:
+                        n_possible = len(u_l56) * len(l_l2356)
+                        n_connections = max(5, int(n_possible * pair_density))
+                        src = np.random.choice(u_l56, n_connections, replace=True)
+                        dst = np.random.choice(l_l2356, n_connections, replace=True)
+                        edge_rows.extend(src.tolist())
+                        edge_cols.extend(dst.tolist())
 
-        # 4. Input projections: sensory nodes -> level-0 modules
+        # 4. Input projections: sensory nodes -> level-0 modules (specifically L4)
         level0_mods = self.level_modules[0]
         for mod_id in level0_mods:
             mod = self.modules[mod_id]
-            idx = mod['indices']
-            # Each sensory node connects to a subset of level-0 module nodes
+            idx = mod['l4_indices']  # Project into L4
+            if len(idx) == 0: continue
             n_proj = max(1, len(idx) // 2)
             for s in range(n_sensory):
                 targets = np.random.choice(idx, n_proj, replace=False)
                 edge_rows.extend([s] * n_proj)
                 edge_cols.extend(targets.tolist())
-                # Bidirectional for settling
+                # Allow feedback from L4 to input nodes to stabilize inputs
                 edge_rows.extend(targets.tolist())
                 edge_cols.extend([s] * n_proj)
 
-        # 5. Output projections: level-0 modules -> motor nodes
+        # 5. Output projections: level-0 modules (L5/6) -> motor nodes
         for mod_id in level0_mods:
             mod = self.modules[mod_id]
-            idx = mod['indices']
+            idx = mod['l56_indices']  # Output comes from L5/6
+            if len(idx) == 0: continue
             n_proj = max(1, len(idx) // 4)
             for m in range(n_motor):
                 sources = np.random.choice(idx, n_proj, replace=False)
@@ -299,6 +366,11 @@ class DynamicGraph:
         print(f"Weight magnitudes: input={np.abs(weight_vals[input_proj_mask]).mean():.4f}, "
               f"free={np.abs(weight_vals[free_mask]).mean():.4f}")
 
+        # Build node-to-module lookup
+        self.node_to_module = np.full(num_nodes, -1, dtype=np.int64)
+        for mod in self.modules:
+            self.node_to_module[mod['start']:mod['end']] = mod['id']
+
         # Balance Hierarchies: Shift fan-in normalization to Level 0 lateral connections.
         node_levels = np.zeros(num_nodes, dtype=int)
         node_levels[:n_io] = -1  # I/O nodes conceptually at level -1
@@ -320,6 +392,24 @@ class DynamicGraph:
         max_effective_fan_in_lat = 64.0
         bounded_lat_fan_in = np.minimum(lat_fan_in, max_effective_fan_in_lat)
         weight_vals[lat_l0_mask] = np.abs(weight_vals[lat_l0_mask]) / np.sqrt(bounded_lat_fan_in)
+        
+        # Massive Recurrent Excitation for Level 2 and Level 3 intra-module connections (Prefrontal)
+        l23_intra_mask = (src_levels_arr == dst_levels_arr) & (src_levels_arr >= 2) & free_mask
+        # Only boost connections within the *same* module for working memory 
+        l23_same_mod = self.node_to_module[edge_rows[l23_intra_mask]] == self.node_to_module[edge_cols[l23_intra_mask]]
+        
+        # Ensure we can update the correct edges
+        l23_indices = np.where(l23_intra_mask)[0]
+        same_mod_indices = l23_indices[l23_same_mod]
+        
+        # Level 2 gets 3x boost, Level 3 gets 5x boost for working memory persistence
+        for idx in same_mod_indices:
+            lvl = src_levels_arr[idx]
+            boost = 3.0 if lvl == 2 else 5.0
+            weight_vals[idx] = np.abs(weight_vals[idx]) * boost
+            
+        print(f"Boosted recurrent excitation for {len(same_mod_indices)} high-level intra-module working memory edges.")
+
         # Enforce minimum weight magnitude for lateral signal propagation
         lat_min_magnitude = 0.01
         weight_vals[lat_l0_mask] = np.maximum(weight_vals[lat_l0_mask], lat_min_magnitude)
@@ -346,6 +436,19 @@ class DynamicGraph:
         max_effective_fan_in_bu = 64.0
         bounded_bu_fan_in = np.minimum(bu_fan_in, max_effective_fan_in_bu)
         weight_vals[bu_mask] = weight_vals[bu_mask] / np.sqrt(bounded_bu_fan_in)
+        
+        # THALAMIC BOOST: Amplify Bottom-Up signals feeding into higher levels
+        # to prevent Signal Death before they reach Level 3 working memory
+        bu_dst_levels_arr = src_levels_arr[edge_cols[bu_mask]]
+        for i, idx in enumerate(np.where(bu_mask)[0]):
+            lvl = dst_levels_arr[idx]
+            if lvl == 1:
+                weight_vals[idx] *= 2.0
+            elif lvl == 2:
+                weight_vals[idx] *= 4.0
+            elif lvl == 3:
+                weight_vals[idx] *= 8.0
+                
         # Enforce minimum weight magnitude to guarantee upward signal flow
         bu_min_magnitude = 0.01
         bu_signs = np.sign(weight_vals[bu_mask])
@@ -376,9 +479,8 @@ class DynamicGraph:
         )
 
         # --- Timescale Assignment (per-module, per-level) ---
-        # Compressed the temporal hierarchy's time constant range to [0.5, 4.0]
-        # to reduce extreme mathematical stiffness.
-        tau_by_level = {0: 0.5, 1: 1.0, 2: 2.0, 3: 4.0}
+        # Massive Range of Intrinsic Timescales corresponding to NMDA vs AMPA
+        tau_by_level = {0: 1.0, 1: 5.0, 2: 25.0, 3: 100.0}
 
         self.taus = np.zeros(num_nodes)
         # I/O nodes: fast
@@ -411,11 +513,6 @@ class DynamicGraph:
                 self.neocortical_modules.add(mod_id)
         print(f"CLS: {len(self.hippocampal_modules)} hippocampal modules, "
               f"{len(self.neocortical_modules)} neocortical modules")
-
-        # Build node-to-module lookup
-        self.node_to_module = np.full(num_nodes, -1, dtype=np.int64)
-        for mod in self.modules:
-            self.node_to_module[mod['start']:mod['end']] = mod['id']
 
         # Build connectivity map between hippocampal and neocortical modules
         self._build_cls_connectivity(edge_rows, edge_cols)

@@ -350,6 +350,11 @@ class SequentialTrainer:
         accumulated_readout_grad_b = torch.zeros_like(self.readout_b)
         readout_acc_count = 0
         readout_lr = lr * 0.5
+        
+        # Neuromodulator running states
+        running_dopamine = 1.0       # DA: Reward Prediction Error (RPE) surrogate
+        running_acetylcholine = 1.0  # ACh: Expected Uncertainty surrogate
+        loss_ema = 0.0
 
         for epoch in range(epochs):
             print(f"--- Epoch {epoch+1}/{epochs} ---")
@@ -405,7 +410,7 @@ class SequentialTrainer:
                     input_mask=input_mask,
                     max_steps=settle_steps,
                     tol=settle_tol,
-                    implicit_damping=3.0,  # was 1.2; needed to handle SR > 1
+                    implicit_damping=2.0,  # was 3.0; needed to handle SR > 1 but without complete lockdown
                 )
                 free_state = self.engine.state.clone()
                 free_diff = self.engine.last_settle_diff
@@ -413,27 +418,25 @@ class SequentialTrainer:
                 # 6. Compute prediction errors (top-down only; I/O zeroed) based on free state
                 energy = self.engine.compute_prediction_errors()
 
-                # 6b. EqProp Nudge Phase with Error-Proportional Beta
+                # 6b. Prospective Configuration Phase (Clamped Target)
                 output_actual = torch.tanh(free_state[256:512])         # evaluate on free_state
                 output_target = self.eye[target_byte]                   # one-hot [256]
                 output_error = output_target - output_actual            # observation error
                 
-                # Calculate Absolute Error Magnitude
-                error_magnitude = torch.sum(torch.abs(output_error)).item()
+                # Clamping mask: target nodes + input nodes are clamped
+                pc_mask = input_mask.clone()
+                pc_mask[256:512] = 1.0  # Clamp the motor/output nodes
                 
-                # Scale Beta by Error
-                self.dynamic_beta = min(2.0, error_magnitude)
-                beta = self.dynamic_beta
-                
-                nudge_vec = input_vec.clone()
-                nudge_vec[256:512] = output_target * beta
+                # Vector containing targets
+                pc_vec = input_vec.clone()
+                pc_vec[256:512] = output_target
                 
                 self.engine.settle(
-                    nudge_vec,
-                    input_mask=input_mask,
+                    pc_vec,
+                    input_mask=pc_mask,
                     max_steps=settle_steps,
                     tol=settle_tol,
-                    implicit_damping=3.0,  # was 1.2; needed to handle SR > 1
+                    implicit_damping=2.0,
                 )
                 nudge_state = self.engine.state.clone()
                 nudge_diff = self.engine.last_settle_diff
@@ -490,17 +493,34 @@ class SequentialTrainer:
                     accumulated_readout_grad_b += readout_grad
                     readout_acc_count += 1
 
-                # 8b. Update L0 recurrent weights per-character (Strategy 2).
+                # 8b. Compute Neuromodulators
+                # Dopamine (RPE): If loss is shockingly *lower* than EMA, high DA (positive surprise).
+                # Acetylcholine (Uncertainty): If EMA loss is high overall, high ACh (needs faster learning).
+                if step == 0:
+                    loss_ema = loss
+                else:
+                    loss_ema = 0.99 * loss_ema + 0.01 * loss
+                
+                # ACh: High when baseline uncertainty (loss EMA) is high
+                ach_target = max(0.1, min(2.0, loss_ema / 2.0))
+                running_acetylcholine = 0.9 * running_acetylcholine + 0.1 * ach_target
+                
+                # DA: High when sudden unexpected success occurs (loss << loss_ema)
+                da_target = max(0.1, min(3.0, (loss_ema + 1e-5) / (loss + 1e-5))) 
+                running_dopamine = 0.9 * running_dopamine + 0.1 * da_target
+
+                # 8c. Update L0 recurrent weights per-character (Strategy 2).
                 # L1-L3 edges are frozen at character timescale; they receive updates
                 # only at word and sentence boundaries via consolidated states, ensuring
                 # each level's credit assignment matches its natural temporal scale.
                 self.engine.update_weights_predictive(
                     free_state,
                     nudge_state,
-                    beta=beta,
                     learning_rate=effective_lr,
                     hippo_edge_mask=self.hippo_edge_mask,
-                    active_level_max=1)
+                    active_level_max=1,
+                    dopamine=running_dopamine,
+                    acetylcholine=running_acetylcholine)
 
                 if step < 5:
                     # Inspect the motor weights
@@ -520,19 +540,25 @@ class SequentialTrainer:
                 if is_word_boundary:
                     _zero = torch.zeros(self.num_nodes, device=self.device)
                     self.engine.settle(_zero, input_mask=None, max_steps=50,
-                                       tol=settle_tol, implicit_damping=3.0)
+                                       tol=settle_tol, implicit_damping=2.0)
                     word_free_state = self.engine.state.clone()
-                    # Nudge target at word boundary: first char of next word (= target_byte)
-                    word_nudge_vec = torch.zeros(self.num_nodes, device=self.device)
-                    word_nudge_vec[256:512] = self.eye[target_byte] * beta
-                    self.engine.settle(word_nudge_vec, input_mask=None,
+                    # Clamp target at word boundary: first char of next word (= target_byte)
+                    pc_vec = torch.zeros(self.num_nodes, device=self.device)
+                    pc_vec[256:512] = self.eye[target_byte]
+                    
+                    pc_mask = torch.zeros(self.num_nodes, device=self.device)
+                    pc_mask[256:512] = 1.0
+                    
+                    self.engine.settle(pc_vec, input_mask=pc_mask,
                                        max_steps=settle_steps, tol=settle_tol,
-                                       implicit_damping=3.0)
+                                       implicit_damping=2.0)
                     word_nudge_state = self.engine.state.clone()
                     self.engine.update_weights_predictive(
-                        word_free_state, word_nudge_state, beta=beta,
+                        word_free_state, word_nudge_state,
                         learning_rate=effective_lr, hippo_edge_mask=self.hippo_edge_mask,
-                        active_level_max=2)
+                        active_level_max=2,
+                        dopamine=running_dopamine,
+                        acetylcholine=running_acetylcholine)
                     # Flush buffered readout gradient (Strategy 1)
                     if readout_acc_count > 0:
                         self.readout_W -= readout_lr * accumulated_readout_grad_W / readout_acc_count
@@ -547,18 +573,24 @@ class SequentialTrainer:
                 if is_sentence_boundary:
                     _zero = torch.zeros(self.num_nodes, device=self.device)
                     self.engine.settle(_zero, input_mask=None, max_steps=100,
-                                       tol=settle_tol, implicit_damping=3.0)
+                                       tol=settle_tol, implicit_damping=2.0)
                     sent_free_state = self.engine.state.clone()
-                    sent_nudge_vec = torch.zeros(self.num_nodes, device=self.device)
-                    sent_nudge_vec[256:512] = self.eye[target_byte] * beta
-                    self.engine.settle(sent_nudge_vec, input_mask=None,
+                    pc_vec = torch.zeros(self.num_nodes, device=self.device)
+                    pc_vec[256:512] = self.eye[target_byte]
+                    
+                    pc_mask = torch.zeros(self.num_nodes, device=self.device)
+                    pc_mask[256:512] = 1.0
+                    
+                    self.engine.settle(pc_vec, input_mask=pc_mask,
                                        max_steps=settle_steps, tol=settle_tol,
-                                       implicit_damping=3.0)
+                                       implicit_damping=2.0)
                     sent_nudge_state = self.engine.state.clone()
                     self.engine.update_weights_predictive(
-                        sent_free_state, sent_nudge_state, beta=beta,
+                        sent_free_state, sent_nudge_state,
                         learning_rate=effective_lr, hippo_edge_mask=self.hippo_edge_mask,
-                        active_level_max=self.engine.max_level)
+                        active_level_max=self.engine.max_level,
+                        dopamine=running_dopamine,
+                        acetylcholine=running_acetylcholine)
                     # Cascade transfer at sentence boundary (not per-step)
                     if step >= 500:
                         self.engine.cascade_transfer(include_deep=(step >= 5000))

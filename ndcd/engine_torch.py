@@ -4,10 +4,21 @@ from typing import Optional, Tuple, List
 
 
 @torch.jit.script
+def get_soma(b: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
+    # Apical amplifies basal if aligned, ignores if weak
+    # Using a bounded modulation: soma = basal * (1 + tanh(apical))
+    # This is a standard coincidence detection model for pyramidal cells.
+    # Ensure it remains within [-1.5, 1.5]
+    return (b * (1.0 + torch.tanh(a))).clamp(-1.5, 1.5)
+
+@torch.jit.script
 def jit_solve_dynamics_imex(
-    initial_state: torch.Tensor,
-    indices: torch.Tensor,
-    weight_values: torch.Tensor,
+    initial_basal: torch.Tensor,
+    initial_apical: torch.Tensor,
+    indices_basal: torch.Tensor,
+    weights_basal: torch.Tensor,
+    indices_apical: torch.Tensor,
+    weights_apical: torch.Tensor,
     biases: torch.Tensor,
     taus: torch.Tensor,
     input_vector: torch.Tensor,
@@ -21,48 +32,42 @@ def jit_solve_dynamics_imex(
     sparsity_alpha: float,  # 0.0 = no sparsity, 0.3 = moderate
     damping: float = 0.15,
     implicit_damping: float = 1.2,
-) -> Tuple[torch.Tensor, float, int, float]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, float, int, float]:
     """
-    Semi-implicit (IMEX) dynamics solver for predictive coding.
+    Semi-implicit (IMEX) dynamics solver for Multi-Compartment Predictive Coding.
 
-    Replaces RK4 with an implicit-explicit scheme:
-    - Implicit: linear decay term (-x / tau)
-    - Explicit: nonlinear interaction (W*tanh(x) + bias + input) / tau
+    Neurons now have segregated compartments:
+    - Basal: integrates feedforward (bottom-up + lateral) signals
+    - Apical: integrates feedback (top-down) signals
+    - Soma (output): Non-linear combination (e.g., basal * (1 + apical))
 
-    Update rule:
-        x_{n+1} = (x_n + dt * nonlinear_term / tau) / (1 + dt / tau)
-
-    This is unconditionally stable on the linear part, allowing dt=0.5-1.0
-    and convergence in 10-20 steps instead of 100 RK4 steps.
-
-    Returns (settled_state, final_diff) where final_diff indicates convergence.
-    Includes adaptive dt: halves timestep when diff increases (diverging).
+    Returns (basal_state, apical_state, somatic_state, final_diff)
     """
-    num_nodes = initial_state.size(0)
-    current_s = initial_state.clone()
+    num_nodes = initial_basal.size(0)
+    current_b = initial_basal.clone()
+    current_a = initial_apical.clone()
 
-    weights = torch.sparse_coo_tensor(indices, weight_values, (num_nodes, num_nodes))
+    w_basal_sparse = torch.sparse_coo_tensor(indices_basal, weights_basal, (num_nodes, num_nodes))
+    w_apical_sparse = torch.sparse_coo_tensor(indices_apical, weights_apical, (num_nodes, num_nodes))
 
-    # Pre-compute IMEX denominator: (1 + implicit_damping * dt / tau) per node
-    # The implicit_damping coefficient (>1.0) strengthens the implicit decay
-    # term, widening the basin of attraction against explicit overshoots
-    # from high-energy input projections.
     current_dt = dt
     imex_denom = 1.0 + implicit_damping * current_dt / taus
     min_dt: float = 0.05
 
     step_count = 0
-    diff = tol + 1.0  # Ensure at least one step
-    prev_diff: float = 1e6  # Large initial for adaptive dt
+    diff = tol + 1.0
+    prev_diff: float = 1e6
+
+    current_s = get_soma(current_b, current_a)
 
     while step_count < max_steps and diff > tol:
         # Hard clamp input nodes
         if input_mask is not None:
-            current_s = current_s * (1.0 - input_mask) + input_vector * input_mask
+            current_b = current_b * (1.0 - input_mask) + input_vector * input_mask
+            current_s = get_soma(current_b, current_a)
 
-        old_state = current_s.clone()
+        old_soma = current_s.clone()
 
-        # Compute nonlinear term
         # Layer Normalization per module before activation
         normed_s = current_s.clone()
         for m in range(module_starts.size(0)):
@@ -74,71 +79,80 @@ def jit_solve_dynamics_imex(
             normed_s[ms:me] = (mod_s - mean) / torch.sqrt(var + 1e-5)
             
         rho = torch.tanh(normed_s)
-        synaptic = torch.mv(weights, rho)
+        
+        # Basal processing (feedforward / lateral)
+        synaptic_basal = torch.mv(w_basal_sparse, rho)
+        # Apical processing (feedback / top-down)
+        synaptic_apical = torch.mv(w_apical_sparse, rho)
 
-        # Jacobian gain control: bound the effective spectral radius
-        # of the linearized dynamics to prevent ρ(J)≈2.63 explosion.
-        # Compute sech²(x) = 1 - tanh²(x) for local Jacobian scaling.
-        drho = 1.0 - rho * rho  # tanh derivative = sech^2
-        jacobian_input = torch.mv(weights, rho * drho)
-        jacobian_norm = jacobian_input.norm()
+        # Jacobian gain control applied separately to compartments to avoid explosion
+        drho = 1.0 - rho * rho
         state_norm = rho.norm().clamp(min=1e-6)
-        effective_sr = jacobian_norm / state_norm
+        
+        # Basal SR
+        jac_basal = torch.mv(w_basal_sparse, rho * drho)
+        eff_sr_basal = jac_basal.norm() / state_norm
         target_max_sr: float = 0.95
-        if effective_sr > target_max_sr:
-            sr_scale = target_max_sr / effective_sr
-            synaptic = synaptic * sr_scale
+        if eff_sr_basal > target_max_sr:
+            synaptic_basal = synaptic_basal * (target_max_sr / eff_sr_basal)
+            
+        # Apical SR
+        jac_apical = torch.mv(w_apical_sparse, rho * drho)
+        eff_sr_apical = jac_apical.norm() / state_norm
+        if eff_sr_apical > target_max_sr:
+            synaptic_apical = synaptic_apical * (target_max_sr / eff_sr_apical)
 
-        nonlinear = synaptic + biases + input_vector
+        nonlinear_basal = synaptic_basal + biases + input_vector
+        nonlinear_apical = synaptic_apical  # pure prediction context
 
-        # Semi-implicit update: treats -x/tau implicitly, rest explicitly
-        current_s = (current_s + current_dt * nonlinear / taus) / imex_denom
+        # Semi-implicit compartment updates
+        current_b = (current_b + current_dt * nonlinear_basal / taus) / imex_denom
+        # Apical dendrites often have slower time constants (calcium spikes vs sodium)
+        current_a = (current_a + current_dt * nonlinear_apical / (taus * 1.5)) / imex_denom
 
-        # Homeostatic sparsity (L1 penalty) — reduced from 0.01 to 0.001.
-        # The old 0.01 coefficient was excessively punitive, driving 33% of
-        # nodes into the linear regime of tanh and suppressing distinct
-        # attractors. At 0.001, nodes can utilize the full dynamic range
-        # of tanh, pushing activations into the saturated extremes required
-        # to distinctly separate representations for different inputs.
-        current_s -= 0.0001 * current_s.sign() * current_dt
+        # L1 sparsity on basal (the driving feature)
+        current_b -= 0.0001 * current_b.sign() * current_dt
 
-        # State clamping: ±1.5 keeps tanh ≈ 0.91 (18% gradient headroom)
-        current_s = current_s.clamp(-1.5, 1.5)
+        # Clamp compartments
+        current_b = current_b.clamp(-1.5, 1.5)
+        current_a = current_a.clamp(-1.5, 1.5)
+        
+        # Compute somatic state
+        current_s = get_soma(current_b, current_a)
 
         # Hard clamp input nodes after update
         if input_mask is not None:
-            current_s = current_s * (1.0 - input_mask) + input_vector * input_mask
+            current_b = current_b * (1.0 - input_mask) + input_vector * input_mask
+            current_a = current_a * (1.0 - input_mask) # No top down expectation forces input directly
+            current_s = get_soma(current_b, current_a)
 
-        # k-Winner-Take-All (k-WTA) lateral inhibition every 5 steps.
-        # Replaces the old soft mean-field approach that was insufficient
-        # to break representational singularity (cosine similarity ~0.98).
-        # Strict k-WTA forces modules to explicitly select disparate
-        # sub-populations of active nodes for differing sensory inputs,
-        # generating the orthogonal state vectors needed to separate
-        # representations. Top 20% by magnitude win; losers are suppressed
-        # to 5% residual (not hard zero, to avoid settling oscillation).
+        # k-Winner-Take-All (k-WTA) lateral inhibition on the SOMATIC output
+        # Lateral inhibition sharpens the actual firing rate output
         if sparsity_alpha > 0.0 and step_count % 5 == 4:
+            MexicanHatSoma = current_s.clone()
             for m in range(module_starts.size(0)):
                 ms = module_starts[m].item()
                 me = module_ends[m].item()
-                mod_s = current_s[ms:me]
+                mod_s = MexicanHatSoma[ms:me]
                 mod_size = me - ms
-                k = max(1, mod_size // 5)  # 20% winners
+                k = max(1, int(mod_size * 0.05))  # 5% global inhibition sparsity
                 if mod_size > k:
                     topk_vals = torch.topk(mod_s.abs(), k).values
                     threshold = topk_vals[-1]
                     below = mod_s.abs() < threshold
-                    current_s[ms:me] = torch.where(below, mod_s * 0.10, mod_s)
-                    current_s[ms:me] = current_s[ms:me].clamp(-1.5, 1.5)
+                    MexicanHatSoma[ms:me] = torch.where(below, mod_s * 0.05, mod_s)
+                    
+            # Propagate the somatic suppression back into the basal drive
+            suppressing_ratio = (MexicanHatSoma.abs() + 1e-5) / (current_s.abs() + 1e-5)
+            current_b = current_b * suppressing_ratio
+            current_b = current_b.clamp(-1.5, 1.5)
+            current_s = get_soma(current_b, current_a)
 
-        # Convergence check
-        diff = torch.norm(current_s - old_state).item()
+        diff = torch.norm(current_s - old_soma).item()
 
-        # Relax tolerance slightly during internal steps to avoid infinite halving deadlocks
         if diff <= tol * 1.2:
             break
 
-        # Adaptive dt: smaller steps during volatile phases, larger as it nears steady-state
         if diff > prev_diff and current_dt > min_dt:
             current_dt = max(current_dt * 0.5, min_dt)
             imex_denom = 1.0 + implicit_damping * current_dt / taus
@@ -149,7 +163,7 @@ def jit_solve_dynamics_imex(
         prev_diff = diff
         step_count += 1
 
-    return current_s, diff, step_count, current_dt
+    return current_b, current_a, current_s, diff, step_count, current_dt
 
 
 class PredictiveCodingEngine:
@@ -204,7 +218,9 @@ class PredictiveCodingEngine:
         self.biases = torch.tensor(biases, dtype=torch.float32, device=device)
 
         # State
-        self.state = torch.zeros(num_nodes, dtype=torch.float32, device=device)
+        self.state_basal = torch.zeros(num_nodes, dtype=torch.float32, device=device)
+        self.state_apical = torch.zeros(num_nodes, dtype=torch.float32, device=device)
+        self.state = torch.zeros(num_nodes, dtype=torch.float32, device=device)  # somatic state
 
         # Context EMA buffer for cross-boundary context preservation
         self.context_ema = torch.zeros(num_nodes, dtype=torch.float32, device=device)
@@ -343,7 +359,10 @@ class PredictiveCodingEngine:
         self.topdown_pred_var = 0.0
 
         # FIX 3: Sparsity parameter (controllable from trainer)
-        self.sparsity_alpha = 0.05
+        self.sparsity_alpha = 0.8
+        
+        # Thalamic Gate tracking
+        self.surprise_ema = 0.0
 
     def _build_module_tensors(self):
         """Pre-build tensors for module start/end ranges for fast slicing."""
@@ -437,7 +456,7 @@ class PredictiveCodingEngine:
         self.si_baseline_weights = self.effective_weights.clone()
 
     def settle(self, input_vector, max_steps=20, tol=5e-3,
-               input_mask=None, damping=0.15, implicit_damping=1.2):
+               input_mask=None, damping=0.15, implicit_damping=2.0):
         """
         Single-phase settling using IMEX integration.
 
@@ -457,13 +476,26 @@ class PredictiveCodingEngine:
         # Compute effective weights: cascade sum modulated by short-term plasticity
         cascade_weights = self.effective_weights
         effective_weights = cascade_weights * self.facilitation * self.depression
+        
+        # Split into Basal and Apical topologies
+        basal_mask = self.bottomup_edge_mask | self.lateral_edge_mask
+        apical_mask = self.topdown_edge_mask
+        
+        indices_basal = self.indices[:, basal_mask]
+        weights_basal = effective_weights[basal_mask]
+        
+        indices_apical = self.indices[:, apical_mask]
+        weights_apical = effective_weights[apical_mask]
 
         # Single-phase IMEX settling
         # FIX 3: Pass module ranges and sparsity parameter to JIT solver
-        self.state, self.last_settle_diff, self.last_settle_steps, self.last_settle_dt = jit_solve_dynamics_imex(
-            self.state,
-            self.indices,
-            effective_weights,
+        self.state_basal, self.state_apical, self.state, self.last_settle_diff, self.last_settle_steps, self.last_settle_dt = jit_solve_dynamics_imex(
+            self.state_basal,
+            self.state_apical,
+            indices_basal,
+            weights_basal,
+            indices_apical,
+            weights_apical,
             self.biases,
             self.taus,
             input_vector,
@@ -563,19 +595,18 @@ class PredictiveCodingEngine:
 
         return total_energy
 
-    def update_weights_predictive(self, free_state, nudge_state, beta=0.5, learning_rate=0.01, hippo_edge_mask=None, active_level_max=None):
+    def update_weights_predictive(self, free_state, nudge_state, learning_rate=0.01, 
+                                  hippo_edge_mask=None, active_level_max=None,
+                                  dopamine: float = 1.0, acetylcholine: float = 1.0):
         """
         Local Hebbian weight update based on True Equilibrium Propagation.
 
-        Top-Down Spatial weight update (EqProp):
-            ΔW_ij ∝ (rho_nudge_i * rho_nudge_j - rho_free_i * rho_free_j) / beta
+        Top-Down Spatial weight update (Prospective Configuration):
+            ΔW_ij ∝ (rho_nudge_i - rho_free_i) * rho_nudge_j
 
-        Updates go to w_surface only. The metaplastic scaling and synaptic
-        intelligence reduce per-synapse learning rate for consolidated and
-        important synapses, preventing catastrophic forgetting.
-
-        Temporal transition update:
-            ΔA_ℓ ∝ lr * ε_temporal * x_prev^T
+        Neuromodulatory Gating:
+        - Dopamine (DA): RPE surrogate. Scales plasticity based on surprise/success.
+        - Acetylcholine (ACh): Uncertainty/Attention surrogate. High ACh = rapid memory encoding.
         """
         with torch.no_grad():
             rho_free = torch.tanh(free_state)
@@ -599,14 +630,13 @@ class PredictiveCodingEngine:
 
             grad = torch.zeros_like(self.weight_values)
 
-            # Top-down edges: EqProp gradient
-            # ΔW_ij ∝ (rho_nudge_i * rho_nudge_j - rho_free_i * rho_free_j) / beta
+            # Top-down edges: Prospective Configuration update
+            # ΔW_ij ∝ (rho_nudge_i - rho_free_i) * rho_nudge_j
             td_rho_nudge_i = rho_nudge[idx_i[self.topdown_edge_mask]]
             td_rho_nudge_j = rho_nudge[idx_j[self.topdown_edge_mask]]
             td_rho_free_i = rho_free[idx_i[self.topdown_edge_mask]]
-            td_rho_free_j = rho_free[idx_j[self.topdown_edge_mask]]
             
-            grad[self.topdown_edge_mask] = (td_rho_nudge_i * td_rho_nudge_j - td_rho_free_i * td_rho_free_j) / beta
+            grad[self.topdown_edge_mask] = (td_rho_nudge_i - td_rho_free_i) * td_rho_nudge_j
 
             # Pre-synaptic state t-1 for temporal prediction
             prev_rho = torch.tanh(self.previous_state)
@@ -689,16 +719,35 @@ class PredictiveCodingEngine:
             
             grad = grad.clamp(-1.0, 1.0)
 
+            # --- Calculate Thalamic Saliency Gate ---
+            # Use total network energy as a proxy for 'surprise'.
+            # If current_energy is much higher than the EMA, it's a novel/important signal -> scale up learning.
+            # If it's matching or lower, it's predictable noise (like spaces) -> scale down learning.
+            current_energy = 0.5 * torch.sum(self.spatial_errors ** 2).item() + self.temporal_alpha * torch.sum(self.temporal_errors ** 2).item()
+            if self.surprise_ema == 0.0:
+                self.surprise_ema = current_energy
+            else:
+                self.surprise_ema = 0.99 * self.surprise_ema + 0.01 * current_energy
+            
+            saliency_gate = torch.clamp(torch.tensor(current_energy / max(self.surprise_ema, 1e-6)), min=0.1, max=3.0).item()
+
             # Combined importance-aware learning rate (metaplastic + SI)
             consolidation = torch.abs(self.w_deep)
             importance = self.omega
-            meta_lr = learning_rate / (1.0 + self.meta_scale * consolidation + 0.1 * importance)
+            
+            # Base learning rate explicitly gated by Neuromodulators
+            # Dopamine scales overall magnitude
+            # Acetylcholine scales rate of new structural learning (surface weights)
+            global_neuromodulation = max(0.01, dopamine * acetylcholine)
+            
+            meta_lr = (learning_rate * global_neuromodulation) / (1.0 + self.meta_scale * consolidation + 0.1 * importance)
+            
+            # Apply Thalamic Gating
+            meta_lr = meta_lr * saliency_gate
 
-            # CLS: hippocampal synapses get 10x learning rate for rapid
-            # acquisition of episodic patterns, restoring the intended
-            # biological asymmetry of the Complementary Learning System.
+            # CLS: hippocampal synapses get highly boosted learning under high ACh
             if hippo_edge_mask is not None:
-                meta_lr = meta_lr * (1.0 + hippo_edge_mask.float() * 9.0)
+                meta_lr = meta_lr * (1.0 + hippo_edge_mask.float() * (9.0 * acetylcholine))
 
             # Level gate (Strategy 2): restrict updates to edges whose max endpoint
             # level is <= active_level_max.  L0-only per-character, L1+L2 at word
@@ -782,7 +831,7 @@ class PredictiveCodingEngine:
             self.w_surface[td_idx] -= correction
 
             # --- Bias update from prediction errors + IP ---
-            bias_grad = (rho_nudge - rho_free) / beta + self.temporal_alpha * self.temporal_errors + ip_gradient
+            bias_grad = (rho_nudge - rho_free) + self.temporal_alpha * self.temporal_errors + ip_gradient
             if active_level_max is not None:
                 node_gate = (self.node_to_level <= active_level_max).float()
                 bias_grad = bias_grad * node_gate
@@ -975,6 +1024,36 @@ class PredictiveCodingEngine:
     def damp_weights(self, factor=0.9):
         """Damps recurrent weights by a factor (applied to deep level)."""
         self.w_deep *= factor
+
+    def cascade_transfer(self, include_deep=True):
+        """
+        Transfers learned weights down the memory cascade.
+        Surface -> Mid -> Deep.
+        """
+        with torch.no_grad():
+            # 1. Surface to Mid
+            transfer_s2m = self.w_surface / self.tau_surface_to_mid
+            self.w_mid += transfer_s2m
+            self.w_surface -= transfer_s2m
+
+            # 2. Mid to Deep
+            if include_deep:
+                transfer_m2d = self.w_mid / self.tau_mid_to_deep
+                
+                # FIX 3: Magnitude-gated hippocampal transfer
+                # Neocortical synapses (τ_deep=2000) drip-feed continuously.
+                # Hippocampal synapses (τ_deep=50) wait until a coherent pattern
+                # forms in w_mid (magnitude > 0.1) before flushing rapidly.
+                # This prevents noisy transient patterns from cluttering deep CLS memory.
+                is_hippo = self.tau_mid_to_deep < 100.0
+                has_magnitude = self.w_mid.abs() > 0.1
+                
+                # Zero out transfer for hippo edges lacking sufficient structural magnitude
+                transfer_m2d[is_hippo & ~has_magnitude] = 0.0
+
+                self.w_deep += transfer_m2d
+                self.w_mid -= transfer_m2d
+
 
     def cascade_stats(self):
         """Returns mean absolute magnitude at each cascade level for diagnostics."""
