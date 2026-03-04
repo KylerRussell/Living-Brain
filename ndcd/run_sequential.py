@@ -1,6 +1,8 @@
 import torch
 import numpy as np
 import os
+os.environ["MIOPEN_FIND_MODE"] = "2"
+os.environ["MIOPEN_DEBUG_DISABLE_CONV_ALGO_SEARCH"] = "1"
 import time
 import argparse
 import scipy.sparse as sp
@@ -75,6 +77,7 @@ class SequentialTrainer:
             module_ranges=module_ranges,
             module_levels=module_levels,
             hier_pairs=hier_pairs,
+            modules=self.graph.modules,
             positions=self.graph.pos,
             dt=0.5,
             device=device,
@@ -147,7 +150,8 @@ class SequentialTrainer:
         cascade weights accumulate to spectral radii of 50-100+, and rescaling
         by 0.006x lobotomizes the network. Use phase_boundary_reset() instead.
         """
-        print(f"Tuning Spectral Radius to {target_radius:.2f}...")
+        # Feature 5: Local Homeostatic Scaling (Variance Control) replaces global spectral radius tuning.
+        pass
 
         if hasattr(self, 'engine'):
             # Use effective weights (cascade sum) for spectral analysis
@@ -593,8 +597,9 @@ class SequentialTrainer:
                         dopamine=running_dopamine,
                         acetylcholine=running_acetylcholine)
                     # Cascade transfer at sentence boundary (not per-step)
-                    if step >= 500:
-                        self.engine.cascade_transfer(include_deep=(step >= 5000))
+                    surface_mag = self.engine.w_surface.abs().mean().item()
+                    if step >= 5000 or surface_mag >= 0.02:
+                        self.engine.cascade_transfer(include_deep=(step >= 5000 or surface_mag >= 0.02))
                     # SI consolidation at sentence boundary
                     self.engine.consolidate_importance()
 
@@ -1022,6 +1027,8 @@ def main():
         device = 'mps'
     if torch.cuda.is_available() and device == 'cpu':
         device = 'cuda'
+
+    torch.backends.cuda.matmul.allow_tf32 = True
 
     print(f"Using device: {device}")
 

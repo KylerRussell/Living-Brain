@@ -287,8 +287,20 @@ class DynamicGraph:
                 motor_node = n_sensory + m
                 edge_rows.extend(sources.tolist())
                 edge_cols.extend([motor_node] * n_proj)
+                
+        # 6. DKP-PC: Direct feedback from output (motor) to ALL hidden modules
+        # This allows O(1) error propagation from output to deep layers.
+        dkp_feedback_density = 0.05
+        for mod in self.modules:
+            # Feedback goes to L4 (input recipient) or L2/3 (error units)
+            idx = np.concatenate([mod['l4_indices'], mod['l23_indices']])
+            if len(idx) == 0: continue
+            n_proj = max(1, int(len(idx) * dkp_feedback_density))
+            for m in range(n_motor):
+                motor_node = n_sensory + m
+                targets = np.random.choice(idx, n_proj, replace=False)
                 edge_rows.extend([motor_node] * n_proj)
-                edge_cols.extend(sources.tolist())
+                edge_cols.extend(targets.tolist())
 
         # Convert to numpy arrays and remove duplicates
         edge_rows = np.array(edge_rows, dtype=np.int64)
@@ -336,7 +348,7 @@ class DynamicGraph:
             shape=(num_nodes, num_nodes)
         )
 
-        target_sr = 0.90
+        target_sr = 1.10
         try:
             from scipy.sparse.linalg import eigs as sp_eigs
             eigvals = sp_eigs(free_sparse.astype(np.float64),
@@ -364,12 +376,12 @@ class DynamicGraph:
         # Dynamically calibrate input boost against lateral recurrence strength
         # instead of hardcoded 6.5x which overwhelmed lateral recurrence
         lateral_rms = np.sqrt(np.mean(weight_vals[free_mask] ** 2)) if free_mask.sum() > 0 else 0.1
-        input_target_rms = 3.0 * lateral_rms  # 3x lateral (reduced from 6.5x)
+        input_target_rms = 0.25 * lateral_rms  # 0.25x lateral (reduced from 3.0x)
         input_current_rms = np.sqrt(np.mean(weight_vals[input_proj_mask] ** 2)) if input_proj_mask.sum() > 0 else 0.1
         input_boost = input_target_rms / max(input_current_rms, 1e-8)
-        input_boost = np.clip(input_boost, 1.0, 6.0)  # Safety bounds
+        input_boost = np.clip(input_boost, 0.25, 6.0)  # Safety bounds
         weight_vals[input_proj_mask] *= input_boost
-        print(f"Input boost: {input_boost:.2f}x (calibrated to 3x lateral RMS={lateral_rms:.4f})")
+        print(f"Input boost: {input_boost:.2f}x (calibrated to 0.25x lateral RMS={lateral_rms:.4f})")
 
         n_input = int(input_proj_mask.sum())
         n_free = int(free_mask.sum())
@@ -471,21 +483,11 @@ class DynamicGraph:
         weight_vals[bu_mask] = np.maximum(np.abs(weight_vals[bu_mask]), bu_min_magnitude) * bu_signs
         print(f"Bottom-up edges: {int(bu_mask.sum())} fan-in normalized (bounded, min_mag={bu_min_magnitude})")
 
-        # FIX 4: Decouple & enforce symmetric motor connections (Motor -> Level 0)
+        # Fix 4 removed: Uncoupled Product Feedback Alignment (PFA)
+        # Weights are left completely asymmetric.
         fwd_motor_mask = (edge_rows >= 512) & (edge_cols >= 256) & (edge_cols < 512)
         fb_motor_mask = (edge_rows >= 256) & (edge_rows < 512) & (edge_cols >= 512)
-
-        fwd_idx = np.where(fwd_motor_mask)[0]
-        fb_idx = np.where(fb_motor_mask)[0]
-
-        fwd_ids = edge_rows[fwd_idx] * num_nodes + edge_cols[fwd_idx]
-        fb_ids = edge_cols[fb_idx] * num_nodes + edge_rows[fb_idx]  # transpose to match
-
-        fwd_sort = np.argsort(fwd_ids)
-        fb_sort = np.argsort(fb_ids)
-
-        weight_vals[fb_idx[fb_sort]] = weight_vals[fwd_idx[fwd_sort]]
-        print(f"Tied {len(fb_idx)} motor feedback edges to their forward counterparts (W_fb = W_fwd^T).")
+        print(f"PFA: {fb_motor_mask.sum()} independent feedback edges enabling Product Feedback Alignment.")
 
         # Build final sparse matrix
         self.weight_sparse = sp.csr_matrix(
@@ -519,9 +521,14 @@ class DynamicGraph:
         # Remaining 80% are neocortical (slow learners that extract regularities)
         self.hippocampal_modules = set()
         self.neocortical_modules = set()
+        
+        # In humans, the neocortex contains ~14B neurons, Hippocampus CA1 ~5M
+        # This equates to roughly a 1:2800 ratio. We'll enforce a single hippocampal module total,
+        # or at most 2% of the modules. Let's make one mid-to-high level module the hippocampus.
         for level in range(num_levels):
             level_mods = self.level_modules[level]
-            n_hippo = max(1, int(len(level_mods) * 0.2))
+            # Only allocate to hippocampus if level == 2 (to simulate medial temporal lobe)
+            n_hippo = 1 if (level == 2 and len(level_mods) > 0) else 0
             for mod_id in level_mods[:n_hippo]:
                 self.hippocampal_modules.add(mod_id)
             for mod_id in level_mods[n_hippo:]:

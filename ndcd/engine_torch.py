@@ -181,6 +181,7 @@ class PredictiveCodingEngine:
 
     def __init__(self, num_nodes, indices, values, biases, taus,
                  module_ranges, module_levels, hier_pairs,
+                 modules=None,
                  positions: Optional[np.ndarray] = None,
                  dt=0.5, device='cuda' if torch.cuda.is_available() else 'cpu',
                  temporal_alpha=0.5,
@@ -234,6 +235,16 @@ class PredictiveCodingEngine:
         self.hier_pairs = hier_pairs        # [(upper_id, lower_id), ...]
         self.num_modules = len(module_ranges)
 
+        # Laminar Segregation Masks
+        self.is_l4 = torch.zeros(num_nodes, dtype=torch.bool, device=device)
+        self.is_l23 = torch.zeros(num_nodes, dtype=torch.bool, device=device)
+        self.is_l56 = torch.zeros(num_nodes, dtype=torch.bool, device=device)
+        if modules is not None:
+            for mod in modules:
+                self.is_l4[mod['l4_indices']] = True
+                self.is_l23[mod['l23_indices']] = True
+                self.is_l56[mod['l56_indices']] = True
+
         # Build module-level lookup tensors for fast access
         self._build_module_tensors()
 
@@ -268,18 +279,9 @@ class PredictiveCodingEngine:
             (self.indices[1] >= 512)
         )
 
-        # FIX 4: Track symmetric motor connections
-        fwd_motor_mask = (self.indices[0] >= 512) & (self.indices[1] >= 256) & (self.indices[1] < 512)
-        fb_motor_mask = (self.indices[0] >= 256) & (self.indices[0] < 512) & (self.indices[1] >= 512)
+        # Fix 4 removed: Uncoupled Product Feedback Alignment (PFA)
+        # Weights are left completely asymmetric.
 
-        fwd_idx = torch.where(fwd_motor_mask)[0]
-        fb_idx = torch.where(fb_motor_mask)[0]
-
-        fwd_ids = self.indices[0, fwd_idx] * self.num_nodes + self.indices[1, fwd_idx]
-        fb_ids = self.indices[1, fb_idx] * self.num_nodes + self.indices[0, fb_idx]
-
-        self.fwd_motor_idx = fwd_idx[torch.argsort(fwd_ids)]
-        self.fb_motor_idx = fb_idx[torch.argsort(fb_ids)]
 
         # --- Free-edge mask for spectral radius enforcement ---
         # I/O projection edges (source or dest < 512) are external forcing,
@@ -392,8 +394,8 @@ class PredictiveCodingEngine:
             self.module_levels, dtype=torch.long, device=self.device)
 
     def activation_function(self, s):
-        return torch.tanh(s)
-
+        return torch.tanh(s) + 0.01 * s
+        
     @property
     def effective_weights(self):
         """Effective weight is base topology + learned cascade deltas."""
@@ -513,12 +515,7 @@ class PredictiveCodingEngine:
             
             self.weight_values[prune_mask] = new_weights
             
-            # Force recompilation of tied motor weights just in case
-            self.w_surface[self.fb_motor_idx] = self.w_surface[self.fwd_motor_idx]
-            self.w_mid[self.fb_motor_idx] = self.w_mid[self.fwd_motor_idx]
-            self.w_deep[self.fb_motor_idx] = self.w_deep[self.fwd_motor_idx]
-            self.weight_values[self.fb_motor_idx] = self.weight_values[self.fwd_motor_idx]
-            self.eligibility_traces[self.fb_motor_idx] = self.eligibility_traces[self.fwd_motor_idx]
+        
             
             return n_reset
 
@@ -621,12 +618,23 @@ class PredictiveCodingEngine:
             var_change = (rho - rho.mean()).pow(2).clamp(0, 5.0)
             self.temporal_variance_ema = 0.99 * self.temporal_variance_ema + 0.01 * var_change
             
-        # FIX: Rebalancing Generative Predictive Coding: Symmetric Scaling
-        precision = 5.0
+        # FIX: Rebalancing Generative Predictive Coding & Laminar Segregation
+        # PRC (Inhibitory) units regulate "volume" of error signals via divisive normalization
+        # Average inhibitory activity is used as a proxy for confidence (precision)
+        prc_activity = torch.relu(self.state[self.is_inhibitory]).mean()
+        precision = 5.0 * (1.0 + prc_activity)
         
-        # Spatial error = actual state - precision-weighted top-down prediction
-        # FIX 2: Implement Hebbian Gradient Clipping (± 1.0)
-        self.spatial_errors = (self.state - precision * topdown_pred).clamp(-1.0, 1.0)
+        # Spatial error = actual state - precision-weighted prediction
+        raw_error = self.state - precision * topdown_pred
+        
+        # Divisive normalization of the error signal by PRC units
+        divisive_factor = 1.0 + torch.relu(self.state[self.is_inhibitory]).mean()
+        normalized_error = raw_error / divisive_factor
+        
+        # ERR units (L2/3) predominantly ascend errors. Suppress error on EXP units (L5/6).
+        self.spatial_errors = normalized_error.clamp(-1.0, 1.0)
+        self.spatial_errors[self.is_l56] *= 0.1  # EXP units don't broadcast upward prediction errors
+        self.spatial_errors[self.is_l4] *= 0.5   # L4 are input recipients, moderate error
 
         # Store top-down prediction variance for diagnostics
         self.topdown_pred_var = topdown_pred[512:].var().item()
@@ -657,8 +665,9 @@ class PredictiveCodingEngine:
 
             temporal_energy += 0.5 * torch.sum(t_error ** 2).item()
 
-        # Total free energy
-        total_energy = spatial_energy + self.temporal_alpha * temporal_energy
+        # Total free energy with Metabolic Cost (minimizing surprisal and restricting activity bounds)
+        metabolic_cost = 0.001 * torch.sum(self.state.abs()).item()
+        total_energy = spatial_energy + self.temporal_alpha * temporal_energy + metabolic_cost
 
         return total_energy
 
@@ -709,7 +718,7 @@ class PredictiveCodingEngine:
             td_rho_nudge_j = rho_nudge[idx_j[self.topdown_edge_mask]]
             td_rho_free_i = rho_free[idx_i[self.topdown_edge_mask]]
             
-            grad[self.topdown_edge_mask] = (td_rho_nudge_i - td_rho_free_i) * td_rho_nudge_j
+            grad[self.topdown_edge_mask] = 100.0 * (td_rho_nudge_i - td_rho_free_i) * td_rho_nudge_j
 
             # Pre-synaptic state t-1 for temporal prediction
             prev_rho = torch.tanh(self.previous_state)
@@ -724,8 +733,7 @@ class PredictiveCodingEngine:
             # Pure associative Oja rule: co-occurrence with self-normalization, gated by apical bursts
             grad[self.bottomup_edge_mask] = 0.1 * (1.0 + bu_burst_j) * (bu_prev_rho_i * bu_rho_j - bu_w_plastic * bu_rho_j.pow(2))
 
-            # FIX 4: Zero out gradients for motor feedback edges so they don't learn independently
-            grad[self.fb_motor_idx] = 0.0
+        
 
             # FIX 4: Lateral edges — anti-Hebbian inhibitory + Oja excitatory.
             lat_i = idx_i[self.lateral_edge_mask]
@@ -791,7 +799,26 @@ class PredictiveCodingEngine:
             if grad_norm > 1.0:
                 grad = grad * (1.0 / grad_norm)
             
+            # --- Metabolic Cost (Weight Penalty) ---
+            grad -= 0.0001 * self.effective_weights.sign()
+
             grad = grad.clamp(-1.0, 1.0)
+
+            # --- Dale's ANNs (DANNs) Fisher Information Scaling ---
+            if not hasattr(self, 'fisher_info'):
+                self.fisher_info = torch.ones(self.num_nodes, device=self.device)
+            var_inst = (rho_free - getattr(self, 'activation_ema', torch.zeros_like(rho_free))).pow(2)
+            self.fisher_info = 0.99 * self.fisher_info + 0.01 * var_inst
+            
+            src_inh = self.is_inhibitory[idx_i]
+            fisher_scale = 1.0 / (self.fisher_info[idx_i] + 1e-4)
+            fisher_scale = torch.clamp(fisher_scale, 0.1, 5.0)
+            grad[src_inh] *= fisher_scale[src_inh] * 0.2  # Dampen and normalize inhibitory updates
+
+            # --- Local Homeostatic Scaling (Variance Control) ---
+            target_var = 0.1
+            tau_update = 0.05 * (var_inst - target_var)
+            self.taus = torch.clamp(self.taus + tau_update, 0.5, 100.0)
 
             # --- Calculate Thalamic Saliency Gate ---
             # Use total network energy as a proxy for 'surprise'.
@@ -898,10 +925,7 @@ class PredictiveCodingEngine:
             self.w_surface *= weight_scale
             self.w_mid *= weight_scale
 
-            # FIX 4: Enforce tied weights dynamically (W_fb = W_fwd^T)
-            self.w_surface[self.fb_motor_idx] = self.w_surface[self.fwd_motor_idx]
-            self.w_mid[self.fb_motor_idx] = self.w_mid[self.fwd_motor_idx]
-            self.w_deep[self.fb_motor_idx] = self.w_deep[self.fwd_motor_idx]
+         
 
             # --- Top-down weight diversity regularization ---
             # (Kept from original — prevents mode collapse)
