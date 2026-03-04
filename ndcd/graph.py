@@ -113,6 +113,15 @@ class DynamicGraph:
         self.num_actual_modules = module_id
         self.module_levels = np.array(self.module_levels)
 
+        # --- Dale's Law E/I Assignment ---
+        self.is_inhibitory = np.zeros(num_nodes, dtype=bool)
+        for mod in self.modules:
+            # 20% of nodes in each module are inhibitory
+            n_inh = int(mod['size'] * 0.2)
+            if n_inh > 0:
+                inh_idx = np.random.choice(mod['indices'], n_inh, replace=False)
+                self.is_inhibitory[inh_idx] = True
+
         # --- Functional Lateralization ---
         # Selectively designate ~15% of intermediate modules as Broca and ~15% as Wernicke
         self.broca_modules = set()
@@ -310,7 +319,9 @@ class DynamicGraph:
         avg_degree = num_edges / num_nodes
         std_dev = np.sqrt(2.0 / (avg_degree + avg_degree))
 
-        weight_vals = np.random.normal(0, std_dev, num_edges).astype(np.float32)
+        weight_vals = np.abs(np.random.normal(0, std_dev, num_edges)).astype(np.float32)
+        src_is_inh = self.is_inhibitory[edge_rows]
+        weight_vals[src_is_inh] = -weight_vals[src_is_inh]
 
         # Input nodes (0-255) are CLAMPED during settling — edges from/to
         # them are external forcing, not autonomous recurrence. Tuning
@@ -391,7 +402,10 @@ class DynamicGraph:
         # Bound fan-in normalization to prevent weights decaying to 0.00
         max_effective_fan_in_lat = 64.0
         bounded_lat_fan_in = np.minimum(lat_fan_in, max_effective_fan_in_lat)
-        weight_vals[lat_l0_mask] = np.abs(weight_vals[lat_l0_mask]) / np.sqrt(bounded_lat_fan_in)
+        
+        lat_src_inh = self.is_inhibitory[edge_rows[lat_l0_mask]]
+        lat_signs = np.where(lat_src_inh, -1.0, 1.0)
+        weight_vals[lat_l0_mask] = np.abs(weight_vals[lat_l0_mask]) / np.sqrt(bounded_lat_fan_in) * lat_signs
         
         # Massive Recurrent Excitation for Level 2 and Level 3 intra-module connections (Prefrontal)
         l23_intra_mask = (src_levels_arr == dst_levels_arr) & (src_levels_arr >= 2) & free_mask
@@ -406,13 +420,14 @@ class DynamicGraph:
         for idx in same_mod_indices:
             lvl = src_levels_arr[idx]
             boost = 3.0 if lvl == 2 else 5.0
-            weight_vals[idx] = np.abs(weight_vals[idx]) * boost
+            sign = -1.0 if self.is_inhibitory[edge_rows[idx]] else 1.0
+            weight_vals[idx] = np.abs(weight_vals[idx]) * boost * sign
             
         print(f"Boosted recurrent excitation for {len(same_mod_indices)} high-level intra-module working memory edges.")
 
         # Enforce minimum weight magnitude for lateral signal propagation
         lat_min_magnitude = 0.01
-        weight_vals[lat_l0_mask] = np.maximum(weight_vals[lat_l0_mask], lat_min_magnitude)
+        weight_vals[lat_l0_mask] = np.maximum(np.abs(weight_vals[lat_l0_mask]), lat_min_magnitude) * lat_signs
         
         n_lat = int(lat_l0_mask.sum())
         if len(fan_in_map) > 0:

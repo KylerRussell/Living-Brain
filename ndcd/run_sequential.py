@@ -79,6 +79,7 @@ class SequentialTrainer:
             dt=0.5,
             device=device,
             temporal_alpha=0.5,
+            is_inhibitory=self.graph.is_inhibitory,
         )
 
         # 3. Define I/O Masks
@@ -261,7 +262,7 @@ class SequentialTrainer:
                 self.engine.state[fast_mask] *= 0.5
 
             self.engine.store_previous_state()
-            self.engine.settle(input_vec, input_mask=input_mask, max_steps=15, tol=5e-3)
+            self.engine.settle(input_vec, input_mask=input_mask, max_steps=200, tol=1e-5)
 
             with torch.no_grad():
                 level0_acts = torch.tanh(self.engine.state[self.level0_indices])
@@ -401,10 +402,10 @@ class SequentialTrainer:
                     self.engine.blend_context(blend_factor=0.2)
 
                 # 5. Single-phase settle (IMEX) -> FREE PHASE
-                # Dynamic tolerance: relax to 1e-2 during the first 2000 steps
-                # of each phase, preventing the solver from fruitlessly exhausting
-                # max_steps during transient reorganization after phase boundaries.
-                settle_tol = 1e-2 if step < 2000 else 5e-3
+                # Dynamic tolerance: relax to 1e-3 during the first 2000 steps
+                # of each phase, minimizing early computational burden while still
+                # demanding strict 1e-5 convergence later.
+                settle_tol = 1e-3 if step < 2000 else 1e-5
                 self.engine.settle(
                     input_vec,
                     input_mask=input_mask,
@@ -539,7 +540,7 @@ class SequentialTrainer:
                 # buffered readout gradient is flushed (Strategy 1).
                 if is_word_boundary:
                     _zero = torch.zeros(self.num_nodes, device=self.device)
-                    self.engine.settle(_zero, input_mask=None, max_steps=50,
+                    self.engine.settle(_zero, input_mask=None, max_steps=200,
                                        tol=settle_tol, implicit_damping=2.0)
                     word_free_state = self.engine.state.clone()
                     # Clamp target at word boundary: first char of next word (= target_byte)
@@ -572,7 +573,7 @@ class SequentialTrainer:
                 # surface weights have time to accumulate meaningful signal before draining.
                 if is_sentence_boundary:
                     _zero = torch.zeros(self.num_nodes, device=self.device)
-                    self.engine.settle(_zero, input_mask=None, max_steps=100,
+                    self.engine.settle(_zero, input_mask=None, max_steps=300,
                                        tol=settle_tol, implicit_damping=2.0)
                     sent_free_state = self.engine.state.clone()
                     pc_vec = torch.zeros(self.num_nodes, device=self.device)
@@ -749,19 +750,36 @@ class SequentialTrainer:
         level3_mask = self.engine.node_to_level == 3
 
         for cycle in range(num_replay_cycles):
-            # 1. Initialize with low-amplitude noise biased toward recent activity
-            noise = torch.randn(self.num_nodes, device=self.device) * 0.1
+            # 1. Temporal vs Generative Replay Split
+            is_rem = (cycle % 4 == 0) # 25% REM, 75% NREM
             
-            # Add targeted high-variance perturbation to Level 3 nodes to break mode collapse
-            noise[level3_mask] = torch.randn(level3_mask.sum(), device=self.device) * 0.5
-            
-            replay_init = awake_state * 0.05 + noise
-            self.engine.state = replay_init
+            if is_rem:
+                # Generative REM Replay ("Dreaming")
+                # Randomize top-level prior (Level 3) with high variance to synthesize
+                # pseudo-data, breaking strict anchoring to the last awake frame.
+                noise = torch.randn(self.num_nodes, device=self.device) * 0.1
+                noise[level3_mask] = torch.randn(level3_mask.sum(), device=self.device) * 1.0
+                replay_init = awake_state * 0.05 + noise
+                self.engine.state = replay_init
+            else:
+                # Structured NREM Replay (Temporal & Reverse)
+                # Traces the sequences forwards or backwards using the temporal transition matrix
+                with torch.no_grad():
+                    for mod_idx, (start, end) in enumerate(self.engine.module_ranges):
+                        a_diag = self.engine.temporal_A[mod_idx]
+                        if cycle < num_replay_cycles // 2:
+                            # Forward Temporal Replay
+                            self.engine.state[start:end] = (a_diag * self.engine.state[start:end]).clamp(-1.5, 1.5)
+                        else:
+                            # Reverse Temporal Replay (bounded inverse)
+                            inv_a = a_diag.sign() / a_diag.abs().clamp(min=0.1, max=1.0)
+                            self.engine.state[start:end] = (inv_a * self.engine.state[start:end]).clamp(-1.5, 1.5)
 
             # 2. Settle with NO external input, NO input clamping
             #    The network falls into a learned attractor — a "memory"
+            #    Max steps increased to 200 to allow top-down cascade to fully settle.
             input_vec = torch.zeros(self.num_nodes, device=self.device)
-            self.engine.settle(input_vec, max_steps=50)
+            self.engine.settle(input_vec, max_steps=200, tol=1e-5)
 
             # 3. Strengthen this attractor with Hebbian update
             rho = torch.tanh(self.engine.state)
@@ -800,6 +818,11 @@ class SequentialTrainer:
 
             # Prevent unbounded bias accumulation during 200 sleep cycles
             self.engine.biases.clamp_(-1.0, 1.0)
+            
+            # 5. Structural Plasticity / Memory Purging
+            if cycle == num_replay_cycles - 1:
+                n_pruned = self.engine.remodel_structure(prune_ratio=0.01)
+                print(f"  Structural Plasticity: Pruned and reinitialized {n_pruned} low-utility synapses.")
 
             # Log every 50 cycles
             if cycle % 50 == 0:
@@ -849,7 +872,7 @@ class SequentialTrainer:
             input_mask = torch.zeros(self.num_nodes, device=self.device)
             input_mask[self.input_indices] = 1.0
 
-            self.engine.settle(input_vec, input_mask=input_mask, max_steps=10)
+            self.engine.settle(input_vec, input_mask=input_mask, max_steps=100, tol=1e-5)
 
             level0_acts = torch.tanh(self.engine.state[self.level0_indices])
             features = torch.nn.functional.layer_norm(level0_acts, level0_acts.size())
@@ -871,7 +894,7 @@ class SequentialTrainer:
         print(f"Retention eval on {data_path}: Acc={acc:.2%} Top3={acc3:.2%} ({num_samples} samples)")
         return acc
 
-    def evaluate_generalization(self, eval_data, num_samples=5000, max_steps=10):
+    def evaluate_generalization(self, eval_data, num_samples=5000, max_steps=100):
         """
         Evaluate model using a fully decoupled inference engine to calculate the formal Generalization Gap.
         All learning mechanisms are strictly disabled. Local temporal buffer and state are zeroed.
@@ -897,6 +920,7 @@ class SequentialTrainer:
             dt=self.engine.dt,
             device=self.device,
             temporal_alpha=self.engine.temporal_alpha,
+            is_inhibitory=self.graph.is_inhibitory,
         )
         
         # Deep copy current weights
@@ -934,7 +958,7 @@ class SequentialTrainer:
                 fast_mask = eval_engine.taus < 0.5
                 eval_engine.state[fast_mask] *= 0.1
 
-            eval_engine.settle(input_vec, input_mask=input_mask, max_steps=max_steps, tol=5e-3)
+            eval_engine.settle(input_vec, input_mask=input_mask, max_steps=max_steps, tol=1e-5)
 
             level0_acts = torch.tanh(eval_engine.state[self.level0_indices])
             features = torch.nn.functional.layer_norm(level0_acts, level0_acts.size())
@@ -966,7 +990,7 @@ class SequentialTrainer:
             last_byte = val
             input_vec = torch.zeros(self.num_nodes, device=self.device)
             input_vec[0:256] = self.eye[val] * 2.0
-            self.engine.settle(input_vec, max_steps=10)
+            self.engine.settle(input_vec, max_steps=100, tol=1e-5)
 
         for _ in range(length):
             level0_acts = torch.tanh(self.engine.state[self.level0_indices])
@@ -981,7 +1005,7 @@ class SequentialTrainer:
 
             input_vec = torch.zeros(self.num_nodes, device=self.device)
             input_vec[0:256] = self.eye[next_byte] * 2.0
-            self.engine.settle(input_vec, max_steps=10)
+            self.engine.settle(input_vec, max_steps=100, tol=1e-5)
 
         print(curr_text)
         print("--------------------------------------")
@@ -1009,7 +1033,7 @@ def main():
     # Phase 1: Holophrases
     trainer.train_phase("Holophrases", "ndcd/data/level1_holophrases.txt",
                         iterations=500, steps_per_iter=100, lr=0.05,
-                        settle_steps=30, input_gain=0.5)
+                        settle_steps=200, input_gain=0.5)
     trainer.generate(start_text="L")
 
     # --- Phase boundary: Holophrases → Slot-and-Frame ---
@@ -1019,7 +1043,7 @@ def main():
     # Phase 2: Slot-and-Frame
     trainer.train_phase("Slot-and-Frame", "ndcd/data/level2_slot_frame.txt",
                         iterations=500, steps_per_iter=100, lr=0.05,
-                        settle_steps=30, input_gain=0.5)
+                        settle_steps=200, input_gain=0.5)
     trainer.evaluate_retention("ndcd/data/level1_holophrases.txt")
     trainer.generate(start_text="W")
 
@@ -1030,7 +1054,7 @@ def main():
     # Phase 3: Complex Constructions
     trainer.train_phase("Complex Constructions", "ndcd/data/level3_complex.txt",
                         iterations=500, steps_per_iter=100, lr=0.05,
-                        settle_steps=50, input_gain=0.5)
+                        settle_steps=200, input_gain=0.5)
     trainer.evaluate_retention("ndcd/data/level1_holophrases.txt")
     trainer.evaluate_retention("ndcd/data/level2_slot_frame.txt")
     trainer.generate(start_text="I")
@@ -1042,7 +1066,7 @@ def main():
     # Phase 4: Contextual Continuity
     trainer.train_phase("Contextual Continuity", "ndcd/data/level4_contextual.txt",
                         iterations=500, steps_per_iter=100, lr=0.05,
-                        settle_steps=50, input_gain=0.5)
+                        settle_steps=200, input_gain=0.5)
     trainer.evaluate_retention("ndcd/data/level1_holophrases.txt")
     trainer.evaluate_retention("ndcd/data/level2_slot_frame.txt")
     trainer.evaluate_retention("ndcd/data/level3_complex.txt")

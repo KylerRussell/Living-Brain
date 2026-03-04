@@ -6,10 +6,11 @@ from typing import Optional, Tuple, List
 @torch.jit.script
 def get_soma(b: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
     # Apical amplifies basal if aligned, ignores if weak
-    # Using a bounded modulation: soma = basal * (1 + tanh(apical))
-    # This is a standard coincidence detection model for pyramidal cells.
+    # Burst coincidence detection: if both b and a are highly active and aligned
+    burst = torch.relu(b) * torch.relu(a)
+    # Using a bounded modulation: soma = basal * (1 + tanh(apical)) + burst
     # Ensure it remains within [-1.5, 1.5]
-    return (b * (1.0 + torch.tanh(a))).clamp(-1.5, 1.5)
+    return (b * (1.0 + torch.tanh(a)) + burst).clamp(-1.5, 1.5)
 
 @torch.jit.script
 def jit_solve_dynamics_imex(
@@ -182,7 +183,8 @@ class PredictiveCodingEngine:
                  module_ranges, module_levels, hier_pairs,
                  positions: Optional[np.ndarray] = None,
                  dt=0.5, device='cuda' if torch.cuda.is_available() else 'cpu',
-                 temporal_alpha=0.5):
+                 temporal_alpha=0.5,
+                 is_inhibitory: Optional[np.ndarray] = None):
         """
         Args:
             num_nodes: Total number of nodes.
@@ -364,6 +366,22 @@ class PredictiveCodingEngine:
         # Thalamic Gate tracking
         self.surprise_ema = 0.0
 
+        # Dale's law assignment
+        if is_inhibitory is not None:
+            self.is_inhibitory = torch.tensor(is_inhibitory, dtype=torch.bool, device=device)
+        else:
+            self.is_inhibitory = torch.zeros(num_nodes, dtype=torch.bool, device=device)
+
+        # Homeostatic Synaptic Scaling (HSS)
+        self.calcium_traces = torch.zeros(num_nodes, dtype=torch.float32, device=device)
+        self.calcium_target = 0.1
+        self.tau_calcium = 1000.0
+        self.hss_rho = 0.001
+
+        # Three-Factor Learning (Eligibility Traces)
+        self.eligibility_traces = torch.zeros_like(self.weight_values)
+        self.tau_eligibility = 2.0  # Short-term memory of local coincidence
+
     def _build_module_tensors(self):
         """Pre-build tensors for module start/end ranges for fast slicing."""
         self.mod_starts = torch.tensor(
@@ -454,6 +472,55 @@ class PredictiveCodingEngine:
         # Reset accumulator and baseline
         self.running_contribution.zero_()
         self.si_baseline_weights = self.effective_weights.clone()
+
+    def remodel_structure(self, prune_ratio=0.01):
+        """
+        Selective Structural Plasticity.
+        Prunes the `prune_ratio` lowest-utility synapses (based on omega) 
+        and reinitializes them. This mimics biological synaptogenesis.
+        Only applies to free edges (not I/O).
+        """
+        if prune_ratio <= 0.0:
+            return 0
+            
+        with torch.no_grad():
+            free_omega = self.omega[self.free_edge_mask]
+            n_prune = int(free_omega.size(0) * prune_ratio)
+            
+            if n_prune == 0:
+                return 0
+                
+            threshold = torch.kthvalue(free_omega, n_prune).values.item()
+            prune_mask_free = free_omega <= threshold
+            
+            prune_mask = torch.zeros_like(self.omega, dtype=torch.bool)
+            prune_mask[self.free_edge_mask] = prune_mask_free
+            
+            # Clear cascade and tracking stats for pruned edges
+            self.w_surface[prune_mask] = 0.0
+            self.w_mid[prune_mask] = 0.0
+            self.w_deep[prune_mask] = 0.0
+            self.eligibility_traces[prune_mask] = 0.0
+            self.omega[prune_mask] = 0.0
+            self.running_contribution[prune_mask] = 0.0
+            
+            n_reset = prune_mask.sum().item()
+            src_inh = self.is_inhibitory[self.indices[0, prune_mask]]
+            
+            avg_magnitude = self.weight_values[self.free_edge_mask].abs().mean().item()
+            new_weights = torch.rand(n_reset, device=self.device) * (avg_magnitude * 2.0)
+            new_weights = torch.where(src_inh, -new_weights, new_weights)
+            
+            self.weight_values[prune_mask] = new_weights
+            
+            # Force recompilation of tied motor weights just in case
+            self.w_surface[self.fb_motor_idx] = self.w_surface[self.fwd_motor_idx]
+            self.w_mid[self.fb_motor_idx] = self.w_mid[self.fwd_motor_idx]
+            self.w_deep[self.fb_motor_idx] = self.w_deep[self.fwd_motor_idx]
+            self.weight_values[self.fb_motor_idx] = self.weight_values[self.fwd_motor_idx]
+            self.eligibility_traces[self.fb_motor_idx] = self.eligibility_traces[self.fwd_motor_idx]
+            
+            return n_reset
 
     def settle(self, input_vector, max_steps=20, tol=5e-3,
                input_mask=None, damping=0.15, implicit_damping=2.0):
@@ -623,6 +690,12 @@ class PredictiveCodingEngine:
             
             # Use free phase as baseline for associative rules
             rho = rho_free
+            
+            # --- Update Calcium Traces for HSS ---
+            self.calcium_traces += (rho.abs() - self.calcium_traces) / self.tau_calcium
+            
+            # Calculate somatic bursts from current basal/apical compartments
+            bursts = torch.relu(self.state_basal) * torch.relu(self.state_apical)
 
             # --- Spatial weight update (top-down + bottom-up + lateral) ---
             idx_i = self.indices[0]
@@ -647,8 +720,9 @@ class PredictiveCodingEngine:
             bu_w_plastic = (self.w_surface[self.bottomup_edge_mask] + 
                             self.w_mid[self.bottomup_edge_mask] + 
                             self.w_deep[self.bottomup_edge_mask])
-            # Pure associative Oja rule: co-occurrence with self-normalization
-            grad[self.bottomup_edge_mask] = 0.1 * (bu_prev_rho_i * bu_rho_j - bu_w_plastic * bu_rho_j.pow(2))
+            bu_burst_j = bursts[idx_j[self.bottomup_edge_mask]]
+            # Pure associative Oja rule: co-occurrence with self-normalization, gated by apical bursts
+            grad[self.bottomup_edge_mask] = 0.1 * (1.0 + bu_burst_j) * (bu_prev_rho_i * bu_rho_j - bu_w_plastic * bu_rho_j.pow(2))
 
             # FIX 4: Zero out gradients for motor feedback edges so they don't learn independently
             grad[self.fb_motor_idx] = 0.0
@@ -759,8 +833,23 @@ class PredictiveCodingEngine:
                 level_gate = (edge_max_lvl <= active_level_max).float()
                 grad = grad * level_gate
 
-            # Apply update only to surface level
-            self.w_surface += meta_lr * grad
+            # --- Three-Factor Learning ---
+            # 1. Accumulate local Hebbian correlation into the eligibility trace
+            self.eligibility_traces = self.eligibility_traces * (1.0 - 1.0/self.tau_eligibility) + grad * (1.0/self.tau_eligibility)
+
+            # 2. Global Neuromodulatory Gating (M(t))
+            # meta_lr contains global_neuromodulation (DA * ACh) and Thalamic Saliency
+            self.w_surface += meta_lr * self.eligibility_traces
+
+            # --- Homeostatic Synaptic Scaling (HSS) ---
+            # dw = -rho_hss * w * (C - epsilon)
+            # Reverses sign for inhibitory synapses to increase inhibition when overly active
+            calcium_dev = self.calcium_traces[self.indices[1]] - self.calcium_target
+            hss_mod = -self.hss_rho * calcium_dev
+            src_inh = self.is_inhibitory[self.indices[0]]
+            hss_mod[src_inh] *= -1.0  
+            w_plastic = self.w_surface + self.w_mid + self.w_deep
+            self.w_surface += hss_mod * w_plastic
 
             # Apply RMS normalization to the learned deltas (cascade) universally
             # across all edges. Grouping by destination node ensures no neuron
@@ -829,6 +918,18 @@ class PredictiveCodingEngine:
 
             correction = src_means[inverse] * 0.01
             self.w_surface[td_idx] -= correction
+
+            # --- Dale's Law: Enforce E/I constraints ---
+            # Excitatory neurons can only have positive outgoing weights.
+            # Inhibitory neurons can only have negative outgoing weights.
+            src_inh = self.is_inhibitory[self.indices[0]]
+            cascade_all = self.w_surface + self.w_mid + self.w_deep + self.weight_values
+            
+            # Constraint: total effective_weight >= 0 for Exc, <= 0 for Inh
+            cascade_all_clamped = torch.where(src_inh, cascade_all.clamp(max=0.0), cascade_all.clamp(min=0.0))
+            
+            # Reconstruct w_surface from the clamped effective weight
+            self.w_surface = cascade_all_clamped - self.w_mid - self.w_deep - self.weight_values
 
             # --- Bias update from prediction errors + IP ---
             bias_grad = (rho_nudge - rho_free) + self.temporal_alpha * self.temporal_errors + ip_gradient
