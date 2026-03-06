@@ -90,29 +90,24 @@ class DynamicGraph:
                     self.neocortical_modules.add(module_id)
                     
                 # Distribute extra nodes
-                n_in_module = nodes_per_module + (1 if module_id < extra_nodes else 0)
-                start = current_node
-                end = current_node + n_in_module
-                node_indices = np.arange(start, end)
-
                 if module_id == hippo_module_id:
                     # Item 4: Expansion-Sparsity Layer (5:1 Expansion for DG)
-                    # We allocate 5x more nodes to the DG layer within the hippocampal module.
-                    # Normal module size is ~N nodes. Hippo module will be larger or scaled.
-                    # For simplicity, we keep module sizes relatively consistent but 
-                    # shift the internal lamination to favor DG expansion.
-                    n_l4 = max(1, int(n_in_module * 0.85)) # DG expanded (85% of hippo nodes)
-                    n_l23 = max(1, int(n_in_module * 0.10)) # CA3
-                    n_l56 = max(1, n_in_module - n_l4 - n_l23) # CA1
+                    # Entorhinal (Input) is 256 nodes. DG should be 1280 nodes (5:1).
+                    n_l4 = 1280 
+                    n_l23 = 256  # CA3
+                    n_l56 = 256  # CA1
+                    n_in_module = n_l4 + n_l23 + n_l56
                 else:
                     # Uniform Neocortical Lamination
+                    n_in_module = nodes_per_module + (1 if module_id < extra_nodes else 0)
                     n_l4 = max(1, int(n_in_module * 0.2))
                     n_l23 = max(1, int(n_in_module * 0.4))
                     n_l56 = n_in_module - n_l4 - n_l23
 
-                l4_start = start
+                l4_start = current_node
                 l23_start = l4_start + n_l4
                 l56_start = l23_start + n_l23
+                end = l56_start + n_l56
 
                 l4_indices = np.arange(l4_start, l4_start + n_l4)
                 l23_indices = np.arange(l23_start, l23_start + n_l23)
@@ -125,10 +120,10 @@ class DynamicGraph:
                 self.modules.append({
                     'id': module_id,
                     'level': level,
-                    'start': start,
+                    'start': l4_start,
                     'end': end,
-                    'indices': node_indices,
-                    'size': n_in_module,
+                    'indices': np.arange(l4_start, end),
+                    'size': end - l4_start,
                     'l4_indices': l4_indices,
                     'l23_indices': l23_indices,
                     'l56_indices': l56_indices
@@ -238,10 +233,20 @@ class DynamicGraph:
                     n_edges = int(len(l23) * target_conns)
                     src = np.random.choice(l23, n_edges, replace=True)
                     dst = np.random.choice(l56, n_edges, replace=True)
+                # 5. CA3 (L23) -> DG (L4) Backprojections (Inhibitory for pattern separation)
+                if len(l23) > 0 and len(l4) > 0:
+                    target_conns = max(2, int(len(l4) * 0.05))
+                    n_edges = int(len(l23) * target_conns)
+                    src = np.random.choice(l23, n_edges, replace=True)
+                    dst = np.random.choice(l4, n_edges, replace=True)
+                    # These will be marked as inhibitory later based on is_inhibitory,
+                    # but for this specific microcircuit, we force them to be inhibitory
+                    # by adding to the lists and then ensuring signs are correct later.
                     edge_rows.extend(src.tolist())
                     edge_cols.extend(dst.tolist())
-                    
-            else:
+                    # Mark sources as inhibitory if not already 
+                    # (Better approach: just ensure the weights will be negative)
+                    # For now, we'll rely on the src_is_inh check in DynamicGraph.
                 # Standard Neocortical Microcircuitry
                 # L4 -> L2/3
                 if len(l4) > 0 and len(l23) > 0:
@@ -354,18 +359,25 @@ class DynamicGraph:
                         edge_rows.extend(src.tolist())
                         edge_cols.extend(dst.tolist())
 
-        # 4. Input projections: sensory nodes -> level-0 modules (specifically L4)
-        level0_mods = self.level_modules[0]
-        for mod_id in level0_mods:
+        # 4. Input projections: sensory nodes -> level-0 modules AND Hippo DG
+        # Item 4: Input (EC) projects to expansion layer (DG) with 1:5 ratio (1280 nodes)
+        target_input_mods = set(self.level_modules[0])
+        if hippo_module_id != -1:
+            target_input_mods.add(hippo_module_id)
+            
+        for mod_id in target_input_mods:
             mod = self.modules[mod_id]
             idx = mod['l4_indices']  # Project into L4
             if len(idx) == 0: continue
-            n_proj = max(1, len(idx) // 2)
+            
+            # Sparse Random weights for expansion (Item 4)
+            # n_proj set to ~5% density for pattern separation
+            n_proj = max(1, int(len(idx) * 0.05)) 
             for s in range(n_sensory):
                 targets = np.random.choice(idx, n_proj, replace=False)
                 edge_rows.extend([s] * n_proj)
                 edge_cols.extend(targets.tolist())
-                # Allow feedback from L4 to input nodes to stabilize inputs
+                # Reciprocal feedback for stability
                 edge_rows.extend(targets.tolist())
                 edge_cols.extend([s] * n_proj)
 
@@ -639,11 +651,12 @@ class DynamicGraph:
         
         for mod in self.modules:
             level = mod['level']
-            # Item 3: Hierarchical Gradient of Intrinsic Neural Timescales (INTs)
-            # τrec increases linearly with layer depth: level 0 (fast) -> level 3 (slow)
-            # base_tau = 20.0 + 100.0 * level 
-            # We add variance to avoid perfect homogeneity.
-            base_tau = 20.0 + 150.0 * level # Linear gradient: 20, 170, 320, 470
+            # Item 2: Hierarchical Gradient of Intrinsic Neural Timescales (INTs)
+            # τm scales from transient in level 0 to prolonged in level 3.
+            # Sensory Layers (L0): 20-35ms. Associative Layers (L3): 150-200ms.
+            tau_min = 25.0
+            tau_max = 175.0
+            base_tau = tau_min + (tau_max - tau_min) * (level / max(1, self.num_levels - 1))
             self.taus[mod['start']:mod['end']] = np.random.normal(base_tau, base_tau * 0.1, mod['size']).astype(np.float32)
 
         # Enforce biological bounds [20ms, 2000ms]
