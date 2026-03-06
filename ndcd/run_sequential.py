@@ -83,6 +83,10 @@ class SequentialTrainer:
             device=device,
             temporal_alpha=0.5,
             is_inhibitory=self.graph.is_inhibitory,
+            is_pv=self.graph.is_pv,
+            is_sst=self.graph.is_sst,
+            is_vip=self.graph.is_vip,
+            dg_indices=self.graph.dg_indices,
         )
 
         # 3. Define I/O Masks
@@ -214,6 +218,13 @@ class SequentialTrainer:
             # Reset synaptic intelligence — omega double-counts with cascade
             self.engine.omega.zero_()
             self.engine.running_contribution.zero_()
+            
+            # Reset stabilization states
+            self.engine.threshold_adaptation.fill_(1.0)
+            self.engine.inh_depression_soma.fill_(1.0)
+            self.engine.inh_depression_dend.fill_(1.0)
+            self.engine.apical_bp1.zero_()
+            self.engine.apical_bp2.zero_()
 
             # Readout is preserved intact — dedicated SGD realignment
             # (realign_readout) is called after phase_boundary_reset to
@@ -742,11 +753,15 @@ class SequentialTrainer:
         """
         Offline consolidation: replay learned patterns by settling
         from noise without external input, then strengthen attractors.
-
-        The energy-based architecture is inherently generative — disconnecting
-        input and settling into energy minima naturally replays learned patterns.
+        Also performs global synaptic renormalization (SHY cycle).
         """
-        print("\n--- Sleep Phase: Consolidation ---")
+        print("\n--- Sleep Phase: Consolidation & SHY Renormalization ---")
+        
+        # 1. Global Synaptic Renormalization (SHY Cycle)
+        # Downscales net strength while preserving high-information backbone
+        self.engine.sleep_phase()
+
+        # 2. Pattern Replay and Attractor Reinforcement
 
         # Save current state
         awake_state = self.engine.state.clone()
@@ -926,6 +941,9 @@ class SequentialTrainer:
             device=self.device,
             temporal_alpha=self.engine.temporal_alpha,
             is_inhibitory=self.graph.is_inhibitory,
+            is_pv=self.graph.is_pv,
+            is_sst=self.graph.is_sst,
+            is_vip=self.graph.is_vip,
         )
         
         # Deep copy current weights

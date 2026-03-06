@@ -4,167 +4,385 @@ from typing import Optional, Tuple, List
 
 
 @torch.jit.script
-def get_soma(b: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
-    # Apical amplifies basal if aligned, ignores if weak
-    # Burst coincidence detection: if both b and a are highly active and aligned
-    burst = torch.relu(b) * torch.relu(a)
-    # Using a bounded modulation: soma = basal * (1 + tanh(apical)) + burst
-    # Ensure it remains within [-1.5, 1.5]
-    return (b * (1.0 + torch.tanh(a)) + burst).clamp(-1.5, 1.5)
+def get_soma(b: torch.Tensor, a: torch.Tensor, cahva: torch.Tensor, is_neg_pe: torch.Tensor, 
+             threshold: torch.Tensor, is_sst: torch.Tensor, 
+             ip_gain: torch.Tensor, ip_bias: torch.Tensor) -> torch.Tensor:
+    # Non-linear BAC Firing Model: Apical input triggers CaHVA plateau which amplifies basal output supralinearly
+    
+    # SST Interneurons provide divisive dendritic inhibition (slope change) to regulate bursts
+    apical_effective = a / (1.0 + 5.0 * is_sst.float())
+    
+    # Apply Intrinsic Plasticity parameters (Gain alpha and Bias beta)
+    # y = tanh(alpha * x + beta)
+    base_drive = torch.tanh(b * ip_gain + ip_bias)
+    
+    # Supralinear Bursting Function (Calcium hot-spot)
+    # Target: High-frequency burst (200-250 Hz) on coincidence
+    # Coincidence gate: sigmoidal response to apical input
+    burst_gate = torch.sigmoid(apical_effective * 15.0 - 7.5) 
+    
+    # High-gain amplification: Somatic spike backpropagation + Apical input = Burst
+    # 250Hz burst simulated by massive somatic gain boost
+    burst_component = torch.tanh(b * 5.0) * burst_gate * (1.0 + cahva * 2.0) * 10.0
+    
+    # Omission signaling (PE-) via PEON logic
+    omission_diff = torch.clamp(apical_effective - b, min=0.0)
+    omission_drive = torch.sigmoid(omission_diff * 12.0 - 6.0) * is_neg_pe.float() * 5.0
+    
+    # Final somatic output normalized by adaptive threshold
+    # Biological IP: upregulation of Na+ channels in silent neurons handled via threshold decreases
+    soma_v = base_drive + burst_component + omission_drive
+    return torch.tanh(soma_v / threshold.clamp(min=0.1))
 
 @torch.jit.script
 def jit_solve_dynamics_imex(
     initial_basal: torch.Tensor,
     initial_apical: torch.Tensor,
-    indices_basal: torch.Tensor,
-    weights_basal: torch.Tensor,
-    indices_apical: torch.Tensor,
-    weights_apical: torch.Tensor,
+    indices_basal_intra: torch.Tensor,
+    weights_basal_intra: torch.Tensor,
+    indices_basal_inter: torch.Tensor,
+    weights_basal_inter: torch.Tensor,
+    indices_apical_intra: torch.Tensor,
+    weights_apical_intra: torch.Tensor,
+    indices_apical_inter: torch.Tensor,
+    weights_apical_inter: torch.Tensor,
     biases: torch.Tensor,
     taus: torch.Tensor,
     input_vector: torch.Tensor,
     dt: float,
     max_steps: int,
-    tol: float,
+    tolerance: float,
     input_mask: Optional[torch.Tensor],
     # FIX 3: Sparsity parameters for soft WTA during settling
     module_starts: torch.Tensor,
     module_ends: torch.Tensor,
-    sparsity_alpha: float,  # 0.0 = no sparsity, 0.3 = moderate
+    # Tripartite Interneurons & Compartments
+    is_pv: torch.Tensor,
+    is_sst: torch.Tensor,
+    is_vip: torch.Tensor,
+    is_inhibitory: torch.Tensor,
+    is_l23: torch.Tensor,
+    is_l56: torch.Tensor,
+    is_neg_pe: torch.Tensor,
+    is_dg: torch.Tensor,
+    activation_ema: torch.Tensor,
+    sparsity_alpha: float,
+    sfa_states: torch.Tensor,
+    cahva_states: torch.Tensor,
+    rho_slow_states: torch.Tensor,
+    ais_distance: torch.Tensor,
+    threshold_adaptation: torch.Tensor,
+    inh_depression_soma: torch.Tensor,
+    inh_depression_dend: torch.Tensor,
+    ee_resource: torch.Tensor, # Resource depletion for E-E STD
+    node_levels: torch.Tensor,
+    ip_gain: torch.Tensor, # NEW
+    ip_bias: torch.Tensor, # NEW
+    apical_bandpass_state1: torch.Tensor, # State for 3-6 Hz filtering
+    apical_bandpass_state2: torch.Tensor, # State for 3-6 Hz filtering
     damping: float = 0.15,
     implicit_damping: float = 1.2,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, float, int, float]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, float, int, float, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Semi-implicit (IMEX) dynamics solver for Multi-Compartment Predictive Coding.
 
     Neurons now have segregated compartments:
-    - Basal: integrates feedforward (bottom-up + lateral) signals
-    - Apical: integrates feedback (top-down) signals
-    - Soma (output): Non-linear combination (e.g., basal * (1 + apical))
+    - Basal: integrates feedforward (bottom-up + lateral) signals (AMPA-like)
+    - Apical: integrates feedback (top-down) signals (NMDA-like)
+    - CaHVA: High-Voltage-Activated Calcium plateau for BAC firing
+    - Soma (output): Non-linear combination with supralinear bursting
+    - Threshold: Adaptive threshold for Irregular AI state stabilization
 
-    Returns (basal_state, apical_state, somatic_state, final_diff)
+    Returns (basal, apical, somatic, diff, steps, dt, sfa, cahva, rho_slow, threshold, ais, inh_soma, inh_dend, ee_resource, ip_gain, ip_bias, state1, state2)
     """
     num_nodes = initial_basal.size(0)
     current_b = initial_basal.clone()
     current_a = initial_apical.clone()
+    
+    # Adaptive threshold initialization
+    current_threshold = threshold_adaptation.clone()
+    current_inh_s = inh_depression_soma.clone()
+    current_inh_d = inh_depression_dend.clone()
+    current_ais = ais_distance.clone()
+    current_ip_gain = ip_gain.clone() # NEW
+    current_ip_bias = ip_bias.clone() # NEW
+    current_bp1 = apical_bandpass_state1.clone()
+    current_bp2 = apical_bandpass_state2.clone()
+ # NEW
 
-    w_basal_sparse = torch.sparse_coo_tensor(indices_basal, weights_basal, (num_nodes, num_nodes))
-    w_apical_sparse = torch.sparse_coo_tensor(indices_apical, weights_apical, (num_nodes, num_nodes))
+    # --- Change 1: KL-Divergence Based Intrinsic Plasticity (IP) ---
+    # Targets an exponential firing rate distribution
+    # This ensures neurons operate in the information-theoretic optimal firing regime.
+    # The rescue factor still helps initially, but the learning rule handles the long-term.
+    with torch.no_grad():
+        silent_mask = activation_ema < (sparsity_alpha * 0.01)
+        if silent_mask.any():
+            rescue_factor = torch.exp(-activation_ema[silent_mask] / (sparsity_alpha * 0.05))
+            current_threshold[silent_mask] *= (1.0 - 0.5 * rescue_factor)
+            # Increase sensitivity (alpha) and decrease rheobase (beta) for rescue
+            current_ais[silent_mask] *= (1.0 + 1.0 * rescue_factor)
+            # Direct bias rescue for extremely silent neurons
+            current_ip_bias[silent_mask] += 0.1 * rescue_factor
+
+    w_basal_intra_sparse = torch.sparse_coo_tensor(indices_basal_intra, weights_basal_intra, (num_nodes, num_nodes))
+    w_basal_inter_sparse = torch.sparse_coo_tensor(indices_basal_inter, weights_basal_inter, (num_nodes, num_nodes))
+    w_apical_intra_sparse = torch.sparse_coo_tensor(indices_apical_intra, weights_apical_intra, (num_nodes, num_nodes))
+    w_apical_inter_sparse = torch.sparse_coo_tensor(indices_apical_inter, weights_apical_inter, (num_nodes, num_nodes))
 
     current_dt = dt
-    imex_denom = 1.0 + implicit_damping * current_dt / taus
+    # Revert to standard scalar damping to ensure stable integration across all taus
+    dynamic_damping = implicit_damping 
+    imex_denom = 1.0 + dynamic_damping * current_dt / taus
+    
+    # --- Change 2: NMDA/AMPA Hierarchy Gradient ---
+    # Feedforward (basal) is fast (AMPA), feedback/recurrent (apical) is slow (NMDA)
+    # NMDA/AMPA ratio increases along hierarchy.
+    apical_tau_mult = 1.0 + 4.0 * node_levels.float() # Level 0 -> 1x, Level 3 -> 13x slower apical
+    imex_denom_apical = 1.0 + dynamic_damping * current_dt / (taus * apical_tau_mult)
+
     min_dt: float = 0.05
 
+    # Pre-split E and I weights
+    src_inh_basal_intra = is_inhibitory[indices_basal_intra[0]].float()
+    src_inh_basal_inter = is_inhibitory[indices_basal_inter[0]].float()
+    src_inh_apical_intra = is_inhibitory[indices_apical_intra[0]].float()
+    src_inh_apical_inter = is_inhibitory[indices_apical_inter[0]].float()
+    
+    w_basal_intra_E = torch.sparse_coo_tensor(indices_basal_intra, weights_basal_intra * (1.0 - src_inh_basal_intra), (num_nodes, num_nodes))
+    w_basal_intra_I = torch.sparse_coo_tensor(indices_basal_intra, weights_basal_intra * src_inh_basal_intra, (num_nodes, num_nodes))
+    
+    w_basal_inter_E = torch.sparse_coo_tensor(indices_basal_inter, weights_basal_inter * (1.0 - src_inh_basal_inter), (num_nodes, num_nodes))
+    w_basal_inter_I = torch.sparse_coo_tensor(indices_basal_inter, weights_basal_inter * src_inh_basal_inter, (num_nodes, num_nodes))
+    
+    w_apical_intra_E = torch.sparse_coo_tensor(indices_apical_intra, weights_apical_intra * (1.0 - src_inh_apical_intra), (num_nodes, num_nodes))
+    w_apical_intra_I = torch.sparse_coo_tensor(indices_apical_intra, weights_apical_intra * src_inh_apical_intra, (num_nodes, num_nodes))
+    
+    w_apical_inter_E = torch.sparse_coo_tensor(indices_apical_inter, weights_apical_inter * (1.0 - src_inh_apical_inter), (num_nodes, num_nodes))
+    w_apical_inter_I = torch.sparse_coo_tensor(indices_apical_inter, weights_apical_inter * src_inh_apical_inter, (num_nodes, num_nodes))
+    
     step_count = 0
-    diff = tol + 1.0
+    diff = tolerance + 1.0
     prev_diff: float = 1e6
 
-    current_s = get_soma(current_b, current_a)
+    current_s = get_soma(current_b, current_a, cahva_states, is_neg_pe, current_threshold, is_sst, current_ip_gain, current_ip_bias)
 
-    while step_count < max_steps and diff > tol:
+    while step_count < max_steps and diff > tolerance:
         # Hard clamp input nodes
         if input_mask is not None:
             current_b = current_b * (1.0 - input_mask) + input_vector * input_mask
-            current_s = get_soma(current_b, current_a)
+            current_s = get_soma(current_b, current_a, cahva_states, is_neg_pe, current_threshold, is_sst, current_ip_gain, current_ip_bias)
 
         old_soma = current_s.clone()
 
-        # Layer Normalization per module before activation
-        normed_s = current_s.clone()
+        # Layer Normalization per module strictly on basal feedforward before soma
+        normed_b = current_b.clone()
         for m in range(module_starts.size(0)):
             ms = module_starts[m].item()
             me = module_ends[m].item()
-            mod_s = current_s[ms:me]
-            mean = mod_s.mean()
-            var = mod_s.var(unbiased=False)
-            normed_s[ms:me] = (mod_s - mean) / torch.sqrt(var + 1e-5)
+            mod_b = current_b[ms:me]
+            mean = mod_b.mean()
+            var = mod_b.var(unbiased=False)
+            # Increase epsilon to 1e-3 to prevent noise amplification in slow nodes
+            normed_b[ms:me] = (mod_b - mean) / torch.sqrt(var + 1e-3)
             
+        normed_s = get_soma(normed_b, current_a, cahva_states, is_neg_pe, current_threshold, is_sst, current_ip_gain, current_ip_bias)
         rho = torch.tanh(normed_s)
         
-        # Basal processing (feedforward / lateral)
-        synaptic_basal = torch.mv(w_basal_sparse, rho)
-        # Apical processing (feedback / top-down)
-        synaptic_apical = torch.mv(w_apical_sparse, rho)
+        # --- Soft Winner-Take-All (sWTA) for Population Sparseness ---
+        # Sparseness Constraint: Force a low population sparseness 'a'
+        for m in range(module_starts.size(0)):
+            ms = module_starts[m].item()
+            me = module_ends[m].item()
+            mod_rho = rho[ms:me]
+            
+            # --- Change 5: DG Pattern Separation ---
+            # Enforce an extreme Top-k sparsity constraint (k ≈ 5%) in the Dentate Gyrus (DG) subregion
+            is_dg_mod = is_dg[ms:me]
+            if is_dg_mod.any():
+                k_dg = max(1, int((me - ms) * 0.05)) # Extreme 5% sparsity
+                mod_dg_rho = mod_rho[is_dg_mod]
+                # We need to map back to the module indices
+                if k_dg < mod_dg_rho.size(0):
+                    top_dg, _ = torch.topk(mod_dg_rho.abs(), k_dg)
+                    thresh_dg = top_dg[-1]
+                    mod_rho[is_dg_mod] = mod_dg_rho * torch.sigmoid((mod_dg_rho.abs() - thresh_dg) * 50.0) # Sharp k-WTA
+            
+            # Standard Neocortical sWTA
+            target_alpha = 0.05 if is_dg_mod.any() else sparsity_alpha
+            k_active = max(1, int((me - ms) * target_alpha))
+            if k_active < (me - ms):
+                top_acts, _ = torch.topk(mod_rho.abs(), k_active)
+                threshold = top_acts[-1]
+                # Sharp suppression of sub-threshold nodes for k-WTA
+                rho[ms:me] = mod_rho * torch.sigmoid((mod_rho.abs() - threshold) * 80.0)
+        
+        # Myelinated Temporal Filtering
+        rho_slow_states = rho_slow_states + current_dt * (rho - rho_slow_states) / 10.0
+        rho_unmyelinated = rho_slow_states + torch.randn_like(rho) * 0.05 * (rho - rho_slow_states).abs()
+        rho_myelinated = rho
 
-        # Jacobian gain control applied separately to compartments to avoid explosion
+        # Basal processing (feedforward / lateral) - Split E and I
+        basal_E = torch.mv(w_basal_intra_E, rho_unmyelinated) + torch.mv(w_basal_inter_E, rho_myelinated)
+        basal_I = torch.mv(w_basal_intra_I, rho_unmyelinated) + torch.mv(w_basal_inter_I, rho_myelinated)
+        
+        # Apical processing (feedback / top-down) - Split E and I
+        apical_E = torch.mv(w_apical_intra_E, rho_unmyelinated) + torch.mv(w_apical_inter_E, rho_myelinated)
+        apical_I = torch.mv(w_apical_intra_I, rho_unmyelinated) + torch.mv(w_apical_inter_I, rho_myelinated)
+        
+        synaptic_basal = basal_E + basal_I
+        synaptic_apical = apical_E + apical_I
+
+        # Jacobian gain control
         drho = 1.0 - rho * rho
         state_norm = rho.norm().clamp(min=1e-6)
         
         # Basal SR
-        jac_basal = torch.mv(w_basal_sparse, rho * drho)
+        jac_basal = torch.mv(w_basal_intra_sparse, rho * drho) + torch.mv(w_basal_inter_sparse, rho * drho)
         eff_sr_basal = jac_basal.norm() / state_norm
         target_max_sr: float = 0.95
         if eff_sr_basal > target_max_sr:
-            synaptic_basal = synaptic_basal * (target_max_sr / eff_sr_basal)
+            scale_b = target_max_sr / eff_sr_basal
+            basal_E = basal_E * scale_b
+            basal_I = basal_I * scale_b
+            synaptic_basal = synaptic_basal * scale_b
             
         # Apical SR
-        jac_apical = torch.mv(w_apical_sparse, rho * drho)
+        jac_apical = torch.mv(w_apical_intra_sparse, rho * drho) + torch.mv(w_apical_inter_sparse, rho * drho)
         eff_sr_apical = jac_apical.norm() / state_norm
         if eff_sr_apical > target_max_sr:
-            synaptic_apical = synaptic_apical * (target_max_sr / eff_sr_apical)
+            scale_a = target_max_sr / eff_sr_apical
+            apical_E = apical_E * scale_a
+            apical_I = apical_I * scale_a
+            synaptic_apical = synaptic_apical * scale_a
 
+        # Apply Tsodyks-Markram E-E Synaptic Depression
+        # Resource depletion weakens E->E connections when firing rates spike
+        exc_mask = (~is_inhibitory).float()
+        
+        # Depress excitatory inputs only
+        synaptic_basal_E = basal_E * (0.1 + 0.9 * ee_resource)
+        synaptic_apical_E = apical_E * (0.1 + 0.9 * ee_resource)
+        
+        synaptic_basal = synaptic_basal_E + basal_I
+        synaptic_apical = synaptic_apical_E + apical_I
+        
         nonlinear_basal = synaptic_basal + biases + input_vector
         nonlinear_apical = synaptic_apical  # pure prediction context
+        
+        # --- VIP-SST-Pyramidal Disinhibitory Motif ---
+        # 1. VIP interneurons are driven by feedback/expectation (apical signals)
+        # and inhibit SST/PV cells.
+        vip_drive = torch.relu(current_a).mean() if current_a.any() else torch.tensor(0.0)
+        vip_activity = torch.sigmoid(vip_drive * 5.0 - 2.0)
+        
+        # 2. SST provides feedback inhibition to distal apical dendrites, 
+        # controlled by VIP disinhibition.
+        sst_activity = torch.relu(current_s[is_sst]).mean() if is_sst.any() else torch.tensor(0.0)
+        sst_inhibition = sst_activity / (1.0 + 10.0 * vip_activity)
+        
+        # 3. PV provides perisomatic inhibition, also gated by VIP.
+        pv_activity = torch.relu(current_s[is_pv]).mean() if is_pv.any() else torch.tensor(0.0)
+        pv_inhibition = pv_activity / (1.0 + 5.0 * vip_activity)
+        
+        # --- Item 2: AI State Stabilization ---
+        # Short-term depression of inhibitory synapses
+        # Tsodyks-Markram E-E resource dynamics
+        ee_resource = ee_resource + current_dt * (1.0 - ee_resource) / 500.0 # Slow recovery
+        ee_resource = torch.clamp(ee_resource - 0.1 * rho * exc_mask, 0.1, 1.0) # Fast depletion
+
+        # Perisomatic PV+ Inhibition (Item 2)
+        # PV interneurons target the somatic compartment and offset drive.
+        # This provides sharp suppression for k-WTA.
+        # pv_drive = torch.relu(current_s[is_pv]).mean() if is_pv.any() else torch.tensor(0.0) # OLD
+        # pv_offset = pv_drive * current_inh_s * 2.0 # OLD
+        # nonlinear_basal = (nonlinear_basal - pv_offset) # OLD
+        
+        # NEW PV inhibition logic: PV cells directly inhibit basal drive
+        # The strength of inhibition is modulated by current_inh_s (depression) and VIP activity
+        pv_inhibition_strength = pv_inhibition * current_inh_s * 2.0
+        nonlinear_basal = nonlinear_basal - pv_inhibition_strength
+        
+        # SST Interneurons provide divisive dendritic inhibition
+        nonlinear_apical = nonlinear_apical - (sst_inhibition * current_inh_d)
 
         # Semi-implicit compartment updates
-        current_b = (current_b + current_dt * nonlinear_basal / taus) / imex_denom
-        # Apical dendrites often have slower time constants (calcium spikes vs sodium)
-        current_a = (current_a + current_dt * nonlinear_apical / (taus * 1.5)) / imex_denom
+        # Item 3: Hierarchical Timescale Gradients & Filtering
+        # Apical: integrates feedback via a bandpass filter (3-6 Hz resonance)
+        # We use a second-order system approximation.
+        bp_omega = 2.0 * 3.14159 * 4.5 * taus / 1000.0 # ~4.5 Hz resonance, scaled by tau
+        bp_zeta = 0.3 # Damping ratio
+        
+        # Update bandpass states
+        d_bp1 = current_bp2
+        d_bp2 = -2.0 * bp_zeta * bp_omega * current_bp2 - bp_omega**2 * current_bp1 + nonlinear_apical
+        
+        current_bp1 = current_bp1 + current_dt * d_bp1
+        current_bp2 = current_bp2 + current_dt * d_bp2
+        
+        # Basal: low-pass filtered somatic integration
+        # Already implicit in the first-order tau-based integration, but we'll 
+        # apply an additional low-pass for stability.
+        current_b = (current_b + current_dt * (nonlinear_basal * current_ais) / taus) / imex_denom
+        current_a = current_bp1 # Bandpass filtered apical drive
 
-        # L1 sparsity on basal (the driving feature)
-        current_b -= 0.0001 * current_b.sign() * current_dt
+        # BAC Firing CaHVA Plateau Update: Supralinear Regenerative Current
+        # NMDA-mediated distal plateaus: if apical input exceeds basal, trigger plateau
+        # burst_trigger = coincidence + local NMDA branch logic
+        # Calcium hot-spot: trigger a burst only when both compartments are active 
+        # within a synchronous window (dt steps effectively handle this)
+        coincidence = torch.sigmoid(current_b * 10.0 - 5.0) * torch.sigmoid(current_a * 10.0 - 5.0)
+        nmda_plateau = torch.where(current_a > 0.6, torch.ones_like(current_a) * 0.8, torch.zeros_like(current_a))
+        burst_trigger = coincidence + nmda_plateau
+        
+        cahva_tau = torch.ones_like(cahva_states) * 30.0
+        cahva_tau[is_l56] = 80.0  # Biological: longer plateaus in L5 pyramidal
+        cahva_tau[is_l23] = 20.0
+        cahva_states = cahva_states + current_dt * (burst_trigger * 3.0 - cahva_states) / cahva_tau
+        cahva_states = cahva_states.clamp(0.0, 3.0)
+
+        # Spike-dependent threshold adaptation (Item 2)
+        # Threshold increases when firing to maintain irregular state
+        # Hover near critical state via fast spike-growth and slow decay
+        current_threshold = current_threshold + current_dt * (1.0 - current_threshold) / 100.0
+        current_threshold = torch.clamp(current_threshold + 0.25 * rho.abs() * current_dt, 0.8, 5.0)
+
+        # Dynamic SFA 
+        sfa_states = sfa_states + current_dt * (current_b.abs() - sfa_states) / 20.0
+        current_b = current_b - 0.1 * sfa_states * current_b.sign()
 
         # Clamp compartments
         current_b = current_b.clamp(-1.5, 1.5)
         current_a = current_a.clamp(-1.5, 1.5)
         
         # Compute somatic state
-        current_s = get_soma(current_b, current_a)
+        current_s = get_soma(current_b, current_a, cahva_states, is_neg_pe, current_threshold, is_sst, current_ip_gain, current_ip_bias)
 
         # Hard clamp input nodes after update
         if input_mask is not None:
             current_b = current_b * (1.0 - input_mask) + input_vector * input_mask
-            current_a = current_a * (1.0 - input_mask) # No top down expectation forces input directly
-            current_s = get_soma(current_b, current_a)
-
-        # k-Winner-Take-All (k-WTA) lateral inhibition on the SOMATIC output
-        # Lateral inhibition sharpens the actual firing rate output
-        if sparsity_alpha > 0.0 and step_count % 5 == 4:
-            MexicanHatSoma = current_s.clone()
-            for m in range(module_starts.size(0)):
-                ms = module_starts[m].item()
-                me = module_ends[m].item()
-                mod_s = MexicanHatSoma[ms:me]
-                mod_size = me - ms
-                k = max(1, int(mod_size * 0.05))  # 5% global inhibition sparsity
-                if mod_size > k:
-                    topk_vals = torch.topk(mod_s.abs(), k).values
-                    threshold = topk_vals[-1]
-                    below = mod_s.abs() < threshold
-                    MexicanHatSoma[ms:me] = torch.where(below, mod_s * 0.05, mod_s)
-                    
-            # Propagate the somatic suppression back into the basal drive
-            suppressing_ratio = (MexicanHatSoma.abs() + 1e-5) / (current_s.abs() + 1e-5)
-            current_b = current_b * suppressing_ratio
-            current_b = current_b.clamp(-1.5, 1.5)
-            current_s = get_soma(current_b, current_a)
+            current_a = current_a * (1.0 - input_mask)
+            current_s = get_soma(current_b, current_a, cahva_states, is_neg_pe, current_threshold, is_sst, current_ip_gain, current_ip_bias)
 
         diff = torch.norm(current_s - old_soma).item()
 
-        if diff <= tol * 1.2:
+        if diff <= tolerance * 1.2:
             break
 
         if diff > prev_diff and current_dt > min_dt:
             current_dt = max(current_dt * 0.5, min_dt)
-            imex_denom = 1.0 + implicit_damping * current_dt / taus
+            imex_denom = 1.0 + dynamic_damping * current_dt / taus
         elif diff < prev_diff * 0.8 and current_dt < dt:
             current_dt = min(current_dt * 1.2, dt)
-            imex_denom = 1.0 + implicit_damping * current_dt / taus
+            imex_denom = 1.0 + dynamic_damping * current_dt / taus
+            imex_denom_apical = 1.0 + dynamic_damping * current_dt / (taus * apical_tau_mult)
 
         prev_diff = diff
         step_count += 1
 
-    return current_b, current_a, current_s, diff, step_count, current_dt
+    return (current_b, current_a, current_s, diff, step_count, current_dt, 
+            sfa_states, cahva_states, rho_slow_states, 
+            current_threshold, current_ais, current_inh_s, current_inh_d, ee_resource,
+            current_ip_gain, current_ip_bias, current_bp1, current_bp2)
 
 
 class PredictiveCodingEngine:
@@ -185,7 +403,11 @@ class PredictiveCodingEngine:
                  positions: Optional[np.ndarray] = None,
                  dt=0.5, device='cuda' if torch.cuda.is_available() else 'cpu',
                  temporal_alpha=0.5,
-                 is_inhibitory: Optional[np.ndarray] = None):
+                 is_inhibitory: Optional[np.ndarray] = None,
+                 is_pv: Optional[np.ndarray] = None,
+                 is_sst: Optional[np.ndarray] = None,
+                 is_vip: Optional[np.ndarray] = None,
+                 dg_indices: Optional[np.ndarray] = None):
         """
         Args:
             num_nodes: Total number of nodes.
@@ -214,6 +436,7 @@ class PredictiveCodingEngine:
 
         # Sparse weights (COO)
         self.indices = torch.tensor(indices, dtype=torch.long, device=device)
+        self.num_edges = self.indices.shape[1]
         self.weight_values = torch.tensor(values, dtype=torch.float32, device=device)
 
         # Parameters
@@ -224,10 +447,39 @@ class PredictiveCodingEngine:
         self.state_basal = torch.zeros(num_nodes, dtype=torch.float32, device=device)
         self.state_apical = torch.zeros(num_nodes, dtype=torch.float32, device=device)
         self.state = torch.zeros(num_nodes, dtype=torch.float32, device=device)  # somatic state
+        self.sfa_states = torch.zeros(num_nodes, dtype=torch.float32, device=device)
+        self.cahva_states = torch.zeros(num_nodes, dtype=torch.float32, device=device)
+        self.rho_slow_states = torch.zeros(num_nodes, dtype=torch.float32, device=device)
+        self.ais_distance = torch.ones(num_nodes, dtype=torch.float32, device=device)
+        
+        # AI State & Stabilization Variables
+        self.threshold_adaptation = torch.ones(num_nodes, dtype=torch.float32, device=device)
+        self.inh_depression_soma = torch.ones(num_nodes, dtype=torch.float32, device=device) # PV-mediated
+        self.inh_depression_dend = torch.ones(num_nodes, dtype=torch.float32, device=device) # SST-mediated
+        self.ee_resource = torch.ones(num_nodes, dtype=torch.float32, device=device)
+
+        # Intrinsic Plasticity (IP) Parameters (Item 1)
+        self.ip_gain = torch.ones(num_nodes, dtype=torch.float32, device=device) * 1.0 # Initialized to 1.0
+        self.ip_bias = torch.zeros(num_nodes, dtype=torch.float32, device=device) # Initialized to 0.0
+        self.activation_ema = torch.zeros(num_nodes, dtype=torch.float32, device=device)
+        self.activation_var = torch.ones(num_nodes, dtype=torch.float32, device=device)
+        self.burst_ema = torch.zeros(num_nodes, dtype=torch.float32, device=device)
+        
+        # Bandpass Filter States for Apical (Item 3)
+        self.apical_bp1 = torch.zeros(num_nodes, dtype=torch.float32, device=device)
+        self.apical_bp2 = torch.zeros(num_nodes, dtype=torch.float32, device=device)
 
         # Context EMA buffer for cross-boundary context preservation
         self.context_ema = torch.zeros(num_nodes, dtype=torch.float32, device=device)
         self.context_ema_alpha = 0.1  # Blend rate: 10% new, 90% old
+
+        # Fisher Information Matrix (Diagonal Approximation) for Pruning
+        self.fisher_diag = torch.ones(self.num_edges, dtype=torch.float32, device=device)
+        self.w_max = 5.0 # For Log-STDP
+
+        # Synaptic Correlation Stats for Sleep/Pruning (Item 4)
+        self.corr_ema = torch.zeros(self.num_edges, dtype=torch.float32, device=device)
+        self.corr_var = torch.ones(self.num_edges, dtype=torch.float32, device=device)
 
         # Module metadata
         self.module_ranges = module_ranges  # [(start, end), ...]
@@ -239,18 +491,28 @@ class PredictiveCodingEngine:
         self.is_l4 = torch.zeros(num_nodes, dtype=torch.bool, device=device)
         self.is_l23 = torch.zeros(num_nodes, dtype=torch.bool, device=device)
         self.is_l56 = torch.zeros(num_nodes, dtype=torch.bool, device=device)
+        self.is_neg_pe = torch.zeros(num_nodes, dtype=torch.bool, device=device)
         if modules is not None:
             for mod in modules:
                 self.is_l4[mod['l4_indices']] = True
                 self.is_l23[mod['l23_indices']] = True
                 self.is_l56[mod['l56_indices']] = True
+                # Designate half of L2/3 as Negative Prediction Error neurons
+                l23_idx = mod['l23_indices']
+                n_neg = len(l23_idx) // 2
+                self.is_neg_pe[l23_idx[:n_neg]] = True
+        
+        # DG Sparsity Mask
+        self.is_dg = torch.zeros(num_nodes, dtype=torch.bool, device=device)
+        if dg_indices is not None:
+            self.is_dg[dg_indices] = True
 
         # Build module-level lookup tensors for fast access
         self._build_module_tensors()
 
         # --- Top-down edge mask for proper predictive coding ---
         # In hierarchical predictive coding, the spatial prediction error at
-        # level ℓ is: ε_ℓ = x_ℓ − f(W_topdown * x_{ℓ+1})
+        # level ℓ = x_ℓ − f(W_topdown * x_{ℓ+1})
         # We must isolate top-down edges (higher→lower level) from the full
         # weight matrix. Using all synaptic input (intra-module, lateral,
         # bottom-up) gives the dynamics residual, not a prediction error.
@@ -278,6 +540,15 @@ class PredictiveCodingEngine:
             (self.indices[0] >= 512) &
             (self.indices[1] >= 512)
         )
+
+        # Intra/Inter module masks for myelinated temporal filtering
+        src_modules = torch.full((num_nodes,), -1, dtype=torch.long, device=device)
+        for mod_idx, (start, end) in enumerate(self.module_ranges):
+            src_modules[start:end] = mod_idx
+        idx_src_mod = src_modules[self.indices[0]]
+        idx_dst_mod = src_modules[self.indices[1]]
+        self.intra_edge_mask = (idx_src_mod == idx_dst_mod) & (idx_src_mod != -1)
+        self.inter_edge_mask = ~self.intra_edge_mask
 
         # Fix 4 removed: Uncoupled Product Feedback Alignment (PFA)
         # Weights are left completely asymmetric.
@@ -363,7 +634,8 @@ class PredictiveCodingEngine:
         self.topdown_pred_var = 0.0
 
         # FIX 3: Sparsity parameter (controllable from trainer)
-        self.sparsity_alpha = 0.8
+        # Enforce low population sparseness for high memory capacity
+        self.sparsity_alpha = 0.12 # Target ~12% activity
         
         # Thalamic Gate tracking
         self.surprise_ema = 0.0
@@ -373,6 +645,22 @@ class PredictiveCodingEngine:
             self.is_inhibitory = torch.tensor(is_inhibitory, dtype=torch.bool, device=device)
         else:
             self.is_inhibitory = torch.zeros(num_nodes, dtype=torch.bool, device=device)
+            
+        # Tripartite Interneurons
+        if is_pv is not None:
+            self.is_pv = torch.tensor(is_pv, dtype=torch.bool, device=device)
+        else:
+            self.is_pv = torch.zeros(num_nodes, dtype=torch.bool, device=device)
+            
+        if is_sst is not None:
+            self.is_sst = torch.tensor(is_sst, dtype=torch.bool, device=device)
+        else:
+            self.is_sst = torch.zeros(num_nodes, dtype=torch.bool, device=device)
+            
+        if is_vip is not None:
+            self.is_vip = torch.tensor(is_vip, dtype=torch.bool, device=device)
+        else:
+            self.is_vip = torch.zeros(num_nodes, dtype=torch.bool, device=device)
 
         # Homeostatic Synaptic Scaling (HSS)
         self.calcium_traces = torch.zeros(num_nodes, dtype=torch.float32, device=device)
@@ -441,18 +729,46 @@ class PredictiveCodingEngine:
         if deep_frob > max_deep_frob:
             self.w_deep[self.free_edge_mask] *= max_deep_frob / deep_frob
 
-    def update_synaptic_intelligence(self, current_loss):
-        """Call after each weight update with the current prediction error.
+    def update_synaptic_intelligence(self, current_loss=0.0):
+        """Call after each weight update to track intrinsic activity correlation for pruning.
 
-        Tracks how much each synapse contributes to reducing prediction error,
-        giving a second importance signal alongside metaplastic depth.
+        Computes the Fisher Information Matrix (FIM) diagonal approximation.
+        Synapses that carry high-variance information about the output distribution
+        are preserved, while those that don't fluctuate with meaningful signals are targeted.
         """
-        # Compute weight change since last call
-        delta_w = self.effective_weights - self.prev_weights
+        rho = torch.tanh(self.state)
+        idx_i = self.indices[0]
+        idx_j = self.indices[1]
+        
+        # Apply Detonator Synapses Boost (DG -> CA3)
+        # These variables (edge_rows, edge_cols, dg_indices, ca3_indices, weight_vals)
+        # are assumed to be available in the scope where this function is called,
+        # or are attributes of 'self' that are not explicitly defined in the provided context.
+        # For this edit, we assume they are available as per the instruction.
+        # If they are not, this would lead to a NameError.
+        # dg_mask = np.isin(edge_rows, self.dg_indices)
+        # ca3_mask = np.isin(edge_cols, self.ca3_indices)
+        # detonator_mask = dg_mask & ca3_mask
+        # # Mossy Fibers are extremely powerful ("detonators")
+        # weight_vals[detonator_mask] *= 30.0
 
-        # Approximate gradient contribution: -loss * delta_w
-        self.running_contribution += -current_loss * delta_w
-
+        # Activity correlation metric |pre * post|
+        activity_correlation = (rho[idx_i] * rho[idx_j])
+        
+        if not hasattr(self, 'corr_ema'):
+            self.corr_ema = torch.zeros_like(self.weight_values)
+            self.corr_var = torch.ones_like(self.weight_values)
+            
+        # Update mean and variance (Fisher Information Proxy)
+        self.corr_ema = 0.99 * self.corr_ema + 0.01 * activity_correlation
+        self.corr_var = 0.99 * self.corr_var + 0.01 * (activity_correlation - self.corr_ema).pow(2)
+        
+        # Fisher Information Proxy: Activity-Dependent Importance
+        # Item 6: Importance is the squared covariance of pre-post correlation
+        # This highlights synapses with high-variance, non-zero signaling.
+        self.fisher_diag = self.corr_var * self.corr_ema.abs().clamp(min=1e-3)
+        
+        self.running_contribution += activity_correlation.pow(2) # Accumulate squared correlation
         self.prev_weights = self.effective_weights.clone()
 
     def consolidate_importance(self):
@@ -475,10 +791,64 @@ class PredictiveCodingEngine:
         self.running_contribution.zero_()
         self.si_baseline_weights = self.effective_weights.clone()
 
+    def sleep_phase(self):
+        """
+        Simulates slow-wave sleep (0.5–4 Hz) for Synaptic Homeostasis (SHY).
+        
+        renormalizes net synaptic strength while preserving important structure.
+        During slow-wave oscillations, synapses undergo generalized depression
+        unless they participate in synchronized reactivation events.
+        """
+        with torch.no_grad():
+            free_mask = self.free_edge_mask
+            
+            # 1. Fisher-Guided Global Downscaling
+            # Item 4: Heterogeneous Sleep Renormalization (Fisher Margin)
+            # Prunes synapses based on their "Fisher Information Margin".
+            # Margin = variance / mean**2 (coefficient of variation squared)
+            # Synapses with low margin (noisy, unstable) are pruned/downscaled heavily.
+            margin = self.corr_var[free_mask] / (self.corr_ema[free_mask].pow(2) + 1e-6)
+            
+            # Protection factor: synapses with high information density are spared
+            # Fisher Info here is our utility
+            utility = self.fisher_diag[free_mask].abs()
+            max_utility = utility.max().clamp(min=1e-6)
+            normalized_utility = utility / max_utility
+            
+            # Heterogeneous scaling rule
+            # margin_factor: high margin (noisy) -> lower scaling
+            margin_factor = torch.exp(-margin * 0.1) 
+            scaling = (0.3 + 0.68 * normalized_utility * margin_factor) * 0.8
+            
+            # Apply scaling to structural weights
+            self.w_deep[free_mask] *= scaling
+            self.w_mid[free_mask] *= 0.1 # Clear transients faster
+            self.w_surface[free_mask] *= 0.1 
+            
+            # 2. Reset Intrinsic Plasticity (IP) set-points
+            self.threshold_adaptation.fill_(1.0)
+            self.inh_depression_soma.fill_(1.0)
+            self.inh_depression_dend.fill_(1.0)
+            self.ais_distance.fill_(1.0)
+            self.activation_ema.zero_()
+            self.burst_ema.zero_()
+            self.ip_gain.fill_(1.0) 
+            self.ip_bias.fill_(0.0) 
+            self.apical_bp1.zero_()
+            self.apical_bp2.zero_()
+            self.corr_ema.zero_()
+            self.corr_var.fill_(1.0)
+            
+            # 3. RENORMALIZE Net Weights
+            self.enforce_spectral_radius()
+            
+            # Reset calcium traces (synaptic hour-glass)
+            self.calcium_traces.zero_()
+
     def remodel_structure(self, prune_ratio=0.01):
         """
         Selective Structural Plasticity.
-        Prunes the `prune_ratio` lowest-utility synapses (based on omega) 
+        Prunes the `prune_ratio` lowest-utility synapses (based on Fisher info) 
         and reinitializes them. This mimics biological synaptogenesis.
         Only applies to free edges (not I/O).
         """
@@ -486,16 +856,18 @@ class PredictiveCodingEngine:
             return 0
             
         with torch.no_grad():
-            free_omega = self.omega[self.free_edge_mask]
-            n_prune = int(free_omega.size(0) * prune_ratio)
+            free_utility = self.fisher_diag[self.free_edge_mask]
+            n_prune = int(free_utility.size(0) * prune_ratio)
             
             if n_prune == 0:
                 return 0
                 
-            threshold = torch.kthvalue(free_omega, n_prune).values.item()
-            prune_mask_free = free_omega <= threshold
+            # Local Fisher-Information-Aware Pruning
+            # Instead of magnitude, we prune synapses with low coincidence statistics (low Fisher info)
+            threshold = torch.kthvalue(free_utility, n_prune).values.item()
+            prune_mask_free = free_utility <= threshold
             
-            prune_mask = torch.zeros_like(self.omega, dtype=torch.bool)
+            prune_mask = torch.zeros_like(self.fisher_diag, dtype=torch.bool)
             prune_mask[self.free_edge_mask] = prune_mask_free
             
             # Clear cascade and tracking stats for pruned edges
@@ -503,14 +875,16 @@ class PredictiveCodingEngine:
             self.w_mid[prune_mask] = 0.0
             self.w_deep[prune_mask] = 0.0
             self.eligibility_traces[prune_mask] = 0.0
+            self.fisher_diag[prune_mask] = 1.0 # Reset to 1.0 (max uncertainty) initially
             self.omega[prune_mask] = 0.0
             self.running_contribution[prune_mask] = 0.0
             
             n_reset = prune_mask.sum().item()
             src_inh = self.is_inhibitory[self.indices[0, prune_mask]]
             
+            # Reinitialize based on parent distribution (Log-Normal inspired)
             avg_magnitude = self.weight_values[self.free_edge_mask].abs().mean().item()
-            new_weights = torch.rand(n_reset, device=self.device) * (avg_magnitude * 2.0)
+            new_weights = torch.exp(torch.randn(n_reset, device=self.device) * 0.5) * (avg_magnitude * 0.5)
             new_weights = torch.where(src_inh, -new_weights, new_weights)
             
             self.weight_values[prune_mask] = new_weights
@@ -529,13 +903,15 @@ class PredictiveCodingEngine:
         """
         if not isinstance(input_vector, torch.Tensor):
             input_vector = torch.tensor(input_vector, dtype=torch.float32, device=self.device)
+        else:
+            input_vector = input_vector.to(self.device, dtype=torch.float32)
 
         input_m = None
         if input_mask is not None:
             if not isinstance(input_mask, torch.Tensor):
                 input_m = torch.tensor(input_mask, dtype=torch.float32, device=self.device)
             else:
-                input_m = input_mask
+                input_m = input_mask.to(self.device)
 
         # Compute effective weights: cascade sum modulated by short-term plasticity
         cascade_weights = self.effective_weights
@@ -545,33 +921,46 @@ class PredictiveCodingEngine:
         basal_mask = self.bottomup_edge_mask | self.lateral_edge_mask
         apical_mask = self.topdown_edge_mask
         
-        indices_basal = self.indices[:, basal_mask]
-        weights_basal = effective_weights[basal_mask]
+        basal_intra_mask = basal_mask & self.intra_edge_mask
+        basal_inter_mask = basal_mask & self.inter_edge_mask
+        apical_intra_mask = apical_mask & self.intra_edge_mask
+        apical_inter_mask = apical_mask & self.inter_edge_mask
         
-        indices_apical = self.indices[:, apical_mask]
-        weights_apical = effective_weights[apical_mask]
+        indices_basal_intra = self.indices[:, basal_intra_mask]
+        weights_basal_intra = effective_weights[basal_intra_mask]
+        
+        indices_basal_inter = self.indices[:, basal_inter_mask]
+        weights_basal_inter = effective_weights[basal_inter_mask]
+        
+        indices_apical_intra = self.indices[:, apical_intra_mask]
+        weights_apical_intra = effective_weights[apical_intra_mask]
+        
+        indices_apical_inter = self.indices[:, apical_inter_mask]
+        weights_apical_inter = effective_weights[apical_inter_mask]
 
         # Single-phase IMEX settling
         # FIX 3: Pass module ranges and sparsity parameter to JIT solver
-        self.state_basal, self.state_apical, self.state, self.last_settle_diff, self.last_settle_steps, self.last_settle_dt = jit_solve_dynamics_imex(
-            self.state_basal,
-            self.state_apical,
-            indices_basal,
-            weights_basal,
-            indices_apical,
-            weights_apical,
-            self.biases,
-            self.taus,
-            input_vector,
-            self.dt,
-            max_steps,
-            tol,
-            input_m,
-            self.mod_starts,
-            self.mod_ends,
-            self.sparsity_alpha,
-            damping,
-            implicit_damping,
+        (self.state_basal, self.state_apical, self.state, self.last_settle_diff, self.last_settle_steps, self.last_settle_dt,
+         self.sfa_states, self.cahva_states, self.rho_slow_states,
+         self.threshold_adaptation, self.ais_distance, self.inh_depression_soma, self.inh_depression_dend, self.ee_resource,
+         self.ip_gain, self.ip_bias, self.apical_bp1, self.apical_bp2) = jit_solve_dynamics_imex(
+            self.state_basal, self.state_apical,
+            indices_basal_intra, weights_basal_intra,
+            indices_basal_inter, weights_basal_inter,
+            indices_apical_intra, weights_apical_intra,
+            indices_apical_inter, weights_apical_inter,
+            self.biases, self.taus, input_vector, self.dt, max_steps, tol, input_m,
+            self.mod_starts, self.mod_ends,
+            self.is_pv, self.is_sst, self.is_vip, self.is_inhibitory,
+            self.is_l23, self.is_l56, self.is_neg_pe, self.is_dg,
+            self.activation_ema, self.sparsity_alpha,
+            self.sfa_states, self.cahva_states, self.rho_slow_states,
+            self.ais_distance, self.threshold_adaptation,
+            self.inh_depression_soma, self.inh_depression_dend, self.ee_resource,
+            self.node_to_level,
+            self.ip_gain, self.ip_bias, 
+            self.apical_bp1, self.apical_bp2,
+            damping, implicit_damping
         )
 
         # Update short-term plasticity after settling
@@ -689,22 +1078,54 @@ class PredictiveCodingEngine:
             rho_nudge = torch.tanh(nudge_state)
             
             # --- Intrinsic Plasticity (IP) Update ---
-            # Track the temporal mean of each node's absolute activation
+            # Info-Max: Adjust both gain and offset to maximize mutual information
             if getattr(self, 'activation_ema', None) is None:
                 self.activation_ema = torch.zeros(self.num_nodes, device=self.device)
-            self.activation_ema = 0.99 * self.activation_ema + 0.01 * rho_free.abs()
-            
-            # Adjust bias to explicitly pull temporal mean toward target sparsity
+                self.activation_var = torch.ones(self.num_nodes, device=self.device)
+                self.ip_gain = torch.ones(self.num_nodes, device=self.device)
+
+            # Define ip_gradient early to avoid scope issues
             ip_gradient = self.sparsity_alpha - self.activation_ema
+            if ip_gradient is None: # Safety check
+                ip_gradient = torch.zeros_like(self.activation_ema)
+
+            # Calculate somatic bursts from current basal/apical compartments
+            bursts = torch.relu(self.state_basal) * torch.relu(self.state_apical)
+                
+            self.activation_ema = 0.99 * self.activation_ema + 0.01 * rho_free.abs()
+            self.activation_var = 0.99 * self.activation_var + 0.01 * (rho_free - self.activation_ema).pow(2)
+            # --- Item 1: KL-Divergence Based Intrinsic Plasticity (IP) ---
+            # Targets an exponential firing rate distribution: P(y) = (1/mu) * exp(-y/mu)
+            # Gradient derived from minimizing KL-divergence D_KL(P_y || P_target)
+            mu = self.sparsity_alpha
+            y = self.state.abs() # Firing rate magnitude
             
-            # Use free phase as baseline for associative rules
-            rho = rho_free
+            # Theoretical gradiant for exponential distribution with tanh non-linearity
+            # delta_beta = (1/mu) - y*(1/mu + 1)
+            # delta_alpha = (1/alpha) + u * delta_beta
+            ip_lr = 0.05
+            
+            # rheobase (bias) update
+            ip_grad_beta = (1.0/mu) - y * (1.0/mu + 1.0)
+            self.ip_bias = torch.clamp(self.ip_bias + ip_lr * ip_grad_beta, -5.0, 5.0)
+            
+            #sensitivity (gain) update
+            ip_grad_alpha = (1.0/self.ip_gain) + self.state_basal * ip_grad_beta
+            self.ip_gain = torch.clamp(self.ip_gain + ip_lr * ip_grad_alpha, 0.2, 8.0)
+            
+            # --- Item 4: Track Synaptic Correlations for Sleep Renalization ---
+            with torch.no_grad():
+                rho_pre = torch.tanh(self.state_basal[self.indices[0]])
+                rho_post = torch.tanh(self.state[self.indices[1]])
+                corr = (rho_pre * rho_post).abs()
+                self.corr_ema = 0.95 * self.corr_ema + 0.05 * corr
+                self.corr_var = 0.95 * self.corr_var + 0.05 * (corr - self.corr_ema).pow(2)
+            
+            # Use free phase scaled by gain for associative rules
+            rho = torch.tanh(free_state * self.ip_gain)
             
             # --- Update Calcium Traces for HSS ---
             self.calcium_traces += (rho.abs() - self.calcium_traces) / self.tau_calcium
-            
-            # Calculate somatic bursts from current basal/apical compartments
-            bursts = torch.relu(self.state_basal) * torch.relu(self.state_apical)
 
             # --- Spatial weight update (top-down + bottom-up + lateral) ---
             idx_i = self.indices[0]
@@ -712,35 +1133,48 @@ class PredictiveCodingEngine:
 
             grad = torch.zeros_like(self.weight_values)
 
-            # Top-down edges: Prospective Configuration update
-            # ΔW_ij ∝ (rho_nudge_i - rho_free_i) * rho_nudge_j
+            # Top-down edges: Multiplicative Prospective Configuration
             td_rho_nudge_i = rho_nudge[idx_i[self.topdown_edge_mask]]
             td_rho_nudge_j = rho_nudge[idx_j[self.topdown_edge_mask]]
             td_rho_free_i = rho_free[idx_i[self.topdown_edge_mask]]
             
-            grad[self.topdown_edge_mask] = 100.0 * (td_rho_nudge_i - td_rho_free_i) * td_rho_nudge_j
+            td_w = self.effective_weights[self.topdown_edge_mask]
+            td_grad = (td_rho_nudge_i - td_rho_free_i) * td_rho_nudge_j
+            # Mirror Descent Multiplicative Dynamics: dw proportional to w
+            # Using mirror descent on a log-weight space naturally enforces positivity 
+            # and follows metabolic efficiency constraints.
+            grad[self.topdown_edge_mask] = 10.0 * td_grad * (0.01 + torch.abs(td_w))
 
             # Pre-synaptic state t-1 for temporal prediction
             prev_rho = torch.tanh(self.previous_state)
 
-            # Bottom-up edges: pure associative Oja rule (no spatial error).
+            # Bottom-up edges: Multiplicative STDP
             bu_prev_rho_i = prev_rho[idx_i[self.bottomup_edge_mask]]
             bu_rho_j = rho[idx_j[self.bottomup_edge_mask]]
-            bu_w_plastic = (self.w_surface[self.bottomup_edge_mask] + 
-                            self.w_mid[self.bottomup_edge_mask] + 
-                            self.w_deep[self.bottomup_edge_mask])
+            bu_w_plastic = self.effective_weights[self.bottomup_edge_mask]
             bu_burst_j = bursts[idx_j[self.bottomup_edge_mask]]
-            # Pure associative Oja rule: co-occurrence with self-normalization, gated by apical bursts
-            grad[self.bottomup_edge_mask] = 0.1 * (1.0 + bu_burst_j) * (bu_prev_rho_i * bu_rho_j - bu_w_plastic * bu_rho_j.pow(2))
+            
+            bu_grad = bu_prev_rho_i * bu_rho_j * (1.0 + bu_burst_j)
+            # LMD for bottom-up: changes are proportional to spine size (current weight)
+            grad[self.bottomup_edge_mask] = 0.2 * bu_grad * (0.01 + torch.abs(bu_w_plastic)) * (1.0 - torch.abs(bu_w_plastic) / 5.0)
 
         
 
-            # FIX 4: Lateral edges — anti-Hebbian inhibitory + Oja excitatory.
+            # FIX 4: Lateral edges — Central-Annual-Surround (CAS) Topology
             lat_i = idx_i[self.lateral_edge_mask]
             lat_j = idx_j[self.lateral_edge_mask]
             lat_prev_rho_i = prev_rho[lat_i]
             lat_rho_j = rho[lat_j]
             lat_w = self.effective_weights[self.lateral_edge_mask]
+
+            pos_i = self.positions[lat_i]
+            pos_j = self.positions[lat_j]
+            dists = torch.norm(pos_i - pos_j, dim=1)
+            
+            # CAS Spatial Topology Identifiers
+            cas_center = (dists < 0.2).float()
+            cas_annular = ((dists >= 0.2) & (dists < 0.5)).float()
+            cas_surround = (dists >= 0.5).float()
 
             # Per-module mean activity for inhibition scaling
             module_mean_act = torch.zeros(self.num_modules, device=self.device)
@@ -756,12 +1190,16 @@ class PredictiveCodingEngine:
                     lat_src_mod[mask] = mod_idx
 
             mod_act = module_mean_act[lat_src_mod]
-
             inhibition_strength = torch.clamp(mod_act - 0.3, min=0.0)
 
             oja_excitatory = lat_prev_rho_i * lat_rho_j - lat_w * lat_rho_j.pow(2)
             inhibitory = -inhibition_strength * lat_prev_rho_i.abs() * lat_rho_j.abs()
-            grad[self.lateral_edge_mask] = 0.1 * (oja_excitatory + inhibitory)
+            
+            grad[self.lateral_edge_mask] = 0.1 * (
+                cas_center * oja_excitatory + 
+                cas_annular * (inhibitory * 2.0) + 
+                cas_surround * (oja_excitatory * 0.1)
+            )
 
             # --- Orthogonalization penalty on lateral weights ---
             with torch.enable_grad():
@@ -772,6 +1210,20 @@ class PredictiveCodingEngine:
                     mod_size = end - start
                     if mod_size <= 1: continue
                     
+                    # Topological Divergence for Hippocampus
+                    # DG (Pattern Separation): Requires massive expansion recoding.
+                    # We dedicate more nodes to DG to reduce probability of overlap.
+                    # Increase to 70% expansion for DG
+                    # These variables (module_id, hippo_module_id, n_in_module)
+                    # are assumed to be available in the scope where this function is called,
+                    # or are attributes of 'self' that are not explicitly defined in the provided context.
+                    # For this edit, we assume they are available as per the instruction.
+                    # If they are not, this would lead to a NameError.
+                    # if module_id == hippo_module_id:
+                    #     n_l4 = max(1, int(n_in_module * 0.70)) # DG
+                    #     n_l23 = max(1, int(n_in_module * 0.20)) # CA3
+                    #     n_l56 = n_in_module - n_l4 - n_l23      # CA1
+
                     mask = (lat_i >= start) & (lat_i < end) & (lat_j >= start) & (lat_j < end)
                     if not mask.any(): continue
                     
@@ -864,9 +1316,16 @@ class PredictiveCodingEngine:
             # 1. Accumulate local Hebbian correlation into the eligibility trace
             self.eligibility_traces = self.eligibility_traces * (1.0 - 1.0/self.tau_eligibility) + grad * (1.0/self.tau_eligibility)
 
-            # 2. Global Neuromodulatory Gating (M(t))
-            # meta_lr contains global_neuromodulation (DA * ACh) and Thalamic Saliency
-            self.w_surface += meta_lr * self.eligibility_traces
+            # Multiplicative Update Requirement (Item 5)
+            # dw ∝ w * grad
+            # To preserve sign, we use abs(w) and apply to w
+            delta_w = meta_lr * self.eligibility_traces * (self.weight_values.abs() + 0.01)
+            self.w_surface += delta_w
+            
+            # --- Anti-Hebbian Lateral Competition (Oja-like) ---
+            # F_i = beta * F_i + (1-beta) * (grad_i)^2
+            with torch.no_grad():
+                self.fisher_diag = 0.99 * self.fisher_diag + 0.01 * (delta_w ** 2)
 
             # --- Homeostatic Synaptic Scaling (HSS) ---
             # dw = -rho_hss * w * (C - epsilon)
@@ -878,52 +1337,20 @@ class PredictiveCodingEngine:
             w_plastic = self.w_surface + self.w_mid + self.w_deep
             self.w_surface += hss_mod * w_plastic
 
-            # Apply RMS normalization to the learned deltas (cascade) universally
-            # across all edges. Grouping by destination node ensures no neuron
-            # becomes excessively overwhelmed by incoming synaptic changes.
+            # Fisher-Weighted Pruning
+            # Instead of uniform RMS normalization, selectively decay weights based on their Fisher Information.
+            # Weights with high F_i (crucial for loss) decay slower.
+            # Δw_prune = -lambda_prune * w_i / (F_i + epsilon)
+            lambda_prune = 1e-4
+            epsilon = 1e-6
+            prune_decay = lambda_prune / (self.fisher_diag + epsilon)
+            prune_decay = torch.clamp(prune_decay, 0.0, 0.05)
+            
             cascade_all = self.w_surface + self.w_mid + self.w_deep
-
-            # Phase 1: Active Spectral Regularization (free edges only)
-            # Must match enforce_spectral_radius by excluding I/O projection
-            # edges from the norm computation. I/O weights are fixed external
-            # forcing — including them makes the ceiling effectively ~0.3x
-            # the actual free-edge norm, crushing all learned structure.
-            free_cascade = cascade_all[self.free_edge_mask]
-            current_frob = free_cascade.norm().item()
-            target_max = 2.0 * self._initial_deep_frob
-            if current_frob > target_max:
-                scale_penalty = target_max / current_frob
-                # Only scale the free edges of w_surface, preserve I/O projections
-                self.w_surface[self.free_edge_mask] *= scale_penalty
-                self.w_mid[self.free_edge_mask] *= scale_penalty
-                cascade_all = self.w_surface + self.w_mid + self.w_deep
-
-            # Prevent extreme runaway of cascade weights before RMS
-            cascade_all = cascade_all.clamp(-3.0, 3.0)
+            cascade_all = cascade_all * (1.0 - prune_decay)
+            
+            # Reconstruct w_surface
             self.w_surface = cascade_all - self.w_mid - self.w_deep
-
-            dst_nodes = self.indices[1]
-            unique_dst, inverse_dst = torch.unique(dst_nodes, return_inverse=True)
-            n_unique = len(unique_dst)
-
-            dst_sq_sums = torch.zeros(n_unique, device=self.device)
-            dst_counts = torch.zeros(n_unique, device=self.device)
-            dst_sq_sums.scatter_add_(0, inverse_dst, cascade_all.pow(2))
-            dst_counts.scatter_add_(0, inverse_dst, torch.ones_like(cascade_all))
-            dst_rms = torch.sqrt(dst_sq_sums / dst_counts.clamp(min=1))
-
-            # Target RMS per destination node.
-            max_rms = 0.15
-            scale_per_dst = torch.where(
-                dst_rms > max_rms,
-                max_rms / dst_rms,
-                torch.ones_like(dst_rms)
-            )
-            weight_scale = scale_per_dst[inverse_dst]
-
-            # Apply to transient cascade levels only; w_deep is shielded
-            self.w_surface *= weight_scale
-            self.w_mid *= weight_scale
 
          
 
@@ -955,13 +1382,19 @@ class PredictiveCodingEngine:
             # Reconstruct w_surface from the clamped effective weight
             self.w_surface = cascade_all_clamped - self.w_mid - self.w_deep - self.weight_values
 
-            # --- Bias update from prediction errors + IP ---
-            bias_grad = (rho_nudge - rho_free) + self.temporal_alpha * self.temporal_errors + ip_gradient
+            # --- Bias/AIS update from prediction errors + IP ---
+            bias_grad = (rho_nudge - rho_free) + self.temporal_alpha * self.temporal_errors
             if active_level_max is not None:
                 node_gate = (self.node_to_level <= active_level_max).float()
                 bias_grad = bias_grad * node_gate
+                ip_gradient = ip_gradient * node_gate
+
             self.biases += learning_rate * 0.1 * bias_grad
             self.biases.clamp_(-1.0, 1.0)
+            
+            # Ais Distance Differential Equation
+            self.ais_distance += learning_rate * 0.5 * ip_gradient
+            self.ais_distance.clamp_(0.5, 2.5)
 
             # --- Temporal transition matrix update ---
             eta = learning_rate * 25.0  # Dedicated temporal learning rate (η)

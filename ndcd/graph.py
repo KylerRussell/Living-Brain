@@ -57,33 +57,58 @@ class DynamicGraph:
             level_module_counts.append(count)
             remaining -= count
         level_module_counts.append(max(1, remaining))
+        
+        # --- Total Capacity Check for 5:1 Expansion ---
+        # We need to ensure we have enough association nodes for the 5:1 expansion of the DG layer.
+        # If DG is 1 module and neocortex has 49 modules, we need to balance the node count.
 
         # Build module metadata
-        self.modules = []  # List of dicts: {level, start_idx, end_idx, node_indices, l4_indices, l23_indices, l56_indices}
-        self.module_levels = []  # level per module
-        self.level_modules = {l: [] for l in range(num_levels)}  # modules per level
-
-        # Distribute association nodes across modules
+        # --- Complementary Learning Systems (CLS) Module Designation ---
+        # Pick 1 module at Level 2 (medial temporal lobe equivalent) to be Hippocampus.
         nodes_per_module = n_association // num_modules
         extra_nodes = n_association % num_modules
-
+        
+        self.hippocampal_modules = set()
+        self.neocortical_modules = set()
+        
+        self.dg_indices = []
+        self.ca3_indices = []
+        
         current_node = n_io  # Start after I/O nodes
         module_id = 0
+        hippo_module_id = -1
+        
+        # Pre-determine which module is hippocampal (first module of level 2)
+        target_hippo_idx = sum(level_module_counts[:2]) # First module index in level 2
+        
         for level in range(num_levels):
             for _ in range(level_module_counts[level]):
-                # Distribute extra nodes to first modules
+                if module_id == target_hippo_idx:
+                    self.hippocampal_modules.add(module_id)
+                    hippo_module_id = module_id
+                else:
+                    self.neocortical_modules.add(module_id)
+                    
+                # Distribute extra nodes
                 n_in_module = nodes_per_module + (1 if module_id < extra_nodes else 0)
                 start = current_node
                 end = current_node + n_in_module
                 node_indices = np.arange(start, end)
 
-                # Laminar Architecture sub-populations
-                # Layer 4 (L4): ~20% of nodes (sensory/bottom-up recipient)
-                # Layer 2/3 (L2/3): ~40% of nodes (error/surprisal)
-                # Layer 5/6 (L5/6): ~40% of nodes (predictions/top-down source)
-                n_l4 = max(1, int(n_in_module * 0.2))
-                n_l23 = max(1, int(n_in_module * 0.4))
-                n_l56 = n_in_module - n_l4 - n_l23
+                if module_id == hippo_module_id:
+                    # Item 4: Expansion-Sparsity Layer (5:1 Expansion for DG)
+                    # We allocate 5x more nodes to the DG layer within the hippocampal module.
+                    # Normal module size is ~N nodes. Hippo module will be larger or scaled.
+                    # For simplicity, we keep module sizes relatively consistent but 
+                    # shift the internal lamination to favor DG expansion.
+                    n_l4 = max(1, int(n_in_module * 0.85)) # DG expanded (85% of hippo nodes)
+                    n_l23 = max(1, int(n_in_module * 0.10)) # CA3
+                    n_l56 = max(1, n_in_module - n_l4 - n_l23) # CA1
+                else:
+                    # Uniform Neocortical Lamination
+                    n_l4 = max(1, int(n_in_module * 0.2))
+                    n_l23 = max(1, int(n_in_module * 0.4))
+                    n_l56 = n_in_module - n_l4 - n_l23
 
                 l4_start = start
                 l23_start = l4_start + n_l4
@@ -92,6 +117,10 @@ class DynamicGraph:
                 l4_indices = np.arange(l4_start, l4_start + n_l4)
                 l23_indices = np.arange(l23_start, l23_start + n_l23)
                 l56_indices = np.arange(l56_start, l56_start + n_l56)
+
+                if module_id == hippo_module_id:
+                    self.dg_indices.extend(l4_indices.tolist())
+                    self.ca3_indices.extend(l23_indices.tolist())
 
                 self.modules.append({
                     'id': module_id,
@@ -112,15 +141,34 @@ class DynamicGraph:
 
         self.num_actual_modules = module_id
         self.module_levels = np.array(self.module_levels)
+        print(f"CLS: {len(self.hippocampal_modules)} hippocampal modules, "
+              f"{len(self.neocortical_modules)} neocortical modules")
 
-        # --- Dale's Law E/I Assignment ---
+        # --- Dale's Law E/I Assignment & Tripartite Interneurons ---
         self.is_inhibitory = np.zeros(num_nodes, dtype=bool)
+        self.is_pv = np.zeros(num_nodes, dtype=bool)
+        self.is_sst = np.zeros(num_nodes, dtype=bool)
+        self.is_vip = np.zeros(num_nodes, dtype=bool)
+        
         for mod in self.modules:
             # 20% of nodes in each module are inhibitory
             n_inh = int(mod['size'] * 0.2)
             if n_inh > 0:
                 inh_idx = np.random.choice(mod['indices'], n_inh, replace=False)
                 self.is_inhibitory[inh_idx] = True
+                
+                # Subdivide inhibitory nodes into 3 groups (PV, SST, VIP)
+                # Typically PV (~40%), SST (~30%), VIP (~30%)
+                n_pv = int(n_inh * 0.4)
+                n_sst = int(n_inh * 0.3)
+                
+                np.random.shuffle(inh_idx)
+                if n_pv > 0:
+                    self.is_pv[inh_idx[:n_pv]] = True
+                if n_sst > 0:
+                    self.is_sst[inh_idx[n_pv:n_pv+n_sst]] = True
+                if n_pv + n_sst < n_inh:
+                    self.is_vip[inh_idx[n_pv+n_sst:]] = True
 
         # --- Functional Lateralization ---
         # Selectively designate ~15% of intermediate modules as Broca and ~15% as Wernicke
@@ -148,47 +196,92 @@ class DynamicGraph:
         edge_cols = []
 
         # 1. INTRA-module connectivity
-        # Structural sparsity constraint: Target < 1% connectivity internally
+        # Structural sparsity constraint: Target < 1% connectivity internally for large networks,
+        # but scales dynamically to support CA3-style specific recurrence in small microcircuits.
         # L4 -> L2/3, L2/3 -> L5/6, L5/6 -> L5/6 (recurrent), L5/6 -> L4
-        target_connections_per_node = 10  # Reduced significantly for <1% sparsity
         for mod in self.modules:
             # We want connections between specific layers
             l4 = mod['l4_indices']
             l23 = mod['l23_indices']
             l56 = mod['l56_indices']
             
-            # L4 -> L2/3
-            if len(l4) > 0 and len(l23) > 0:
-                n_edges = int(len(l4) * target_connections_per_node)
-                src = np.random.choice(l4, n_edges, replace=True)
-                dst = np.random.choice(l23, n_edges, replace=True)
-                edge_rows.extend(src.tolist())
-                edge_cols.extend(dst.tolist())
+            if mod['id'] in self.hippocampal_modules:
+                # Hippocampal Specific Microcircuitry (Topological Divergence)
+                # DG (L4) -> CA3 (L23) -> CA1 (L56)
                 
-            # L2/3 -> L5/6
-            if len(l23) > 0 and len(l56) > 0:
-                n_edges = int(len(l23) * target_connections_per_node)
-                src = np.random.choice(l23, n_edges, replace=True)
-                dst = np.random.choice(l56, n_edges, replace=True)
-                edge_rows.extend(src.tolist())
-                edge_cols.extend(dst.tolist())
+                # 1. DG (L4) receives inputs (from EC, constructed later in hierarchical edges)
                 
-            # L5/6 -> L5/6 (recurrent)
-            if len(l56) > 0:
-                n_edges = int(len(l56) * target_connections_per_node)
-                src = np.random.choice(l56, n_edges, replace=True)
-                dst = np.random.choice(l56, n_edges, replace=True)
-                valid = src != dst
-                edge_rows.extend(src[valid].tolist())
-                edge_cols.extend(dst[valid].tolist())
-                
-            # L5/6 -> L4 (feedback within column)
-            if len(l56) > 0 and len(l4) > 0:
-                n_edges = int(len(l56) * target_connections_per_node)
-                src = np.random.choice(l56, n_edges, replace=True)
-                dst = np.random.choice(l4, n_edges, replace=True)
-                edge_rows.extend(src.tolist())
-                edge_cols.extend(dst.tolist())
+                # 2. DG Mossy Fibers -> CA3 (L4 -> L2/3). Extreme sparsity (e.g. 1%)
+                if len(l4) > 0 and len(l23) > 0:
+                    target_conns = max(2, int(len(l23) * 0.01))
+                    n_edges = int(len(l4) * target_conns)
+                    src = np.random.choice(l4, n_edges, replace=True)
+                    dst = np.random.choice(l23, n_edges, replace=True)
+                    edge_rows.extend(src.tolist())
+                    edge_cols.extend(dst.tolist())
+                    
+                # 3. CA3 Recurrent Collaterals (L2/3 -> L2/3). 
+                # "Diluted connectivity" (sparse recurrent attractor)
+                if len(l23) > 0:
+                    density = 0.15 # Diluted relative to dense neocortex, but strong enough for pattern completion
+                    target_conns = max(5, int(len(l23) * density))
+                    n_edges = int(len(l23) * target_conns)
+                    src = np.random.choice(l23, n_edges, replace=True)
+                    dst = np.random.choice(l23, n_edges, replace=True)
+                    valid = src != dst
+                    edge_rows.extend(src[valid].tolist())
+                    edge_cols.extend(dst[valid].tolist())
+                    
+                # 4. CA3 Schaffer Collaterals -> CA1 (L2/3 -> L5/6).
+                if len(l23) > 0 and len(l56) > 0:
+                    target_conns = max(5, int(len(l56) * 0.20))
+                    n_edges = int(len(l23) * target_conns)
+                    src = np.random.choice(l23, n_edges, replace=True)
+                    dst = np.random.choice(l56, n_edges, replace=True)
+                    edge_rows.extend(src.tolist())
+                    edge_cols.extend(dst.tolist())
+                    
+            else:
+                # Standard Neocortical Microcircuitry
+                # L4 -> L2/3
+                if len(l4) > 0 and len(l23) > 0:
+                    target_conns = max(10, int(len(l23) * 0.3))
+                    n_edges = int(len(l4) * target_conns)
+                    src = np.random.choice(l4, n_edges, replace=True)
+                    dst = np.random.choice(l23, n_edges, replace=True)
+                    edge_rows.extend(src.tolist())
+                    edge_cols.extend(dst.tolist())
+                    
+                # L2/3 -> L5/6
+                if len(l23) > 0 and len(l56) > 0:
+                    target_conns = max(10, int(len(l56) * 0.3))
+                    n_edges = int(len(l23) * target_conns)
+                    src = np.random.choice(l23, n_edges, replace=True)
+                    dst = np.random.choice(l56, n_edges, replace=True)
+                    edge_rows.extend(src.tolist())
+                    edge_cols.extend(dst.tolist())
+                    
+                # L5/6 -> L5/6 (recurrent)
+                if len(l56) > 0:
+                    depth_factor = mod['level'] / max(1, self.num_levels - 1)
+                    # Level 3 gets ultra-dense recurrent excitation (up to 80%)
+                    recurrent_density = 0.1 + 0.70 * depth_factor
+                    target_conns = max(10, int(len(l56) * recurrent_density))
+                    n_edges = int(len(l56) * target_conns)
+                    src = np.random.choice(l56, n_edges, replace=True)
+                    dst = np.random.choice(l56, n_edges, replace=True)
+                    valid = src != dst
+                    edge_rows.extend(src[valid].tolist())
+                    edge_cols.extend(dst[valid].tolist())
+                    
+                # L5/6 -> L4 (feedback within column)
+                if len(l56) > 0 and len(l4) > 0:
+                    target_conns = max(10, int(len(l4) * 0.3))
+                    n_edges = int(len(l56) * target_conns)
+                    src = np.random.choice(l56, n_edges, replace=True)
+                    dst = np.random.choice(l4, n_edges, replace=True)
+                    edge_rows.extend(src.tolist())
+                    edge_cols.extend(dst.tolist())
 
         # 2. Sparse INTER-module connectivity at same level (~1%)
         inter_same_density_default = 0.01
@@ -333,7 +426,21 @@ class DynamicGraph:
 
         weight_vals = np.abs(np.random.normal(0, std_dev, num_edges)).astype(np.float32)
         src_is_inh = self.is_inhibitory[edge_rows]
-        weight_vals[src_is_inh] = -weight_vals[src_is_inh]
+        
+        # --- Item 2: Lateral Inhibition Hierarchy ---
+        # Enforce a strict hierarchy where lateral inhibition (PN -> IN -> neighbor PN) 
+        # is weighted 10 times more heavily than recurrent inhibition (PN -> IN -> same PN).
+        # We approximate this by looking at inter-module vs intra-module inhibitory edges.
+        src_modules = self.node_to_module[edge_rows]
+        dst_modules = self.node_to_module[edge_cols]
+        is_lateral_inh = src_is_inh & (src_modules != dst_modules) & (src_modules != -1) & (dst_modules != -1)
+        is_recurrent_inh = src_is_inh & (src_modules == dst_modules) & (src_modules != -1)
+        
+        weight_vals[is_lateral_inh] *= 10.0
+        weight_vals[is_recurrent_inh] *= 1.0 # Base weight for recurrent
+        
+        # Apply signs after weighting
+        weight_vals[src_is_inh] = -np.abs(weight_vals[src_is_inh])
 
         # Input nodes (0-255) are CLAMPED during settling — edges from/to
         # them are external forcing, not autonomous recurrence. Tuning
@@ -386,6 +493,23 @@ class DynamicGraph:
         n_input = int(input_proj_mask.sum())
         n_free = int(free_mask.sum())
         print(f"Edges: {n_input} input-proj (2x, outside SR), {n_free} free (SR-tuned to {target_sr})")
+
+        # --- Scale-Invariant E/I Balancing (1/sqrt(K)) ---
+        # Scale synaptic strengths proportionally to 1/sqrt(K), where K is the in-degree.
+        # This ensures that nodes with high fan-in don't saturate.
+        unique_dst, dst_counts = np.unique(edge_cols, return_counts=True)
+        fan_in_map = dict(zip(unique_dst, dst_counts))
+        fan_in = np.array([fan_in_map.get(d, 1) for d in edge_cols], dtype=np.float32)
+        
+        # Apply 1/sqrt(K) scaling to free edges (SR-tuned weights already have some scaling)
+        # We blend this with the existing weights to maintain the spectral radius property
+        # while enforcing the fan-in balance.
+        k_scaling = 1.0 / np.sqrt(np.maximum(fan_in[free_mask], 1.0))
+        # Normalize k_scaling to preserve mean magnitude
+        k_scaling /= (np.mean(k_scaling) + 1e-8)
+        weight_vals[free_mask] *= k_scaling
+        
+        print(f"Scale-invariant E/I balancing (1/sqrt(K)) applied to {n_free} free edges.")
         print(f"Weight magnitudes: input={np.abs(weight_vals[input_proj_mask]).mean():.4f}, "
               f"free={np.abs(weight_vals[free_mask]).mean():.4f}")
 
@@ -489,6 +613,19 @@ class DynamicGraph:
         fb_motor_mask = (edge_rows >= 256) & (edge_rows < 512) & (edge_cols >= 512)
         print(f"PFA: {fb_motor_mask.sum()} independent feedback edges enabling Product Feedback Alignment.")
 
+        # Ensure DG/CA3 indices are arrays
+        self.dg_indices = np.array(self.dg_indices, dtype=np.int64)
+        self.ca3_indices = np.array(self.ca3_indices, dtype=np.int64)
+
+        # Apply Detonator Synapses Boost (DG -> CA3)
+        dg_mask = np.isin(edge_rows, self.dg_indices)
+        ca3_mask = np.isin(edge_cols, self.ca3_indices)
+        detonator_mask = dg_mask & ca3_mask
+        # Mossy Fibers are extremely powerful ("detonators")
+        weight_vals[detonator_mask] *= 30.0
+        if detonator_mask.sum() > 0:
+            print(f"Applied 10x detonator boost to {detonator_mask.sum()} DG->CA3 synapses.")
+
         # Build final sparse matrix
         self.weight_sparse = sp.csr_matrix(
             (weight_vals, (edge_rows, edge_cols)),
@@ -496,45 +633,36 @@ class DynamicGraph:
         )
 
         # --- Timescale Assignment (per-module, per-level) ---
-        # Massive Range of Intrinsic Timescales corresponding to NMDA vs AMPA
-        tau_by_level = {0: 1.0, 1: 5.0, 2: 25.0, 3: 100.0}
-
+        # Eliminate homogeneous parameters, progressive scaling of tau
         self.taus = np.zeros(num_nodes)
-        # I/O nodes: fast
-        self.taus[:n_io] = 0.1
-        # Association nodes: per-module by level
+        self.taus[:n_io] = 1.0  # I/O nodes rapid transient
+        
         for mod in self.modules:
             level = mod['level']
-            self.taus[mod['start']:mod['end']] = tau_by_level[level]
+            # Item 3: Hierarchical Gradient of Intrinsic Neural Timescales (INTs)
+            # τrec increases linearly with layer depth: level 0 (fast) -> level 3 (slow)
+            # base_tau = 20.0 + 100.0 * level 
+            # We add variance to avoid perfect homogeneity.
+            base_tau = 20.0 + 150.0 * level # Linear gradient: 20, 170, 320, 470
+            self.taus[mod['start']:mod['end']] = np.random.normal(base_tau, base_tau * 0.1, mod['size']).astype(np.float32)
+
+        # Enforce biological bounds [20ms, 2000ms]
+        self.taus = np.clip(self.taus, 20.0, 2000.0)
 
         # State and bias initialization
         self.states = np.zeros(num_nodes)
         self.biases = np.random.uniform(-0.01, 0.01, num_nodes)
+        
+        # Intense tonic inhibition for Dentate Gyrus (DG) pattern separation
+        if len(self.dg_indices) > 0:
+            self.biases[self.dg_indices] = -2.0
 
         # Store hierarchical connection metadata for predictive coding
         # Top-down weight indices: for each (upper_mod, lower_mod) pair,
         # store the edge indices in the sparse representation
         self._build_hierarchical_index(edge_rows, edge_cols)
 
-        # --- Complementary Learning Systems ---
-        # Mark ~20% of modules at each level as hippocampal (fast learners)
-        # Remaining 80% are neocortical (slow learners that extract regularities)
-        self.hippocampal_modules = set()
-        self.neocortical_modules = set()
-        
-        # In humans, the neocortex contains ~14B neurons, Hippocampus CA1 ~5M
-        # This equates to roughly a 1:2800 ratio. We'll enforce a single hippocampal module total,
-        # or at most 2% of the modules. Let's make one mid-to-high level module the hippocampus.
-        for level in range(num_levels):
-            level_mods = self.level_modules[level]
-            # Only allocate to hippocampus if level == 2 (to simulate medial temporal lobe)
-            n_hippo = 1 if (level == 2 and len(level_mods) > 0) else 0
-            for mod_id in level_mods[:n_hippo]:
-                self.hippocampal_modules.add(mod_id)
-            for mod_id in level_mods[n_hippo:]:
-                self.neocortical_modules.add(mod_id)
-        print(f"CLS: {len(self.hippocampal_modules)} hippocampal modules, "
-              f"{len(self.neocortical_modules)} neocortical modules")
+        # (CLS sets are now initialized at the top of the function)
 
         # Build connectivity map between hippocampal and neocortical modules
         self._build_cls_connectivity(edge_rows, edge_cols)
