@@ -1941,3 +1941,230 @@ class PredictiveCodingEngine:
                             'std': vals.std().item(),
                         }
             return stats
+
+# --- BPTT Architecture Additions ---
+
+import torch.nn as nn
+import torch.nn.functional as F
+
+class EILinear(nn.Module):
+    def __init__(self, in_features, out_features, is_inhibitory=False):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
+        nn.init.xavier_normal_(self.weight)
+        self.is_inhibitory = is_inhibitory
+
+    def forward(self, x):
+        # Force weights to be strictly positive (excitatory) or negative (inhibitory)
+        w_functional = torch.abs(self.weight) 
+        if self.is_inhibitory:
+            w_functional = -w_functional
+        return F.linear(x, w_functional)
+
+
+class STSPLinear(nn.Module):
+    def __init__(self, in_features, out_features):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
+        nn.init.xavier_normal_(self.weight)
+        
+        self.Lambda = nn.Parameter(torch.ones(out_features, in_features) * 0.1)
+        self.Gamma = nn.Parameter(torch.ones(out_features, in_features) * 0.05)
+        
+    def forward(self, x, F_state):
+        # x: (batch, in_features)
+        # F_state: (batch, out_features, in_features)
+        
+        W_exp = self.weight.unsqueeze(0) # (1, out_features, in_features)
+        G = W_exp * (1.0 + F_state)
+        
+        # y = G * x
+        y = torch.bmm(G, x.unsqueeze(2)).squeeze(2)
+        return y
+        
+    def update_state(self, F_state, x, h):
+        # x: pre-synaptic (batch, in_features)
+        # h: post-synaptic (batch, out_features)
+        outer = torch.bmm(h.unsqueeze(2), x.unsqueeze(1))
+        
+        L = torch.sigmoid(self.Lambda).unsqueeze(0) # forget
+        G = self.Gamma.unsqueeze(0) # learn
+        
+        F_new = F_state - L * F_state + G * outer
+        return F_new
+
+
+class PMSNCell(nn.Module):
+    def __init__(self, in_features, hidden_dim, sparsity_alpha=0.1):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.sparsity_alpha = sparsity_alpha
+        
+        # Basal: bottom-up from input
+        self.basal_ff = EILinear(in_features, hidden_dim, is_inhibitory=False)
+        # Basal: lateral recurrent
+        self.basal_rec = STSPLinear(hidden_dim, hidden_dim)
+        
+        # Apical: top-down / context 
+        self.apical_rec = EILinear(hidden_dim, hidden_dim, is_inhibitory=False)
+        
+        # SFA Params
+        self.tau_fast = 3.75
+        self.tau_slow = 10.0
+        self.a_sfa = 0.5
+        self.b_sfa = 0.1
+        self.dt = 1.0
+        
+        self.tau_basal_raw = nn.Parameter(torch.zeros(hidden_dim))
+        self.tau_apical_raw = nn.Parameter(torch.zeros(hidden_dim))
+        
+        self.gamma = nn.Parameter(torch.ones(hidden_dim) * 0.5)
+        self.kappa = nn.Parameter(torch.ones(hidden_dim) * 2.0)
+        
+        # Intrinsic Placticity buffers
+        self.register_buffer('ip_bias', torch.zeros(hidden_dim))
+        self.register_buffer('activation_ema', torch.zeros(hidden_dim))
+        
+    def get_taus(self):
+        t_basal = 1.0 + 20.0 * torch.sigmoid(self.tau_basal_raw)
+        t_apical = 10.0 + 100.0 * torch.sigmoid(self.tau_apical_raw)
+        return t_basal, t_apical
+
+    def forward(self, x_in, c_apical, state):
+        V_b, V_a, V_out, w_sfa, F_stsp, h_prev = state
+        
+        t_basal, t_apical = self.get_taus()
+        
+        x_basal_ff = self.basal_ff(x_in)
+        x_basal_rec = self.basal_rec(h_prev, F_stsp)
+        x_basal_total = x_basal_ff + x_basal_rec
+        
+        # Basal Update
+        V_b_new = torch.exp(-1.0 / t_basal) * V_b + x_basal_total
+        
+        # Apical Update
+        x_apical_total = self.apical_rec(c_apical)
+        V_a_new = torch.exp(-1.0 / t_apical) * V_a + x_apical_total
+        
+        # Somatic Integration (BCD via multiplicative)
+        sigma = torch.sigmoid(V_b_new * V_a_new)
+        V_soma = V_b_new + self.gamma * V_a_new + self.kappa * sigma
+        V_soma = V_soma + self.ip_bias # Add IP
+        
+        # SFA 
+        V_out_new = V_out + (self.dt / self.tau_fast) * (-V_out + V_soma - w_sfa)
+        h_pre = torch.relu(V_out_new)
+        
+        # kWTA Soft Gating
+        k = max(1, int(self.hidden_dim * self.sparsity_alpha))
+        topk, _ = torch.topk(h_pre, k, dim=1)
+        threshold = topk[:, -1:]
+        h_kwta = torch.relu(h_pre - threshold + 0.1) # Soft sparsity
+        
+        h_new = torch.clamp(h_kwta, 0.0, 10.0)
+        
+        # Post-spike SFA adaptation
+        w_sfa_new = w_sfa + (self.dt / self.tau_slow) * (self.a_sfa * V_out_new - w_sfa) + self.b_sfa * h_new
+        
+        # STSP Update
+        F_stsp_new = self.basal_rec.update_state(F_stsp, h_prev, h_new)
+        
+        new_state = (V_b_new, V_a_new, V_out_new, w_sfa_new, F_stsp_new, h_new)
+        return h_new, new_state
+
+
+class MultiCompartmentSTSPNet(nn.Module):
+    def __init__(self, vocab_size=256, hidden_dim=256, num_layers=2):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, hidden_dim)
+        
+        self.layers = nn.ModuleList([
+            PMSNCell(hidden_dim, hidden_dim, sparsity_alpha=0.1) for _ in range(num_layers)
+        ])
+        
+        self.top_down_projs = nn.ModuleList([
+            nn.Linear(hidden_dim, hidden_dim) for _ in range(num_layers - 1)
+        ])
+        
+        self.readout = nn.Linear(hidden_dim, vocab_size)
+        
+    def forward(self, x_seq, use_sleep_noise=False):
+        batch_size, seq_len = x_seq.size()
+        hidden_dim = self.layers[0].hidden_dim
+        device = x_seq.device
+        
+        states = []
+        for _ in range(len(self.layers)):
+            V_b = torch.zeros(batch_size, hidden_dim, device=device)
+            V_a = torch.zeros(batch_size, hidden_dim, device=device)
+            V_out = torch.zeros(batch_size, hidden_dim, device=device)
+            w_sfa = torch.zeros(batch_size, hidden_dim, device=device)
+            F_stsp = torch.zeros(batch_size, hidden_dim, hidden_dim, device=device)
+            h_prev = torch.zeros(batch_size, hidden_dim, device=device)
+            states.append((V_b, V_a, V_out, w_sfa, F_stsp, h_prev))
+            
+        emb_seq = self.embedding(x_seq)
+        if use_sleep_noise:
+            emb_seq = emb_seq * 0.0  + torch.randn_like(emb_seq) * 0.1
+            
+        logits = []
+        pred_losses = []
+        
+        layer_acts_accum = [torch.zeros(hidden_dim, device=device) for _ in range(len(self.layers))]
+        
+        for t in range(seq_len):
+            x_t = emb_seq[:, t, :]
+            
+            new_states = []
+            h_current_layer = x_t
+            
+            for l, cell in enumerate(self.layers):
+                if l < len(self.layers) - 1:
+                    _, _, _, _, _, h_above_prev = states[l+1]
+                    c_apical = self.top_down_projs[l](h_above_prev)
+                else:
+                    c_apical = torch.zeros_like(h_current_layer)
+                    
+                h_out, new_state = cell(h_current_layer, c_apical, states[l])
+                
+                if l < len(self.layers) - 1:
+                    pred_loss = F.mse_loss(h_out, c_apical) 
+                    pred_losses.append(pred_loss)
+                
+                h_current_layer = h_out
+                new_states.append(new_state)
+                
+                # Accumulate for IP
+                layer_acts_accum[l] = layer_acts_accum[l] + h_out.detach().mean(dim=0)
+                
+            states = new_states
+            logits_t = self.readout(h_current_layer)
+            logits.append(logits_t)
+            
+        logits = torch.stack(logits, dim=1) # (B, S, V)
+        total_pred_loss = sum(pred_losses) / max(1, len(pred_losses)) if pred_losses else torch.tensor(0.0, device=device)
+        
+        layer_acts_stacked = torch.stack(layer_acts_accum, dim=0)
+        return logits, total_pred_loss, states, layer_acts_stacked
+        
+    @torch.no_grad()
+    def apply_intrinsic_plasticity(self, layer_acts_stacked, seq_len, target_rate=0.1, lr=0.01):
+        beta = 0.99
+        for l, cell in enumerate(self.layers):
+            mean_act = layer_acts_stacked[l] / seq_len
+            cell.activation_ema.mul_(beta).add_(mean_act, alpha=1 - beta)
+            
+            # Only boost neurons that are far below target rate (dormant)
+            diff = (target_rate - cell.activation_ema).clamp(min=0.0)
+            cell.ip_bias += lr * diff
+
+    @torch.no_grad()
+    def apply_sleep_homeostasis(self, eta_sleep=0.05):
+        # Apply global synaptic downscaling (SHY)
+        for name, param in self.named_parameters():
+            if 'weight' in name:
+                param.mul_(1.0 - eta_sleep)
