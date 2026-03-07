@@ -409,8 +409,9 @@ def jit_solve_dynamics_imex(
         # Integrate an OU process noise term simulating background bombardment
         sigma_noise = 0.05
         # The equation expects a force term, standard stochastic integration is sigma * sqrt(dt) * xi
-        # Since this `dv_basal` is later multiplied by `current_dt`, we divide by sqrt(dt) here:
-        ou_noise = sigma_noise * torch.randn_like(current_b) / torch.sqrt(torch.tensor(current_dt))
+        # Since this `dv_basal` is later divided by `taus` and multiplied by `current_dt`,
+        # we scale the noise by sqrt(2*taus/dt) to ensure steady-state variance is constant (sigma^2).
+        ou_noise = sigma_noise * torch.randn_like(current_b) * torch.sqrt(2.0 * taus / current_dt)
 
         # Apply tau scaling to the integration
         dv_basal = (G_L * (E_L - current_b) + 
@@ -497,7 +498,7 @@ def jit_solve_dynamics_imex(
         # Proposal 5: Spike-Frequency Adaptation for RS Units (AHP Current)
         is_rs = (~is_inhibitory)
         sfa_states = sfa_states + current_dt * (current_b.abs() - sfa_states) / taus
-        current_b = torch.where(is_rs, current_b - 0.15 * sfa_states * current_b.sign(), current_b)
+        current_b = torch.where(is_rs, current_b - 0.15 * (20.0 / taus) * sfa_states * current_b.sign(), current_b)
 
         # Clamp compartments
         current_b = current_b.clamp(-1.5, 1.5)
@@ -1146,6 +1147,22 @@ class PredictiveCodingEngine:
         
             
             return n_reset
+
+    def zero_states(self):
+        """
+        Zeroes out all fast transient states.
+        Should be called between distinct input sequences or evaluation batches.
+        """
+        self.state.zero_()
+        self.state_basal.zero_()
+        self.state_apical.zero_()
+        self.sfa_states.zero_()
+        self.cahva_states.zero_()
+        self.rho_slow_states.zero_()
+        self.apical_bp1.zero_()
+        self.apical_bp2.zero_()
+        if hasattr(self, 'previous_state'):
+            self.previous_state.zero_()
 
     def settle(self, input_vector, max_steps=40, tol=5e-3,
                input_mask=None, damping=0.15, implicit_damping=2.0):

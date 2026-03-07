@@ -255,7 +255,7 @@ class SequentialTrainer:
         print(f"  Realigning readout ({num_iterations} SGD steps on {data_path})...")
 
         saved_state = self.engine.state.clone()
-        self.engine.state.zero_()
+        self.engine.zero_states()
 
         acc_count = 0
         
@@ -958,7 +958,7 @@ class SequentialTrainer:
             eval_engine.temporal_A = copy.deepcopy(self.engine.temporal_A)
             
             # Ensure states are fully zeroed out for clean evaluate
-            eval_engine.state.zero_()
+            eval_engine.zero_states()
             eval_engine.previous_state.zero_()
             eval_engine.facilitation.fill_(0.2)
             eval_engine.depression.fill_(1.0)
@@ -1055,7 +1055,7 @@ def main():
     trainer = SequentialTrainer(num_nodes=args.nodes, device=device, num_modules=args.modules)
 
     # Reset state before curriculum begins
-    trainer.engine.state.zero_()
+    trainer.engine.zero_states()
 
     # Phase 1: Holophrases
     trainer.train_phase("Holophrases", "ndcd/data/level1_holophrases.txt",
