@@ -625,9 +625,10 @@ class SequentialTrainer:
                 if step > 0 and step % self.si_consolidation_interval == 0:
                     self.engine.consolidate_importance()
 
-                # 8g. Sleep replay phase for memory consolidation
+                # 8g. Offline Renormalization phase for memory consolidation
                 if step > 0 and step % self.sleep_interval == 0:
-                    self.sleep_phase(num_replay_cycles=200, replay_lr_mult=0.1)
+                    self.offline_renormalization(num_replay_cycles=200, replay_lr_mult=0.1)
+
 
                 # 9. VICReg Regularization logic removed.
                 # The previous logic incorrectly subtracted a scalar positive loss 
@@ -749,17 +750,18 @@ class SequentialTrainer:
         field = -torch.dot(self.engine.biases, rho)
         return (interaction + field).item()
 
-    def sleep_phase(self, num_replay_cycles=200, replay_lr_mult=0.1):
+    def offline_renormalization(self, num_replay_cycles=200, replay_lr_mult=0.1):
         """
         Offline consolidation: replay learned patterns by settling
         from noise without external input, then strengthen attractors.
         Also performs global synaptic renormalization (SHY cycle).
         """
-        print("\n--- Sleep Phase: Consolidation & SHY Renormalization ---")
+        print("\n--- Offline Renormalization: Consolidation & SHY ---")
         
         # 1. Global Synaptic Renormalization (SHY Cycle)
         # Downscales net strength while preserving high-information backbone
-        self.engine.sleep_phase()
+        self.engine.offline_renormalization()
+
 
         # 2. Pattern Replay and Attractor Reinforcement
 

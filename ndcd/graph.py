@@ -91,9 +91,9 @@ class DynamicGraph:
                     
                 # Distribute extra nodes
                 if module_id == hippo_module_id:
-                    # Item 4: Expansion-Sparsity Layer (5:1 Expansion for DG)
-                    # Entorhinal (Input) is 256 nodes. DG should be 1280 nodes (5:1).
-                    n_l4 = 1280 
+                    # Item 3: DG-Inspired Sparse Expansion Layer (10:1 Expansion for DG)
+                    # Entorhinal (Input) is 256 nodes. DG should be 2560 nodes (10:1).
+                    n_l4 = 2560 
                     n_l23 = 256  # CA3
                     n_l56 = 256  # CA1
                     n_in_module = n_l4 + n_l23 + n_l56
@@ -144,6 +144,7 @@ class DynamicGraph:
         self.is_pv = np.zeros(num_nodes, dtype=bool)
         self.is_sst = np.zeros(num_nodes, dtype=bool)
         self.is_vip = np.zeros(num_nodes, dtype=bool)
+        self.is_neg_pe = np.zeros(num_nodes, dtype=bool)
         
         for mod in self.modules:
             # 20% of nodes in each module are inhibitory
@@ -164,6 +165,13 @@ class DynamicGraph:
                     self.is_sst[inh_idx[n_pv:n_pv+n_sst]] = True
                 if n_pv + n_sst < n_inh:
                     self.is_vip[inh_idx[n_pv+n_sst:]] = True
+            
+            # --- Item 4: Asymmetric Predictive Coding (PEONs) ---
+            # Designate half of L2/3 as Negative Prediction Error neurons (PEONs)
+            l23_idx = mod['l23_indices']
+            if len(l23_idx) > 0:
+                n_neg = len(l23_idx) // 2
+                self.is_neg_pe[l23_idx[:n_neg]] = True
 
         # --- Functional Lateralization ---
         # Selectively designate ~15% of intermediate modules as Broca and ~15% as Wernicke
@@ -320,6 +328,19 @@ class DynamicGraph:
                         # Bidirectional
                         edge_rows.extend(dst_picks.tolist())
                         edge_cols.extend(src_picks.tolist())
+                    
+                    # --- Item 4: PEON Lateral Inhibition (Omission Signaling) ---
+                    # PEON streams in L2/3 connect laterally via inhibitory synapses
+                    pe_i = mod_i['l23_indices'][self.is_neg_pe[mod_i['l23_indices']]]
+                    pe_j = mod_j['l23_indices'][self.is_neg_pe[mod_j['l23_indices']]]
+                    if len(pe_i) > 0 and len(pe_j) > 0:
+                        n_peon = max(2, int(len(pe_i) * 0.15)) # 15% lateral PEON connectivity
+                        src_p = np.random.choice(pe_i, n_peon, replace=True)
+                        dst_p = np.random.choice(pe_j, n_peon, replace=True)
+                        edge_rows.extend(src_p.tolist())
+                        edge_cols.extend(dst_p.tolist())
+                        edge_rows.extend(dst_p.tolist())
+                        edge_cols.extend(src_p.tolist())
 
         # 3. Hierarchical connections between levels.
         # Bottom-up: L2/3 (lower) -> L4 (upper)
@@ -451,8 +472,34 @@ class DynamicGraph:
         weight_vals[is_lateral_inh] *= 10.0
         weight_vals[is_recurrent_inh] *= 1.0 # Base weight for recurrent
         
-        # Apply signs after weighting
-        weight_vals[src_is_inh] = -np.abs(weight_vals[src_is_inh])
+        # --- Solution 2: Spatial Lateral Inhibition (Mexican-hat mask) ---
+        # Apply spatial mask to PV+ interneuron connectivity
+        # Ensures strong lateral inhibition to neighboring nodes while minimizing recurrent self-inhibition
+        src_is_pv = self.is_pv[edge_rows]
+        if src_is_pv.any():
+            pos_src = self.pos[edge_rows[src_is_pv]]
+            pos_dst = self.pos[edge_cols[src_is_pv]]
+            distances = np.linalg.norm(pos_src - pos_dst, axis=1)
+            
+            # Mexican-hat ring: r^2 * exp(-r^2 / sigma^2)
+            # Peaks at distance = sigma.
+            sigma_spatial = 0.2
+            spatial_mask = (distances**2 / sigma_spatial**2) * np.exp(-distances**2 / sigma_spatial**2) * np.e
+            
+            # Apply mask to PV+ weights, amplifying surround ring and suppressing center
+            weight_vals[src_is_pv] *= spatial_mask * 5.0
+
+        # Apply E/I Balance Ratio g ≈ 5.0 (Brunel 2000 AI regime)
+        # Inhibitory weights are scaled to be ~5x stronger than excitatory ones to 
+        # ensure the network operates in the fluctuation-driven balanced state.
+        weight_vals[src_is_inh] = -np.abs(weight_vals[src_is_inh]) * 5.0
+
+        # --- Item 4: Lateral PEON Inhibition ---
+        src_is_peon = self.is_neg_pe[edge_rows]
+        dst_is_peon = self.is_neg_pe[edge_cols]
+        # Lateral inhibitory connections between PEON streams across different modules
+        is_lat_peon = src_is_peon & dst_is_peon & (src_modules != dst_modules) & (src_modules != -1) & (dst_modules != -1)
+        weight_vals[is_lat_peon] = -np.abs(weight_vals[is_lat_peon]) * 5.0 # Strong lateral inhibition
 
         # Input nodes (0-255) are CLAMPED during settling — edges from/to
         # them are external forcing, not autonomous recurrence. Tuning
@@ -555,23 +602,22 @@ class DynamicGraph:
         lat_signs = np.where(lat_src_inh, -1.0, 1.0)
         weight_vals[lat_l0_mask] = np.abs(weight_vals[lat_l0_mask]) / np.sqrt(bounded_lat_fan_in) * lat_signs
         
-        # Massive Recurrent Excitation for Level 2 and Level 3 intra-module connections (Prefrontal)
-        l23_intra_mask = (src_levels_arr == dst_levels_arr) & (src_levels_arr >= 2) & free_mask
-        # Only boost connections within the *same* module for working memory 
-        l23_same_mod = self.node_to_module[edge_rows[l23_intra_mask]] == self.node_to_module[edge_cols[l23_intra_mask]]
+        # Hierarchical Recurrent Excitation Gradient (Chaudhuri 2015)
+        # w_EE(l) = w_base * (1 + η * h_l) where η ≈ 0.68
+        # This increases topic persistence and reverberatory activity in higher layers.
+        recurrent_e_mask = (src_levels_arr == dst_levels_arr) & (~src_is_inh) & free_mask
+        # Only boost connections within the *same* module for working memory
+        same_mod_mask = self.node_to_module[edge_rows] == self.node_to_module[edge_cols]
+        target_indices = np.where(recurrent_e_mask & same_mod_mask)[0]
         
-        # Ensure we can update the correct edges
-        l23_indices = np.where(l23_intra_mask)[0]
-        same_mod_indices = l23_indices[l23_same_mod]
-        
-        # Level 2 gets 3x boost, Level 3 gets 5x boost for working memory persistence
-        for idx in same_mod_indices:
-            lvl = src_levels_arr[idx]
-            boost = 3.0 if lvl == 2 else 5.0
-            sign = -1.0 if self.is_inhibitory[edge_rows[idx]] else 1.0
-            weight_vals[idx] = np.abs(weight_vals[idx]) * boost * sign
+        eta = 0.68
+        max_h_lvl = float(self.num_levels - 1)
+        for idx in target_indices:
+            h_l = src_levels_arr[idx] / max_h_lvl if max_h_lvl > 0 else 0.0
+            boost = 1.0 + eta * h_l
+            weight_vals[idx] *= boost
             
-        print(f"Boosted recurrent excitation for {len(same_mod_indices)} high-level intra-module working memory edges.")
+        print(f"Applied hierarchical recurrent excitatory gradient (η={eta}) to {len(target_indices)} edges.")
 
         # Enforce minimum weight magnitude for lateral signal propagation
         lat_min_magnitude = 0.01
