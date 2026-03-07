@@ -412,11 +412,12 @@ def jit_solve_dynamics_imex(
         # Since this `dv_basal` is later multiplied by `current_dt`, we divide by sqrt(dt) here:
         ou_noise = sigma_noise * torch.randn_like(current_b) / torch.sqrt(torch.tensor(current_dt))
 
+        # Apply tau scaling to the integration
         dv_basal = (G_L * (E_L - current_b) + 
                     g_E_basal * (E_E - current_b) + 
                     g_I_basal * (E_I - current_b) + 
                     biases + input_vector + 
-                    ou_noise)
+                    ou_noise) / taus
         
         # --- Item 1: Non-linear Sigmoidal Integration for Apical ---
         # Instead of pure quadratic, we use a saturating sigmoidal term to allow XOR logic
@@ -427,7 +428,7 @@ def jit_solve_dynamics_imex(
         dv_apical = (G_L * (E_L - current_a) + 
                      g_E_apical * (E_E - current_a) + 
                      g_I_apical * (E_I - current_a) +
-                     2.0 * sigmoidal_feedback) # Non-linear XOR-capable term
+                     2.0 * sigmoidal_feedback) / (taus * apical_tau_mult) # Non-linear XOR-capable term
         
         # --- Item 3: Diversified Interneuron Microcircuits (PV+/SOM+) ---
         # Note: Interneuron activity val calculation moved to top of loop for get_soma usage.
@@ -469,8 +470,9 @@ def jit_solve_dynamics_imex(
         # Item 3: Diversified Interneuron Dynamics
         # PV is fast (~2ms)
         pv_tau_mult = 0.1 # Fast PV (10% of standard tau -> ~1-2ms if tau=20)
-        current_b = (current_b + current_dt * (dv_basal * current_ais) / (taus * torch.where(is_pv, pv_tau_mult, 1.0))) / imex_denom
-        current_a = current_a + current_dt * (dv_apical / apical_tau_mult) # NMDA-like slow apical
+        # Note: dv_basal and dv_apical already have tau factored in above
+        current_b = (current_b + current_dt * (dv_basal * current_ais) / torch.where(is_pv, pv_tau_mult, 1.0)) / imex_denom
+        current_a = current_a + current_dt * dv_apical # NMDA-like slow apical
         current_a = current_a.clamp(-1.5, 1.5)
 
         # BAC Firing CaHVA Plateau Update: Supralinear Regenerative Current (Item 2)
@@ -494,7 +496,7 @@ def jit_solve_dynamics_imex(
 
         # Proposal 5: Spike-Frequency Adaptation for RS Units (AHP Current)
         is_rs = (~is_inhibitory)
-        sfa_states = sfa_states + current_dt * (current_b.abs() - sfa_states) / 20.0
+        sfa_states = sfa_states + current_dt * (current_b.abs() - sfa_states) / taus
         current_b = torch.where(is_rs, current_b - 0.15 * sfa_states * current_b.sign(), current_b)
 
         # Clamp compartments
