@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from typing import Optional, Tuple, List
+from torch.utils.checkpoint import checkpoint
 
 
 @torch.jit.script
@@ -1972,8 +1973,8 @@ class STSPLinear(nn.Module):
         self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
         nn.init.xavier_normal_(self.weight)
         
-        self.Lambda = nn.Parameter(torch.ones(out_features, in_features) * 0.1)
-        self.Gamma = nn.Parameter(torch.ones(out_features, in_features) * 0.05)
+        self.Lambda_raw = nn.Parameter(torch.ones(1) * -4.6) # Initialized to ~0.01 via sigmoid
+        self.Gamma_raw = nn.Parameter(torch.ones(1) * -1.1)  # Initialized to ~0.25 via sigmoid
         
     def forward(self, x, F_state):
         # x: (batch, in_features)
@@ -1986,15 +1987,19 @@ class STSPLinear(nn.Module):
         y = torch.bmm(G, x.unsqueeze(2)).squeeze(2)
         return y
         
-    def update_state(self, F_state, x, h):
+    def update_state(self, F_state, x, h, c_apical=None):
         # x: pre-synaptic (batch, in_features)
         # h: post-synaptic (batch, out_features)
         outer = torch.bmm(h.unsqueeze(2), x.unsqueeze(1))
         
-        L = torch.sigmoid(self.Lambda).unsqueeze(0) # forget
-        G = self.Gamma.unsqueeze(0) # learn
+        Lambda = torch.sigmoid(self.Lambda_raw).unsqueeze(0).unsqueeze(2) # forget
+        Gamma = torch.sigmoid(self.Gamma_raw).unsqueeze(0).unsqueeze(2) # learn
         
-        F_new = F_state - L * F_state + G * outer
+        if c_apical is not None:
+            context_gain = torch.sigmoid(c_apical.mean(dim=-1, keepdim=True)).unsqueeze(2)
+            Gamma = Gamma * (1.0 + context_gain)
+            
+        F_new = F_state - Lambda * F_state + Gamma * outer
         return F_new
 
 
@@ -2019,11 +2024,24 @@ class PMSNCell(nn.Module):
         self.b_sfa = 0.1
         self.dt = 1.0
         
-        self.tau_basal_raw = nn.Parameter(torch.zeros(hidden_dim))
-        self.tau_apical_raw = nn.Parameter(torch.zeros(hidden_dim))
+        
+        # Functional Lateralization: Left half fast (syntax), Right half slow (semantics)
+        self.tau_basal_raw = nn.Parameter(torch.cat([
+            torch.randn(hidden_dim // 2) * 0.1 - 2.0, # Fast (sigmoid(-2) is small -> ~1.0 t_basal)
+            torch.randn(hidden_dim - hidden_dim // 2) * 0.1 + 2.0 # Slow (sigmoid(2) is large -> ~20.0 t_basal)
+        ]))
+        
+        self.tau_apical_raw = nn.Parameter(torch.cat([
+            torch.randn(hidden_dim // 2) * 0.1 - 2.0, # Fast
+            torch.randn(hidden_dim - hidden_dim // 2) * 0.1 + 2.0 # Slow
+        ]))
+        
+        self.shunt_weight = nn.Parameter(torch.ones(hidden_dim) * 0.5)
         
         self.gamma = nn.Parameter(torch.ones(hidden_dim) * 0.5)
         self.kappa = nn.Parameter(torch.ones(hidden_dim) * 2.0)
+        
+        self.layer_norm = nn.LayerNorm(hidden_dim, eps=1e-5) # LayerNorm (Stability Anchor)
         
         # Intrinsic Placticity buffers
         self.register_buffer('ip_bias', torch.zeros(hidden_dim))
@@ -2034,7 +2052,7 @@ class PMSNCell(nn.Module):
         t_apical = 10.0 + 100.0 * torch.sigmoid(self.tau_apical_raw)
         return t_basal, t_apical
 
-    def forward(self, x_in, c_apical, state):
+    def forward(self, x_in, c_apical, state, progress=1.0):
         V_b, V_a, V_out, w_sfa, F_stsp, h_prev = state
         
         t_basal, t_apical = self.get_taus()
@@ -2050,20 +2068,43 @@ class PMSNCell(nn.Module):
         x_apical_total = self.apical_rec(c_apical)
         V_a_new = torch.exp(-1.0 / t_apical) * V_a + x_apical_total
         
-        # Somatic Integration (BCD via multiplicative)
-        sigma = torch.sigmoid(V_b_new * V_a_new)
-        V_soma = V_b_new + self.gamma * V_a_new + self.kappa * sigma
-        V_soma = V_soma + self.ip_bias # Add IP
+        # Apical "Precision" Gating (Dendritic AND-Gate)
+        prime = torch.sigmoid((V_b_new * V_a_new * self.gamma) - 1.0)
+        
+        # Soft Lateral Inhibition
+        # Penalize neurons if their neighbors (the layer mean) are highly active
+        local_activity = torch.relu(V_b_new).mean(dim=1, keepdim=True).clamp(min=1e-6)
+        soft_inh = 1.0 / (1.0 + local_activity * 0.5) # Relaxed 10x
+        
+        # Maturity Factor
+        maturity = torch.clamp(torch.tensor(progress * 5.0, device=x_in.device), 0.0, 1.0)
+        
+        # The gate is permissive (1.0) at the start, and becomes an AND-gate (0.5 + prime) later
+        gate_strength = (1.0 - maturity) + (maturity * (0.5 + prime))
+        V_soma = V_b_new * soft_inh * gate_strength + (self.kappa * prime)
+        V_soma = self.layer_norm(V_soma + self.ip_bias) # Add IP and LayerNorm
         
         # SFA 
         V_out_new = V_out + (self.dt / self.tau_fast) * (-V_out + V_soma - w_sfa)
         h_pre = torch.relu(V_out_new)
         
+        # Inter-Hemispheric Inhibition (Broca-Wernicke Coordination)
+        h_left, h_right = torch.split(h_pre, self.hidden_dim // 2, dim=1)
+        h_left_gated = h_left / (1.0 + h_right.mean(dim=1, keepdim=True))
+        h_right_gated = h_right / (1.0 + h_left.mean(dim=1, keepdim=True))
+        h_pre = torch.cat([h_left_gated, h_right_gated], dim=1)
+        
         # kWTA Soft Gating
         k = max(1, int(self.hidden_dim * self.sparsity_alpha))
         topk, _ = torch.topk(h_pre, k, dim=1)
         threshold = topk[:, -1:]
-        h_kwta = torch.relu(h_pre - threshold + 0.1) # Soft sparsity
+        h_kwta = torch.relu((h_pre - threshold) * 20.0 + 0.1) # Sharpened kWTA (gain 20.0)
+        
+        # Lateral Feedback (Winner-Take-More)
+        h_pre = h_pre + h_kwta * 0.1
+        topk, _ = torch.topk(h_pre, k, dim=1)
+        threshold = topk[:, -1:]
+        h_kwta = torch.relu((h_pre - threshold) * 20.0 + 0.1)
         
         h_new = torch.clamp(h_kwta, 0.0, 10.0)
         
@@ -2071,28 +2112,31 @@ class PMSNCell(nn.Module):
         w_sfa_new = w_sfa + (self.dt / self.tau_slow) * (self.a_sfa * V_out_new - w_sfa) + self.b_sfa * h_new
         
         # STSP Update
-        F_stsp_new = self.basal_rec.update_state(F_stsp, h_prev, h_new)
+        F_stsp_new = self.basal_rec.update_state(F_stsp, h_prev, h_new, c_apical)
         
         new_state = (V_b_new, V_a_new, V_out_new, w_sfa_new, F_stsp_new, h_new)
         return h_new, new_state
 
 
 class MultiCompartmentSTSPNet(nn.Module):
-    def __init__(self, vocab_size=256, hidden_dim=256, num_layers=2):
+    def __init__(self, vocab_size=256, hidden_dim=256, num_layers=2, sparsity_alpha=0.1):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, hidden_dim)
+        self.dropout = nn.Dropout(0.1)
         
         self.layers = nn.ModuleList([
-            PMSNCell(hidden_dim, hidden_dim, sparsity_alpha=0.1) for _ in range(num_layers)
+            PMSNCell(hidden_dim, hidden_dim, sparsity_alpha=sparsity_alpha) for _ in range(num_layers)
         ])
         
         self.top_down_projs = nn.ModuleList([
             nn.Linear(hidden_dim, hidden_dim) for _ in range(num_layers - 1)
         ])
+        for proj in self.top_down_projs:
+            nn.init.orthogonal_(proj.weight, gain=2.0)
         
         self.readout = nn.Linear(hidden_dim, vocab_size)
         
-    def forward(self, x_seq, use_sleep_noise=False):
+    def forward(self, x_seq, use_sleep_noise=False, progress=1.0):
         batch_size, seq_len = x_seq.size()
         hidden_dim = self.layers[0].hidden_dim
         device = x_seq.device
@@ -2115,9 +2159,30 @@ class MultiCompartmentSTSPNet(nn.Module):
         pred_losses = []
         
         layer_acts_accum = [torch.zeros(hidden_dim, device=device) for _ in range(len(self.layers))]
+        c_apical_prev = [torch.zeros(batch_size, hidden_dim, device=device) for _ in range(len(self.layers) - 1)]
         
         for t in range(seq_len):
             x_t = emb_seq[:, t, :]
+            tokens_t = x_seq[:, t]
+            
+            # Decay short term memories on word/sentence boundaries (spaces or periods)
+            is_boundary = ((tokens_t == 32) | (tokens_t == 46)).float().unsqueeze(1)
+            new_states_before_step = []
+            for state_tuple in states:
+                V_b, V_a, V_out, w_sfa, F_stsp, h_prev = state_tuple
+                decay = 1.0 - is_boundary
+                
+                # Clone and detach to avoid inplace autograd errors during checkpointing
+                V_b_d = (V_b * decay).clone().detach().requires_grad_(True)
+                V_a_d = (V_a * decay).clone().detach().requires_grad_(True)
+                V_out_d = (V_out * decay).clone().detach().requires_grad_(True)
+                F_stsp_d = (F_stsp * decay.unsqueeze(2)).clone().detach().requires_grad_(True)
+                h_prev_d = (h_prev * decay).clone().detach().requires_grad_(True)
+                
+                w_sfa_d = w_sfa.clone().detach().requires_grad_(True)
+                
+                new_states_before_step.append((V_b_d, V_a_d, V_out_d, w_sfa_d, F_stsp_d, h_prev_d))
+            states = new_states_before_step
             
             new_states = []
             h_current_layer = x_t
@@ -2126,13 +2191,33 @@ class MultiCompartmentSTSPNet(nn.Module):
                 if l < len(self.layers) - 1:
                     _, _, _, _, _, h_above_prev = states[l+1]
                     c_apical = self.top_down_projs[l](h_above_prev)
+                    c_apical_delayed = c_apical_prev[l]
+                    c_apical_prev[l] = c_apical
                 else:
-                    c_apical = torch.zeros_like(h_current_layer)
+                    c_apical_delayed = torch.zeros_like(h_current_layer)
                     
-                h_out, new_state = cell(h_current_layer, c_apical, states[l])
+                # Thalamic Gating for input layer (filter out predictable noise)
+                if l == 0:
+                    surprise = torch.norm(h_current_layer - c_apical_delayed, dim=1, keepdim=True) + 1e-6
+                    # Emergency Recovery: 100% persistence (disabled gating)
+                    thalamic_gate = torch.sigmoid(surprise * 5.0 - 2.0) * 0.0 + 1.0
+                    h_current_layer = h_current_layer * thalamic_gate
+                    
+                if self.training:
+                    def custom_forward(x_in, c_ap, v_b, v_a, v_o, w_s, f_s, h_p, cell_ref=cell, prog=progress):
+                        return cell_ref(x_in, c_ap, (v_b, v_a, v_o, w_s, f_s, h_p), progress=prog)
+                    
+                    # Ensure one input requires grad for checkpoint to work properly
+                    if not h_current_layer.requires_grad:
+                        h_current_layer.requires_grad_(True)
+                        
+                    out = checkpoint(custom_forward, h_current_layer, c_apical_delayed, *states[l], use_reentrant=False)
+                    h_out, new_state = out[0], out[1]
+                else:
+                    h_out, new_state = cell(h_current_layer, c_apical_delayed, states[l], progress=progress)
                 
                 if l < len(self.layers) - 1:
-                    pred_loss = F.mse_loss(h_out, c_apical) 
+                    pred_loss = F.mse_loss(h_out, c_apical_delayed) 
                     pred_losses.append(pred_loss)
                 
                 h_current_layer = h_out
@@ -2142,24 +2227,29 @@ class MultiCompartmentSTSPNet(nn.Module):
                 layer_acts_accum[l] = layer_acts_accum[l] + h_out.detach().mean(dim=0)
                 
             states = new_states
-            logits_t = self.readout(h_current_layer)
+            logits_t = self.readout(self.dropout(h_current_layer))
             logits.append(logits_t)
             
         logits = torch.stack(logits, dim=1) # (B, S, V)
         total_pred_loss = sum(pred_losses) / max(1, len(pred_losses)) if pred_losses else torch.tensor(0.0, device=device)
         
+        # Entropy-Adaptive Readout (Confidence Sharpening)
+        temp = torch.clamp(torch.sigmoid(total_pred_loss.detach()) * 2.0, min=0.5, max=1.5)
+        logits = logits / temp
+        
         layer_acts_stacked = torch.stack(layer_acts_accum, dim=0)
         return logits, total_pred_loss, states, layer_acts_stacked
         
     @torch.no_grad()
-    def apply_intrinsic_plasticity(self, layer_acts_stacked, seq_len, target_rate=0.1, lr=0.01):
+    def apply_intrinsic_plasticity(self, layer_acts_stacked, seq_len, target_rate=0.04, lr=0.0001):
         beta = 0.99
         for l, cell in enumerate(self.layers):
             mean_act = layer_acts_stacked[l] / seq_len
             cell.activation_ema.mul_(beta).add_(mean_act, alpha=1 - beta)
             
-            # Only boost neurons that are far below target rate (dormant)
-            diff = (target_rate - cell.activation_ema).clamp(min=0.0)
+            # REMOVE .clamp(min=0.0) -> This allows the bias to drop 
+            # for neurons that are over-active, preserving sparsity.
+            diff = target_rate - cell.activation_ema
             cell.ip_bias += lr * diff
 
     @torch.no_grad()

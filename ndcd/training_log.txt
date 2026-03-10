@@ -1,0 +1,51 @@
+=== Living-Brain NDCD Training Log ===
+Step 0/380 | Time: 2s | Loss: 6.1637 | CE: 6.1604 | PredLoss: 26.0625 | Acc: 0.39%
+Step 1/380 | Time: 2s | Loss: 4.9187 | CE: 4.9154 | PredLoss: 25.9074 | Acc: 6.64%
+Step 10/380 | Time: 11s | Loss: 2.0692 | CE: 2.0659 | PredLoss: 27.6260 | Acc: 33.20%
+Step 20/380 | Time: 21s | Loss: 1.5936 | CE: 1.5901 | PredLoss: 31.0023 | Acc: 42.58%
+Step 30/380 | Time: 30s | Loss: 1.4348 | CE: 1.4314 | PredLoss: 31.3566 | Acc: 47.66%
+Step 40/380 | Time: 40s | Loss: 1.3594 | CE: 1.3559 | PredLoss: 32.8046 | Acc: 49.32%
+Step 50/380 | Time: 49s | Loss: 1.2554 | CE: 1.2519 | PredLoss: 33.0900 | Acc: 54.88%
+Step 60/380 | Time: 59s | Loss: 1.1993 | CE: 1.1957 | PredLoss: 34.1769 | Acc: 54.69%
+Step 70/380 | Time: 69s | Loss: 1.0473 | CE: 1.0437 | PredLoss: 34.1036 | Acc: 59.96%
+Step 80/380 | Time: 78s | Loss: 1.0994 | CE: 1.0958 | PredLoss: 34.0878 | Acc: 54.88%
+Step 90/380 | Time: 88s | Loss: 1.0673 | CE: 1.0637 | PredLoss: 35.6149 | Acc: 59.08%
+Step 100/380 | Time: 98s | Loss: 0.9574 | CE: 0.9538 | PredLoss: 37.1358 | Acc: 61.82%
+Step 110/380 | Time: 108s | Loss: 1.1478 | CE: 1.1441 | PredLoss: 37.3938 | Acc: 57.23%
+Step 120/380 | Time: 117s | Loss: 1.0112 | CE: 1.0076 | PredLoss: 37.1735 | Acc: 60.25%
+Step 130/380 | Time: 127s | Loss: 1.0297 | CE: 1.0260 | PredLoss: 38.9531 | Acc: 59.38%
+Step 140/380 | Time: 137s | Loss: 0.9833 | CE: 0.9795 | PredLoss: 41.3467 | Acc: 61.04%
+Step 150/380 | Time: 147s | Loss: 0.9350 | CE: 0.9312 | PredLoss: 42.7176 | Acc: 61.82%
+Step 160/380 | Time: 157s | Loss: 0.9339 | CE: 0.9301 | PredLoss: 42.4556 | Acc: 63.09%
+Step 170/380 | Time: 166s | Loss: 0.9353 | CE: 0.9315 | PredLoss: 43.7676 | Acc: 60.94%
+Step 180/380 | Time: 176s | Loss: 0.8571 | CE: 0.8533 | PredLoss: 42.8880 | Acc: 64.75%
+Step 190/380 | Time: 186s | Loss: 0.8461 | CE: 0.8422 | PredLoss: 44.7940 | Acc: 64.65%
+Step 200/380 | Time: 195s | Loss: 0.8918 | CE: 0.8879 | PredLoss: 45.4727 | Acc: 63.96%
+Step 210/380 | Time: 205s | Loss: 0.8462 | CE: 0.8424 | PredLoss: 46.8681 | Acc: 65.14%
+Step 220/380 | Time: 214s | Loss: 0.7989 | CE: 0.7951 | PredLoss: 47.1383 | Acc: 68.65%
+Step 230/380 | Time: 224s | Loss: 0.7610 | CE: 0.7572 | PredLoss: 43.2481 | Acc: 70.31%
+Step 240/380 | Time: 234s | Loss: 0.9438 | CE: 0.9401 | PredLoss: 41.9041 | Acc: 65.43%
+Step 250/380 | Time: 243s | Loss: 0.7696 | CE: 0.7658 | PredLoss: 42.4959 | Acc: 68.55%
+Step 260/380 | Time: 253s | Loss: 0.7044 | CE: 0.7005 | PredLoss: 45.3453 | Acc: 73.63%
+Step 270/380 | Time: 263s | Loss: 0.6559 | CE: 0.6521 | PredLoss: 43.8367 | Acc: 75.49%
+Step 280/380 | Time: 272s | Loss: 0.6938 | CE: 0.6900 | PredLoss: 44.4929 | Acc: 73.34%
+Step 290/380 | Time: 282s | Loss: 0.5388 | CE: 0.5350 | PredLoss: 44.9805 | Acc: 79.10%
+Step 300/380 | Time: 291s | Loss: 0.5195 | CE: 0.5157 | PredLoss: 45.8469 | Acc: 80.47%
+Step 310/380 | Time: 301s | Loss: 0.5175 | CE: 0.5137 | PredLoss: 44.6304 | Acc: 80.27%
+Step 320/380 | Time: 311s | Loss: 0.4487 | CE: 0.4449 | PredLoss: 43.9617 | Acc: 81.84%
+Step 330/380 | Time: 321s | Loss: 0.3953 | CE: 0.3915 | PredLoss: 44.5661 | Acc: 83.20%
+Step 340/380 | Time: 330s | Loss: 0.3922 | CE: 0.3884 | PredLoss: 43.7109 | Acc: 84.96%
+Step 350/380 | Time: 340s | Loss: 0.3978 | CE: 0.3940 | PredLoss: 42.0581 | Acc: 84.28%
+Step 360/380 | Time: 350s | Loss: 0.4178 | CE: 0.4141 | PredLoss: 42.0379 | Acc: 82.03%
+Step 370/380 | Time: 359s | Loss: 0.3764 | CE: 0.3726 | PredLoss: 43.9192 | Acc: 84.47%
+
+--- Generating: L ... ---
+Le. Gine me. Pic it down. Gi away. Put it down. Pic it down. Help me. Hete me. Pic it down. Help me. 
+--------------------------------------
+Step 0/2920 | Time: 1s | Loss: 8.1271 | CE: 8.1234 | PredLoss: 39.5803 | Acc: 18.36%
+Step 1/2920 | Time: 2s | Loss: 7.7571 | CE: 7.7534 | PredLoss: 39.7386 | Acc: 19.63%
+Step 10/2920 | Time: 11s | Loss: 2.8887 | CE: 2.8851 | PredLoss: 34.6602 | Acc: 32.71%
+Step 20/2920 | Time: 20s | Loss: 1.7841 | CE: 1.7806 | PredLoss: 33.7239 | Acc: 46.39%
+Step 30/2920 | Time: 30s | Loss: 1.4438 | CE: 1.4402 | PredLoss: 34.7485 | Acc: 53.52%
+Step 40/2920 | Time: 39s | Loss: 1.2612 | CE: 1.2575 | PredLoss: 36.6067 | Acc: 57.32%
+Step 50/2920 | Time: 49s | Loss: 1.0969 | CE: 1.0933 | PredLoss: 37.0211 | Acc: 61.62%
