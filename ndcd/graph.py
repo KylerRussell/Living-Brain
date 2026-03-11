@@ -47,6 +47,10 @@ class DynamicGraph:
         self.association_indices = np.arange(n_io, num_nodes)
 
         # --- Assign modules to hierarchical levels ---
+        self.modules = []
+        self.module_levels = []
+        self.level_modules = {i: [] for i in range(num_levels)}
+
         # Distribution: flattened to expand L2/L3 representational capacity
         # for contextual and semantic persistence (was pyramidal [40,30,20,10])
         level_fractions = [0.25, 0.25, 0.25, 0.25]
@@ -70,7 +74,10 @@ class DynamicGraph:
         
         self.hippocampal_modules = set()
         self.neocortical_modules = set()
-        
+
+        # Build node-to-module lookup (pre-allocate)
+        self.node_to_module = np.full(num_nodes, -1, dtype=np.int64)
+
         self.dg_indices = []
         self.ca3_indices = []
         
@@ -403,7 +410,7 @@ class DynamicGraph:
                 edge_cols.extend([s] * n_proj)
 
         # 5. Output projections: level-0 modules (L5/6) -> motor nodes
-        for mod_id in level0_mods:
+        for mod_id in self.level_modules[0]:
             mod = self.modules[mod_id]
             idx = mod['l56_indices']  # Output comes from L5/6
             if len(idx) == 0: continue

@@ -124,6 +124,7 @@ def jit_solve_dynamics_imex(
     g_gap: float = 0.5,
     damping: float = 0.15,
     implicit_damping: float = 1.2,
+    sigma_noise: float = 0.05,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, float, int, float, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Semi-implicit (IMEX) dynamics solver for Multi-Compartment Predictive Coding.
@@ -408,7 +409,7 @@ def jit_solve_dynamics_imex(
         # Using normalized voltages where E_L=-0.7, E_E=1.0, E_I=-1.0
         # Solution 1: Fluctuation-Driven Stochasticity
         # Integrate an OU process noise term simulating background bombardment
-        sigma_noise = 0.05
+        # integrate an OU process noise term simulating background bombardment
         # The equation expects a force term, standard stochastic integration is sigma * sqrt(dt) * xi
         # Since this `dv_basal` is later divided by `taus` and multiplied by `current_dt`,
         # we scale the noise by sqrt(2*taus/dt) to ensure steady-state variance is constant (sigma^2).
@@ -558,7 +559,8 @@ class PredictiveCodingEngine:
                  is_sst: Optional[np.ndarray] = None,
                  is_vip: Optional[np.ndarray] = None,
                  is_lts: Optional[np.ndarray] = None,
-                 dg_indices: Optional[np.ndarray] = None):
+                 dg_indices: Optional[np.ndarray] = None,
+                 ca3_indices: Optional[np.ndarray] = None):
         """
         Args:
             num_nodes: Total number of nodes.
@@ -654,10 +656,15 @@ class PredictiveCodingEngine:
                 n_neg = len(l23_idx) // 2
                 self.is_neg_pe[l23_idx[:n_neg]] = True
         
-        # DG Sparsity Mask
+        # DG Mask
         self.is_dg = torch.zeros(num_nodes, dtype=torch.bool, device=device)
         if dg_indices is not None:
             self.is_dg[dg_indices] = True
+
+        # CA3 Mask
+        self.is_ca3 = torch.zeros(num_nodes, dtype=torch.bool, device=device)
+        if ca3_indices is not None:
+            self.is_ca3[ca3_indices] = True
 
         # Build module-level lookup tensors for fast access
         self._build_module_tensors()
@@ -1166,7 +1173,8 @@ class PredictiveCodingEngine:
             self.previous_state.zero_()
 
     def settle(self, input_vector, max_steps=40, tol=5e-3,
-               input_mask=None, damping=0.15, implicit_damping=2.0):
+               input_mask=None, damping=0.15, implicit_damping=2.0,
+               sigma_noise=0.05):
         """Single-phase settling using IMEX integration."""
         if not isinstance(input_vector, torch.Tensor):
             input_vector = torch.tensor(input_vector, dtype=torch.float32, device=self.device)
@@ -1210,7 +1218,8 @@ class PredictiveCodingEngine:
             ee_mask,
             self.gap_junction_indices, self.gap_junction_weights,
             self.apical_bp1, self.apical_bp2, self.lifetime_firing,
-            damping=damping, implicit_damping=implicit_damping
+            damping=damping, implicit_damping=implicit_damping,
+            sigma_noise=sigma_noise
         )
         self.last_settle_diff = diff
         return self.state
@@ -1319,7 +1328,8 @@ class PredictiveCodingEngine:
 
         return total_energy
 
-    def update_weights_predictive(self, free_state, nudge_state, learning_rate=0.01, 
+    def update_weights_predictive(self, free_state, nudge_state, nudge_neg=None,
+                                  learning_rate=0.01, 
                                   hippo_edge_mask=None, active_level_max=None,
                                   dopamine: float = 1.0, acetylcholine: float = 1.0):
         """
@@ -1334,7 +1344,12 @@ class PredictiveCodingEngine:
         """
         with torch.no_grad():
             rho_free = torch.tanh(free_state)
-            rho_nudge = torch.tanh(nudge_state)
+            if nudge_neg is not None:
+                # Symmetric EqProp: grad ∝ (rho_pos - rho_neg) / (2 * beta)
+                # Here we use the difference directly as the "nudge" signal
+                rho_nudge = (torch.tanh(nudge_state) - torch.tanh(nudge_neg)) / 2.0
+            else:
+                rho_nudge = torch.tanh(nudge_state) - rho_free
             
             # --- Intrinsic Plasticity (IP) Update ---
             # Info-Max: Adjust both gain and offset to maximize mutual information
