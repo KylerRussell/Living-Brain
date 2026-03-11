@@ -2053,7 +2053,7 @@ class PMSNCell(nn.Module):
         return t_basal, t_apical
 
     def forward(self, x_in, c_apical, state, progress=1.0):
-        V_b, V_a, V_out, w_sfa, F_stsp, h_prev, apical_ema = state
+        V_b, V_a, V_out, w_sfa, F_stsp, h_prev, apical_ema, fatigue = state
         
         t_basal, t_apical = self.get_taus()
         
@@ -2083,6 +2083,10 @@ class PMSNCell(nn.Module):
         # The gate is permissive (1.0) at the start, and becomes an AND-gate (0.5 + prime) later
         gate_strength = (1.0 - maturity) + (maturity * (0.5 + prime))
         V_soma = V_b_new * soft_inh * gate_strength + (self.kappa * prime)
+        
+        # Somatic Adaptation (Neural Fatigue): tire out repeated signals
+        V_soma = V_soma - fatigue * 0.1
+        
         V_soma = self.layer_norm(V_soma + self.ip_bias) # Add IP and LayerNorm
         
         # SFA 
@@ -2115,13 +2119,17 @@ class PMSNCell(nn.Module):
         
         h_new = torch.clamp(h_kwta, 0.0, 10.0)
         
+        # Track Fatigue for next step (Non-Linear Somatic Fatigue)
+        # The more a neuron fires, the faster it tires (activations are squared)
+        fatigue_new = 0.9 * fatigue + 0.1 * (h_new.detach() ** 2)
+        
         # Post-spike SFA adaptation
         w_sfa_new = w_sfa + (self.dt / self.tau_slow) * (self.a_sfa * V_out_new - w_sfa) + self.b_sfa * h_new
         
         # STSP Update
         F_stsp_new = self.basal_rec.update_state(F_stsp, h_prev, h_new, c_apical)
         
-        new_state = (V_b_new, V_a_new, V_out_new, w_sfa_new, F_stsp_new, h_new, apical_ema_new)
+        new_state = (V_b_new, V_a_new, V_out_new, w_sfa_new, F_stsp_new, h_new, apical_ema_new, fatigue_new)
         return h_new, new_state
 
 
@@ -2157,7 +2165,8 @@ class MultiCompartmentSTSPNet(nn.Module):
             F_stsp = torch.zeros(batch_size, hidden_dim, hidden_dim, device=device)
             h_prev = torch.zeros(batch_size, hidden_dim, device=device)
             apical_ema = torch.zeros(batch_size, hidden_dim, device=device)
-            states.append((V_b, V_a, V_out, w_sfa, F_stsp, h_prev, apical_ema))
+            fatigue = torch.zeros(batch_size, hidden_dim, device=device)
+            states.append((V_b, V_a, V_out, w_sfa, F_stsp, h_prev, apical_ema, fatigue))
             
         emb_seq = self.embedding(x_seq)
         if use_sleep_noise:
@@ -2177,7 +2186,7 @@ class MultiCompartmentSTSPNet(nn.Module):
             is_boundary = ((tokens_t == 32) | (tokens_t == 46)).float().unsqueeze(1)
             new_states_before_step = []
             for state_tuple in states:
-                V_b, V_a, V_out, w_sfa, F_stsp, h_prev, apical_ema = state_tuple
+                V_b, V_a, V_out, w_sfa, F_stsp, h_prev, apical_ema, fatigue = state_tuple
                 decay = 1.0 - is_boundary
                 
                 # Clone and detach to avoid inplace autograd errors during checkpointing
@@ -2187,10 +2196,11 @@ class MultiCompartmentSTSPNet(nn.Module):
                 F_stsp_d = (F_stsp * decay.unsqueeze(2)).clone().detach().requires_grad_(True)
                 h_prev_d = (h_prev * decay).clone().detach().requires_grad_(True)
                 apical_ema_d = (apical_ema * decay).clone().detach().requires_grad_(True)
+                fatigue_d = (fatigue * decay).clone().detach().requires_grad_(True)
                 
                 w_sfa_d = w_sfa.clone().detach().requires_grad_(True)
                 
-                new_states_before_step.append((V_b_d, V_a_d, V_out_d, w_sfa_d, F_stsp_d, h_prev_d, apical_ema_d))
+                new_states_before_step.append((V_b_d, V_a_d, V_out_d, w_sfa_d, F_stsp_d, h_prev_d, apical_ema_d, fatigue_d))
             states = new_states_before_step
             
             new_states = []
@@ -2198,7 +2208,7 @@ class MultiCompartmentSTSPNet(nn.Module):
             
             for l, cell in enumerate(self.layers):
                 if l < len(self.layers) - 1:
-                    _, _, _, _, _, h_above_prev, _ = states[l+1]
+                    _, _, _, _, _, h_above_prev, _, _ = states[l+1]
                     c_apical = self.top_down_projs[l](h_above_prev)
                     c_apical_delayed = c_apical_prev[l]
                     c_apical_prev[l] = c_apical
@@ -2213,8 +2223,8 @@ class MultiCompartmentSTSPNet(nn.Module):
                     h_current_layer = h_current_layer * thalamic_gate
                     
                 if self.training:
-                    def custom_forward(x_in, c_ap, v_b, v_a, v_o, w_s, f_s, h_p, a_e, cell_ref=cell, prog=progress):
-                        return cell_ref(x_in, c_ap, (v_b, v_a, v_o, w_s, f_s, h_p, a_e), progress=prog)
+                    def custom_forward(x_in, c_ap, v_b, v_a, v_o, w_s, f_s, h_p, a_e, fat, cell_ref=cell, prog=progress):
+                        return cell_ref(x_in, c_ap, (v_b, v_a, v_o, w_s, f_s, h_p, a_e, fat), progress=prog)
                     
                     # Ensure one input requires grad for checkpoint to work properly
                     if not h_current_layer.requires_grad:
@@ -2224,6 +2234,10 @@ class MultiCompartmentSTSPNet(nn.Module):
                     h_out, new_state = out[0], out[1]
                 else:
                     h_out, new_state = cell(h_current_layer, c_apical_delayed, states[l], progress=progress)
+                
+                # Continuous Stochastic Facilitation (Thermal Noise)
+                # Apply 0.005 noise to all states (training and generation) to prevent local minima / loops
+                h_out = h_out + torch.randn_like(h_out) * 0.005
                 
                 if l < len(self.layers) - 1:
                     pred_loss = F.mse_loss(h_out, c_apical_delayed) 

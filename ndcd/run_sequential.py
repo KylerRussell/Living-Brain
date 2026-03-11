@@ -94,9 +94,9 @@ class SequentialBPTTTrainer:
         param_groups = []
         for i, layer in enumerate(self.model.layers):
             if i == 0:
-                scale = 1.2 # Syntax layer (Broca) - fast
+                scale = 1.0 # Syntax layer (Broca) - fast (restored plasticity)
             elif i == 2:
-                scale = 0.6 # Semantic layer (Wernicke) - slow/stable
+                scale = 1.0 # Semantic layer (Wernicke) - slow/stable (accelerated)
             else:
                 scale = 1.0 # Default
             
@@ -122,7 +122,7 @@ class SequentialBPTTTrainer:
         self.criterion = nn.CrossEntropyLoss()
         
         self.sleep_interval = 500  # Trigger sleep phase every N steps
-        self.pruning_ratio_per_sleep = 0.0
+        self.pruning_ratio_per_sleep = 0.03
         
         self.saliency_ema = 0.0 # Track saliency history
         
@@ -211,7 +211,7 @@ class SequentialBPTTTrainer:
                                 current_fisher = state['exp_avg_sq']
                                 if 'fisher_ema' not in state:
                                     state['fisher_ema'] = torch.zeros_like(param.data)
-                                state['fisher_ema'] = 0.90 * state['fisher_ema'] + 0.10 * current_fisher
+                                state['fisher_ema'] = 0.95 * state['fisher_ema'] + 0.05 * current_fisher
                                 importance = state['fisher_ema'] * (param.data ** 2)
                                 param.grad.div_(importance.clamp(min=1.0))
                                 
@@ -302,7 +302,7 @@ class SequentialBPTTTrainer:
                                         current_fisher = state['exp_avg_sq']
                                         if 'fisher_ema' not in state:
                                             state['fisher_ema'] = torch.zeros_like(param.data)
-                                        state['fisher_ema'] = 0.90 * state['fisher_ema'] + 0.10 * current_fisher
+                                        state['fisher_ema'] = 0.95 * state['fisher_ema'] + 0.05 * current_fisher
                                         importance = state['fisher_ema'] * (param.data ** 2)
                                         param.grad.div_(importance.clamp(min=1.0))
                         
