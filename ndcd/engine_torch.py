@@ -2053,7 +2053,7 @@ class PMSNCell(nn.Module):
         return t_basal, t_apical
 
     def forward(self, x_in, c_apical, state, progress=1.0):
-        V_b, V_a, V_out, w_sfa, F_stsp, h_prev = state
+        V_b, V_a, V_out, w_sfa, F_stsp, h_prev, apical_ema = state
         
         t_basal, t_apical = self.get_taus()
         
@@ -2068,8 +2068,9 @@ class PMSNCell(nn.Module):
         x_apical_total = self.apical_rec(c_apical)
         V_a_new = torch.exp(-1.0 / t_apical) * V_a + x_apical_total
         
-        # Apical "Precision" Gating (Dendritic AND-Gate)
-        prime = torch.sigmoid((V_b_new * V_a_new * self.gamma) - 1.0)
+        # Apical "Precision" Gating (Dendritic AND-Gate with Apical Smoothing)
+        apical_ema_new = 0.5 * apical_ema + 0.5 * V_a_new
+        prime = torch.sigmoid((V_b_new * apical_ema_new * self.gamma) - 1.0)
         
         # Soft Lateral Inhibition
         # Penalize neurons if their neighbors (the layer mean) are highly active
@@ -2094,17 +2095,23 @@ class PMSNCell(nn.Module):
         h_right_gated = h_right / (1.0 + h_left.mean(dim=1, keepdim=True))
         h_pre = torch.cat([h_left_gated, h_right_gated], dim=1)
         
-        # kWTA Soft Gating
+        # kWTA Soft Gating with Shunting Lateral Inhibition
         k = max(1, int(self.hidden_dim * self.sparsity_alpha))
         topk, _ = torch.topk(h_pre, k, dim=1)
         threshold = topk[:, -1:]
-        h_kwta = torch.relu((h_pre - threshold) * 20.0 + 0.1) # Sharpened kWTA (gain 20.0)
         
-        # Lateral Feedback (Winner-Take-More)
-        h_pre = h_pre + h_kwta * 0.1
-        topk, _ = torch.topk(h_pre, k, dim=1)
-        threshold = topk[:, -1:]
-        h_kwta = torch.relu((h_pre - threshold) * 20.0 + 0.1)
+        # Compute layer average to penalize non-winners
+        layer_mean = h_pre.mean(dim=1, keepdim=True)
+        
+        # Divisive penalty for losers (pushing them to 0 rapidly)
+        h_kwta = torch.where(
+            h_pre >= threshold,
+            h_pre,
+            h_pre / (1.0 + 5.0 * layer_mean)
+        )
+        
+        # Sharpening
+        h_kwta = torch.relu((h_kwta - threshold * 0.5) * 2.0)
         
         h_new = torch.clamp(h_kwta, 0.0, 10.0)
         
@@ -2114,7 +2121,7 @@ class PMSNCell(nn.Module):
         # STSP Update
         F_stsp_new = self.basal_rec.update_state(F_stsp, h_prev, h_new, c_apical)
         
-        new_state = (V_b_new, V_a_new, V_out_new, w_sfa_new, F_stsp_new, h_new)
+        new_state = (V_b_new, V_a_new, V_out_new, w_sfa_new, F_stsp_new, h_new, apical_ema_new)
         return h_new, new_state
 
 
@@ -2149,7 +2156,8 @@ class MultiCompartmentSTSPNet(nn.Module):
             w_sfa = torch.zeros(batch_size, hidden_dim, device=device)
             F_stsp = torch.zeros(batch_size, hidden_dim, hidden_dim, device=device)
             h_prev = torch.zeros(batch_size, hidden_dim, device=device)
-            states.append((V_b, V_a, V_out, w_sfa, F_stsp, h_prev))
+            apical_ema = torch.zeros(batch_size, hidden_dim, device=device)
+            states.append((V_b, V_a, V_out, w_sfa, F_stsp, h_prev, apical_ema))
             
         emb_seq = self.embedding(x_seq)
         if use_sleep_noise:
@@ -2169,7 +2177,7 @@ class MultiCompartmentSTSPNet(nn.Module):
             is_boundary = ((tokens_t == 32) | (tokens_t == 46)).float().unsqueeze(1)
             new_states_before_step = []
             for state_tuple in states:
-                V_b, V_a, V_out, w_sfa, F_stsp, h_prev = state_tuple
+                V_b, V_a, V_out, w_sfa, F_stsp, h_prev, apical_ema = state_tuple
                 decay = 1.0 - is_boundary
                 
                 # Clone and detach to avoid inplace autograd errors during checkpointing
@@ -2178,10 +2186,11 @@ class MultiCompartmentSTSPNet(nn.Module):
                 V_out_d = (V_out * decay).clone().detach().requires_grad_(True)
                 F_stsp_d = (F_stsp * decay.unsqueeze(2)).clone().detach().requires_grad_(True)
                 h_prev_d = (h_prev * decay).clone().detach().requires_grad_(True)
+                apical_ema_d = (apical_ema * decay).clone().detach().requires_grad_(True)
                 
                 w_sfa_d = w_sfa.clone().detach().requires_grad_(True)
                 
-                new_states_before_step.append((V_b_d, V_a_d, V_out_d, w_sfa_d, F_stsp_d, h_prev_d))
+                new_states_before_step.append((V_b_d, V_a_d, V_out_d, w_sfa_d, F_stsp_d, h_prev_d, apical_ema_d))
             states = new_states_before_step
             
             new_states = []
@@ -2189,7 +2198,7 @@ class MultiCompartmentSTSPNet(nn.Module):
             
             for l, cell in enumerate(self.layers):
                 if l < len(self.layers) - 1:
-                    _, _, _, _, _, h_above_prev = states[l+1]
+                    _, _, _, _, _, h_above_prev, _ = states[l+1]
                     c_apical = self.top_down_projs[l](h_above_prev)
                     c_apical_delayed = c_apical_prev[l]
                     c_apical_prev[l] = c_apical
@@ -2204,8 +2213,8 @@ class MultiCompartmentSTSPNet(nn.Module):
                     h_current_layer = h_current_layer * thalamic_gate
                     
                 if self.training:
-                    def custom_forward(x_in, c_ap, v_b, v_a, v_o, w_s, f_s, h_p, cell_ref=cell, prog=progress):
-                        return cell_ref(x_in, c_ap, (v_b, v_a, v_o, w_s, f_s, h_p), progress=prog)
+                    def custom_forward(x_in, c_ap, v_b, v_a, v_o, w_s, f_s, h_p, a_e, cell_ref=cell, prog=progress):
+                        return cell_ref(x_in, c_ap, (v_b, v_a, v_o, w_s, f_s, h_p, a_e), progress=prog)
                     
                     # Ensure one input requires grad for checkpoint to work properly
                     if not h_current_layer.requires_grad:

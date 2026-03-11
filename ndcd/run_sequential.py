@@ -90,8 +90,35 @@ class SequentialBPTTTrainer:
         # Removed mode="reduce-overhead" to prevent CUDA graph capture memory explosion during unrolling
         self.compiled_model = torch.compile(self.model)
         
+        # Layer-wise Learning Rate Scaling (Cerebral Plasticity)
+        param_groups = []
+        for i, layer in enumerate(self.model.layers):
+            if i == 0:
+                scale = 1.2 # Syntax layer (Broca) - fast
+            elif i == 2:
+                scale = 0.6 # Semantic layer (Wernicke) - slow/stable
+            else:
+                scale = 1.0 # Default
+            
+            param_groups.append({
+                'params': layer.parameters(),
+                'lr_scale': scale
+            })
+            
+        # Add remaining parameters (embeddings, readouts, projections) with base scale
+        remaining_params = []
+        layer_params = set()
+        for layer in self.model.layers:
+            layer_params.update(layer.parameters())
+            
+        for param in self.model.parameters():
+            if param not in layer_params:
+                remaining_params.append(param)
+                
+        param_groups.append({'params': remaining_params, 'lr_scale': 1.0})
+        
         # BPTT Optimizer
-        self.optimizer = optim.Adam(self.model.parameters(), lr=8e-4, weight_decay=0.0)
+        self.optimizer = optim.Adam(param_groups, lr=8e-4, weight_decay=0.0)
         self.criterion = nn.CrossEntropyLoss()
         
         self.sleep_interval = 500  # Trigger sleep phase every N steps
@@ -114,6 +141,9 @@ class SequentialBPTTTrainer:
         step = 0
         total_steps = len(loader) * epochs
         start_time = time.time()
+        
+        
+        self.refractory_counter = getattr(self, 'refractory_counter', 0)
         
         for epoch in range(epochs):
             for x, y in loader:
@@ -153,11 +183,20 @@ class SequentialBPTTTrainer:
                 else:
                     raw_saliency = torch.clamp(torch.exp(pred_loss.detach()) - 0.5, min=0.3, max=5.0).item()
                     
+                # Absolute Refractory Period (Surge Management)
+                if raw_saliency >= 5.0:
+                    self.refractory_counter = 20 # 20 steps of forced cooldown
+                    
+                if getattr(self, 'refractory_counter', 0) > 0:
+                    raw_saliency = 0.3 # Recovery floor
+                    self.refractory_counter -= 1
+                    
                 self.saliency_ema = 0.9 * self.saliency_ema + 0.1 * raw_saliency
                 saliency = raw_saliency / (1.0 + 0.5 * max(0, self.saliency_ema - 2.0))
                 
                 for param_group in self.optimizer.param_groups:
-                    param_group['lr'] = base_lr * saliency
+                    lr_scale = param_group.get('lr_scale', 1.0)
+                    param_group['lr'] = base_lr * saliency * lr_scale
                     # Adaptive Weight Decay: prune non-essential connections when bored
                     param_group['weight_decay'] = 1e-5 if saliency < 1.0 else 0.0
                 
