@@ -1,445 +1,380 @@
-nohup: ignoring input
-Using device: cpu
+Using device: cuda
 Building DynamicGraph with 3500 nodes, 10 modules, 2 levels...
 CLS: 0 hippocampal modules, 10 neocortical modules
 Lateralization: 1 Broca (seq), 1 Wernicke (sem)
-Hierarchical graph: 3500 nodes, 64999 edges, 10 modules across 2 levels
+Hierarchical graph: 3500 nodes, 65012 edges, 10 modules across 2 levels
   Level 0: 2 modules, avg size 299 nodes
   Level 1: 8 modules, avg size 299 nodes
-Free-edge spectral radius tuned: 1.3208 -> 1.6
-Input boost: 6.00x (calibrated to 3.0x lateral RMS=0.2628)
-Edges: 2048 input-proj (2x, outside SR), 62951 free (SR-tuned to 1.6)
-Scale-invariant E/I balancing (1/sqrt(K)) applied to 62951 free edges.
-Weight magnitudes: input=0.9470, free=0.1982
+Free-edge spectral radius tuned: 1.3712 -> 1.6
+Input boost: 6.00x (calibrated to 3.0x lateral RMS=0.2529)
+Edges: 2048 input-proj (2x, outside SR), 62964 free (SR-tuned to 1.6)
+Scale-invariant E/I balancing (1/sqrt(K)) applied to 62964 free edges.
+Weight magnitudes: input=1.0030, free=0.1908
 Applied hierarchical recurrent excitatory gradient (η=0.68) to 0 edges.
 Level 0 lateral edges: 496 made positive, fan-in normalized (avg fan-in=2)
-Bottom-up edges: 2486 fan-in normalized (bounded, min_mag=0.01)
+Bottom-up edges: 2492 fan-in normalized (bounded, min_mag=0.01)
 PFA: 20480 independent feedback edges enabling Product Feedback Alignment.
+Output boost: added 24576 new output projections from higher-level modules
+Thalamic relay: 64 neurons, 3840 L5/6→thal edges, 16384 thal→motor edges
 Initializing PredictiveCodingEngine...
+DFA: Created connectivity-weighted feedback for 2 levels, 3052 nodes, avg motor connectivity: 0.174
 
---- Starting Phase: Holophrases (Phase 0 Recovery Baseline) ---
-  Steps: Free=100, Nudge=10
-  Learning rate: 0.05, Nudge strength: 2.0
-Step 10/20003 | Acc: 0.00% | Err: 63.5410 | W_surf: 0.1597 | Wmx: 0.022 | Fr: 0.004 | B: 0.00 | Inh: 0.0000 | 0 tok/s
-Step 20/20003 | Acc: 0.00% | Err: 51.0562 | W_surf: 0.2113 | Wmx: 0.036 | Fr: 0.005 | B: 0.00 | Inh: 0.0001 | 0 tok/s
-Step 30/20003 | Acc: 0.00% | Err: 44.0698 | W_surf: 0.2345 | Wmx: 0.044 | Fr: 0.007 | B: 0.00 | Inh: 0.0002 | 0 tok/s
-Step 40/20003 | Acc: 0.00% | Err: 40.4755 | W_surf: 0.2555 | Wmx: 0.057 | Fr: 0.008 | B: 0.00 | Inh: 0.0002 | 0 tok/s
-Step 50/20003 | Acc: 0.00% | Err: 41.3091 | W_surf: 0.3272 | Wmx: 0.075 | Fr: 0.009 | B: 0.00 | Inh: 0.0002 | 0 tok/s
-Step 60/20003 | Acc: 0.00% | Err: 39.3824 | W_surf: 0.3637 | Wmx: 0.090 | Fr: 0.010 | B: 0.00 | Inh: 0.0002 | 0 tok/s
-  Top Bigrams (min 5): '. ': 0% (5)
-Step 70/20003 | Acc: 0.00% | Err: 37.7412 | W_surf: 0.3942 | Wmx: 0.107 | Fr: 0.011 | B: 0.00 | Inh: 0.0002 | 0 tok/s
-  Top Bigrams (min 5): '. ': 0% (7)
-Step 80/20003 | Acc: 0.00% | Err: 35.7584 | W_surf: 0.4117 | Wmx: 0.116 | Fr: 0.011 | B: 0.00 | Inh: 0.0003 | 0 tok/s
-  Top Bigrams (min 5): ' i': 0% (5), 'it': 0% (5), '. ': 0% (7)
-Step 90/20003 | Acc: 0.00% | Err: 36.0809 | W_surf: 0.4693 | Wmx: 0.132 | Fr: 0.012 | B: 0.00 | Inh: 0.0003 | 0 tok/s
-  Top Bigrams (min 5): ' i': 0% (6), 'it': 0% (6), '. ': 0% (8)
-Step 100/20003 | Acc: 0.00% | Err: 34.7183 | W_surf: 0.4912 | Wmx: 0.141 | Fr: 0.013 | B: 0.00 | Inh: 0.0003 | 0 tok/s
-  Top Bigrams (min 5): ' i': 0% (7), 'it': 0% (6), '. ': 0% (9)
-Step 110/20003 | Acc: 0.00% | Err: 31.2007 | W_surf: 0.5314 | Wmx: 0.146 | Fr: 0.013 | B: 0.00 | Inh: 0.0003 | 0 tok/s
-  Top Bigrams (min 5): ' i': 0% (7), 'it': 0% (7), 't.': 0% (5)
-Step 120/20003 | Acc: 0.00% | Err: 30.7542 | W_surf: 0.5617 | Wmx: 0.155 | Fr: 0.013 | B: 0.00 | Inh: 0.0003 | 0 tok/s
-  Top Bigrams (min 5): ' i': 0% (8), 'it': 0% (8), 't.': 0% (6)
-Step 130/20003 | Acc: 0.00% | Err: 30.4098 | W_surf: 0.5943 | Wmx: 0.166 | Fr: 0.014 | B: 0.00 | Inh: 0.0003 | 0 tok/s
-  Top Bigrams (min 5): 'p ': 0% (5), ' i': 0% (8), 'it': 0% (8)
-Step 140/20003 | Acc: 0.00% | Err: 29.0534 | W_surf: 0.6055 | Wmx: 0.172 | Fr: 0.014 | B: 0.00 | Inh: 0.0003 | 0 tok/s
-  Top Bigrams (min 5): 'p ': 0% (5), ' i': 0% (9), 'it': 0% (9)
-Step 150/20003 | Acc: 0.00% | Err: 29.1441 | W_surf: 0.6480 | Wmx: 0.189 | Fr: 0.015 | B: 0.00 | Inh: 0.0004 | 0 tok/s
-  Top Bigrams (min 5): 'p ': 0% (6), ' i': 0% (9), 'it': 0% (9)
-Step 160/20003 | Acc: 0.00% | Err: 30.9623 | W_surf: 0.7149 | Wmx: 0.202 | Fr: 0.015 | B: 0.00 | Inh: 0.0004 | 0 tok/s
-  Top Bigrams (min 5): 'p ': 0% (6), ' i': 0% (9), 'it': 0% (9)
-Step 170/20003 | Acc: 0.00% | Err: 32.6504 | W_surf: 0.7837 | Wmx: 0.223 | Fr: 0.015 | B: 0.00 | Inh: 0.0004 | 0 tok/s
-  Top Bigrams (min 5): 'p ': 0% (6), ' i': 0% (9), 'it': 0% (9)
-Step 180/20003 | Acc: 0.00% | Err: 33.4723 | W_surf: 0.8066 | Wmx: 0.239 | Fr: 0.015 | B: 0.00 | Inh: 0.0004 | 0 tok/s
-  Top Bigrams (min 5): 'p ': 0% (6), ' i': 0% (9), 'it': 0% (9)
-Step 190/20003 | Acc: 0.00% | Err: 34.8857 | W_surf: 0.8743 | Wmx: 0.267 | Fr: 0.016 | B: 0.00 | Inh: 0.0004 | 0 tok/s
-  Top Bigrams (min 5): 'p ': 0% (6), ' i': 0% (9), 'it': 0% (9)
-Step 200/20003 | Acc: 0.00% | Err: 33.0491 | W_surf: 0.8853 | Wmx: 0.280 | Fr: 0.016 | B: 0.00 | Inh: 0.0004 | 0 tok/s
-  Top Bigrams (min 5): 'p ': 0% (6), ' i': 0% (9), 'it': 0% (9)
-Step 210/20003 | Acc: 0.00% | Err: 35.1334 | W_surf: 0.9242 | Wmx: 0.296 | Fr: 0.016 | B: 0.00 | Inh: 0.0004 | 0 tok/s
-  Top Bigrams (min 5): 'p ': 0% (6), ' i': 0% (9), 'it': 0% (9)
-Step 220/20003 | Acc: 0.00% | Err: 36.8203 | W_surf: 0.9787 | Wmx: 0.298 | Fr: 0.016 | B: 0.00 | Inh: 0.0004 | 0 tok/s
-  Top Bigrams (min 5): 'p ': 0% (6), ' i': 0% (9), 'it': 0% (9)
-Step 230/20003 | Acc: 0.00% | Err: 36.9688 | W_surf: 1.0124 | Wmx: 0.298 | Fr: 0.016 | B: 0.00 | Inh: 0.0004 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (5), 'to': 0% (5), 'op': 0% (5)
-Step 240/20003 | Acc: 0.00% | Err: 38.7634 | W_surf: 1.0328 | Wmx: 0.293 | Fr: 0.016 | B: 0.00 | Inh: 0.0005 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (5), 'to': 0% (5), 'op': 0% (5)
-Step 250/20003 | Acc: 0.00% | Err: 39.1181 | W_surf: 1.0927 | Wmx: 0.293 | Fr: 0.017 | B: 0.00 | Inh: 0.0005 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (5), 'to': 0% (5), 'op': 0% (5)
-Step 260/20003 | Acc: 0.00% | Err: 37.2522 | W_surf: 1.1188 | Wmx: 0.287 | Fr: 0.017 | B: 0.00 | Inh: 0.0005 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (5), 'to': 0% (5), 'op': 0% (5)
-Step 270/20003 | Acc: 0.00% | Err: 35.6236 | W_surf: 1.1515 | Wmx: 0.301 | Fr: 0.017 | B: 0.00 | Inh: 0.0005 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (5), 'to': 0% (5), 'op': 0% (5)
-Step 280/20003 | Acc: 0.00% | Err: 35.3437 | W_surf: 1.1748 | Wmx: 0.312 | Fr: 0.017 | B: 0.00 | Inh: 0.0005 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (5), 'to': 0% (5), 'op': 0% (5)
-Step 290/20003 | Acc: 0.00% | Err: 32.9491 | W_surf: 1.1868 | Wmx: 0.314 | Fr: 0.017 | B: 0.00 | Inh: 0.0005 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (6), 'to': 0% (6), 'op': 0% (6)
-Step 300/20003 | Acc: 0.00% | Err: 35.4449 | W_surf: 1.2079 | Wmx: 0.316 | Fr: 0.017 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (6), 'to': 0% (6), 'op': 0% (6)
-Step 310/20003 | Acc: 0.00% | Err: 32.4766 | W_surf: 1.2210 | Wmx: 0.323 | Fr: 0.017 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (6), 'to': 0% (6), 'op': 0% (6)
-Step 320/20003 | Acc: 0.00% | Err: 30.1952 | W_surf: 1.2421 | Wmx: 0.338 | Fr: 0.017 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (6), 'to': 0% (6), 'op': 0% (6)
-Step 330/20003 | Acc: 0.00% | Err: 31.1401 | W_surf: 1.2767 | Wmx: 0.351 | Fr: 0.017 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (6), 'to': 0% (6), 'op': 0% (6)
-Step 340/20003 | Acc: 0.00% | Err: 30.4655 | W_surf: 1.2965 | Wmx: 0.357 | Fr: 0.017 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (6), 'to': 0% (6), 'op': 0% (6)
-Step 350/20003 | Acc: 0.00% | Err: 30.0052 | W_surf: 1.3221 | Wmx: 0.363 | Fr: 0.017 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (6), 'to': 0% (6), 'op': 0% (6)
-Step 360/20003 | Acc: 0.00% | Err: 30.2605 | W_surf: 1.3495 | Wmx: 0.377 | Fr: 0.017 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (6), 'to': 0% (6), 'op': 0% (6)
-Step 370/20003 | Acc: 0.00% | Err: 31.5572 | W_surf: 1.3737 | Wmx: 0.402 | Fr: 0.018 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (6), 'to': 0% (6), 'op': 0% (6)
-Step 380/20003 | Acc: 0.00% | Err: 31.2218 | W_surf: 1.3806 | Wmx: 0.419 | Fr: 0.018 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (6), 'to': 0% (6), 'op': 0% (6)
-Step 390/20003 | Acc: 0.00% | Err: 31.2806 | W_surf: 1.3943 | Wmx: 0.438 | Fr: 0.017 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (6), 'to': 0% (6), 'op': 0% (6)
-Step 400/20003 | Acc: 0.00% | Err: 30.9727 | W_surf: 1.4004 | Wmx: 0.454 | Fr: 0.018 | B: 0.00 | Inh: 0.0005 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (6), 'to': 0% (6), 'op': 0% (6)
-Step 410/20003 | Acc: 0.00% | Err: 33.8579 | W_surf: 1.4229 | Wmx: 0.466 | Fr: 0.017 | B: 0.00 | Inh: 0.0005 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (6), 'to': 0% (6), 'op': 0% (6)
-Step 420/20003 | Acc: 0.00% | Err: 34.2493 | W_surf: 1.4489 | Wmx: 0.483 | Fr: 0.017 | B: 0.00 | Inh: 0.0005 | 0 tok/s
-  Top Bigrams (min 5): 'St': 0% (6), 'to': 0% (6), 'op': 0% (6)
-Step 430/20003 | Acc: 0.23% | Err: 33.8567 | W_surf: 1.4630 | Wmx: 0.491 | Fr: 0.018 | B: 0.00 | Inh: 0.0005 | 0 tok/s
-  Top Bigrams (min 5): '. ': 2% (40), 'St': 0% (6), 'to': 0% (6)
-Step 440/20003 | Acc: 0.23% | Err: 34.3159 | W_surf: 1.4832 | Wmx: 0.506 | Fr: 0.018 | B: 0.00 | Inh: 0.0005 | 0 tok/s
-  Top Bigrams (min 5): '. ': 2% (41), 'St': 0% (6), 'to': 0% (6)
-Step 450/20003 | Acc: 0.22% | Err: 32.9497 | W_surf: 1.4987 | Wmx: 0.512 | Fr: 0.018 | B: 0.00 | Inh: 0.0005 | 0 tok/s
-  Top Bigrams (min 5): '. ': 2% (42), 'St': 0% (6), 'to': 0% (6)
-Step 460/20003 | Acc: 0.22% | Err: 34.5896 | W_surf: 1.5274 | Wmx: 0.528 | Fr: 0.018 | B: 0.00 | Inh: 0.0005 | 0 tok/s
-  Top Bigrams (min 5): '. ': 2% (44), 'St': 0% (6), 'to': 0% (6)
-Step 470/20003 | Acc: 0.21% | Err: 33.4861 | W_surf: 1.5527 | Wmx: 0.548 | Fr: 0.018 | B: 0.00 | Inh: 0.0005 | 0 tok/s
-  Top Bigrams (min 5): '. ': 2% (44), 'St': 0% (6), 'to': 0% (6)
-Step 480/20003 | Acc: 0.21% | Err: 37.1567 | W_surf: 1.5870 | Wmx: 0.572 | Fr: 0.017 | B: 0.00 | Inh: 0.0005 | 0 tok/s
-  Top Bigrams (min 5): '. ': 2% (45), 'St': 0% (6), 'to': 0% (6)
-Step 490/20003 | Acc: 0.20% | Err: 35.8899 | W_surf: 1.5920 | Wmx: 0.581 | Fr: 0.017 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): '. ': 2% (46), 'St': 0% (6), 'to': 0% (6)
-Step 500/20003 | Acc: 0.20% | Err: 35.3539 | W_surf: 1.5917 | Wmx: 0.586 | Fr: 0.017 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): '. ': 2% (47), 'St': 0% (6), 'to': 0% (6)
-Step 510/20003 | Acc: 0.20% | Err: 35.0609 | W_surf: 1.6149 | Wmx: 0.589 | Fr: 0.018 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): '. ': 2% (48), 'St': 0% (6), 'to': 0% (6)
-Step 520/20003 | Acc: 0.20% | Err: 33.3005 | W_surf: 1.6269 | Wmx: 0.607 | Fr: 0.017 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): '. ': 2% (48), 'St': 0% (6), 'to': 0% (6)
-Step 530/20003 | Acc: 0.20% | Err: 31.6851 | W_surf: 1.6324 | Wmx: 0.622 | Fr: 0.017 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): '. ': 2% (49), 'St': 0% (6), 'to': 0% (6)
-Step 540/20003 | Acc: 0.40% | Err: 32.8410 | W_surf: 1.6666 | Wmx: 0.642 | Fr: 0.018 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): 'it': 6% (17), '. ': 2% (50), 'St': 0% (7)
-Step 550/20003 | Acc: 0.40% | Err: 31.3271 | W_surf: 1.6723 | Wmx: 0.651 | Fr: 0.017 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'it': 6% (17), '. ': 2% (51), 'St': 0% (7)
-Step 560/20003 | Acc: 0.40% | Err: 32.9572 | W_surf: 1.7181 | Wmx: 0.678 | Fr: 0.018 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'it': 6% (17), '. ': 2% (52), 'St': 0% (7)
-Step 570/20003 | Acc: 0.40% | Err: 35.1633 | W_surf: 1.7394 | Wmx: 0.695 | Fr: 0.018 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'it': 6% (17), '. ': 2% (53), 'St': 0% (7)
-Step 580/20003 | Acc: 0.40% | Err: 31.9358 | W_surf: 1.7513 | Wmx: 0.700 | Fr: 0.017 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'it': 6% (18), '. ': 2% (54), 'St': 0% (7)
-Step 590/20003 | Acc: 0.40% | Err: 33.3627 | W_surf: 1.7569 | Wmx: 0.701 | Fr: 0.017 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): 'it': 6% (18), '. ': 2% (55), 'St': 0% (7)
-Step 600/20003 | Acc: 0.40% | Err: 34.0335 | W_surf: 1.7559 | Wmx: 0.696 | Fr: 0.017 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'it': 5% (19), '. ': 2% (56), 'St': 0% (7)
-Step 610/20003 | Acc: 0.60% | Err: 32.4851 | W_surf: 1.7587 | Wmx: 0.693 | Fr: 0.017 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'it': 5% (19), '. ': 4% (57), 'St': 0% (7)
-Step 620/20003 | Acc: 0.60% | Err: 34.2226 | W_surf: 1.7654 | Wmx: 0.688 | Fr: 0.018 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'it': 5% (19), '. ': 3% (58), 'St': 0% (7)
-Step 630/20003 | Acc: 0.60% | Err: 35.9588 | W_surf: 1.7763 | Wmx: 0.686 | Fr: 0.018 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'it': 5% (19), '. ': 3% (59), 'St': 0% (7)
-Step 640/20003 | Acc: 0.60% | Err: 33.0441 | W_surf: 1.7742 | Wmx: 0.680 | Fr: 0.017 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'it': 5% (19), '. ': 3% (60), 'St': 0% (7)
-Step 650/20003 | Acc: 0.60% | Err: 35.9549 | W_surf: 1.7875 | Wmx: 0.681 | Fr: 0.017 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'it': 5% (19), '. ': 3% (61), 'St': 0% (7)
-Step 660/20003 | Acc: 0.60% | Err: 32.6162 | W_surf: 1.7917 | Wmx: 0.679 | Fr: 0.018 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'it': 5% (19), '. ': 3% (62), 'St': 0% (7)
-Step 670/20003 | Acc: 0.60% | Err: 30.1964 | W_surf: 1.8049 | Wmx: 0.676 | Fr: 0.018 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'it': 5% (20), '. ': 3% (63), 'St': 0% (7)
-Step 680/20003 | Acc: 0.60% | Err: 31.1109 | W_surf: 1.8207 | Wmx: 0.679 | Fr: 0.017 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): 'it': 5% (21), '. ': 3% (64), 'St': 0% (8)
-Step 690/20003 | Acc: 0.60% | Err: 33.4619 | W_surf: 1.8416 | Wmx: 0.679 | Fr: 0.018 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'it': 5% (22), '. ': 3% (65), 'St': 0% (8)
-Step 700/20003 | Acc: 0.60% | Err: 32.5256 | W_surf: 1.8408 | Wmx: 0.673 | Fr: 0.017 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'it': 5% (22), '. ': 3% (66), 'St': 0% (8)
-Step 710/20003 | Acc: 0.80% | Err: 34.2460 | W_surf: 1.8593 | Wmx: 0.674 | Fr: 0.018 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'll': 20% (5), 'it': 5% (22), '. ': 3% (67)
-Step 720/20003 | Acc: 0.80% | Err: 35.3358 | W_surf: 1.8699 | Wmx: 0.678 | Fr: 0.018 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'll': 20% (5), 'it': 5% (22), '. ': 3% (68)
-Step 730/20003 | Acc: 0.80% | Err: 34.5285 | W_surf: 1.8582 | Wmx: 0.674 | Fr: 0.018 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'll': 20% (5), 'it': 5% (22), '. ': 3% (68)
-Step 740/20003 | Acc: 0.80% | Err: 37.6985 | W_surf: 1.8600 | Wmx: 0.675 | Fr: 0.018 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'll': 20% (5), 'it': 5% (22), '. ': 3% (69)
-Step 750/20003 | Acc: 0.80% | Err: 33.5060 | W_surf: 1.8478 | Wmx: 0.671 | Fr: 0.017 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'll': 20% (5), 'it': 5% (22), '. ': 3% (71)
-Step 760/20003 | Acc: 0.80% | Err: 33.2658 | W_surf: 1.8423 | Wmx: 0.665 | Fr: 0.018 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'll': 20% (5), 'it': 4% (23), '. ': 3% (71)
-Step 770/20003 | Acc: 0.80% | Err: 36.3367 | W_surf: 1.8533 | Wmx: 0.663 | Fr: 0.018 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'll': 20% (5), 'it': 4% (23), '. ': 3% (72)
-Step 780/20003 | Acc: 0.80% | Err: 36.7528 | W_surf: 1.8678 | Wmx: 0.665 | Fr: 0.018 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): 'll': 17% (6), 'it': 4% (23), '. ': 3% (73)
-Step 790/20003 | Acc: 0.80% | Err: 35.4148 | W_surf: 1.8701 | Wmx: 0.670 | Fr: 0.018 | B: 0.00 | Inh: 0.0006 | 0 tok/s
-  Top Bigrams (min 5): 'll': 17% (6), 'it': 4% (23), '. ': 3% (75)
-Step 800/20003 | Acc: 0.80% | Err: 36.6914 | W_surf: 1.8627 | Wmx: 0.667 | Fr: 0.018 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'll': 17% (6), 'it': 4% (24), '. ': 3% (75)
-Step 810/20003 | Acc: 0.80% | Err: 35.0398 | W_surf: 1.8714 | Wmx: 0.666 | Fr: 0.018 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'll': 17% (6), 'it': 4% (25), '. ': 3% (77)
-Step 820/20003 | Acc: 0.80% | Err: 35.5935 | W_surf: 1.8904 | Wmx: 0.666 | Fr: 0.018 | B: 0.00 | Inh: 0.0007 | 0 tok/s
-  Top Bigrams (min 5): 'll': 17% (6), 'it': 4% (25), '. ': 3% (78)
-Step 830/20003 | Acc: 0.80% | Err: 35.9307 | W_surf: 1.8916 | Wmx: 0.660 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 17% (6), 'it': 4% (26), '. ': 3% (79)
-Step 840/20003 | Acc: 0.80% | Err: 37.4620 | W_surf: 1.9066 | Wmx: 0.660 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 14% (7), 'it': 4% (27), '. ': 2% (80)
-Step 850/20003 | Acc: 0.80% | Err: 41.2305 | W_surf: 1.9107 | Wmx: 0.661 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 14% (7), 'it': 4% (27), '. ': 2% (81)
-Step 860/20003 | Acc: 0.80% | Err: 40.9637 | W_surf: 1.9012 | Wmx: 0.657 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 14% (7), 'it': 4% (27), '. ': 2% (81)
-Step 870/20003 | Acc: 0.80% | Err: 37.5873 | W_surf: 1.8958 | Wmx: 0.654 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 14% (7), 'it': 4% (27), '. ': 2% (83)
-Step 880/20003 | Acc: 0.80% | Err: 35.9769 | W_surf: 1.8908 | Wmx: 0.653 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 14% (7), 'it': 4% (27), '. ': 2% (83)
-Step 890/20003 | Acc: 0.80% | Err: 33.3178 | W_surf: 1.8805 | Wmx: 0.650 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 14% (7), 'it': 4% (27), '. ': 2% (84)
-Step 900/20003 | Acc: 0.80% | Err: 34.4257 | W_surf: 1.8824 | Wmx: 0.647 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 14% (7), 'it': 4% (27), '. ': 2% (85)
-Step 910/20003 | Acc: 0.80% | Err: 33.0858 | W_surf: 1.8766 | Wmx: 0.645 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 14% (7), 'it': 4% (28), '. ': 2% (86)
-Step 920/20003 | Acc: 0.80% | Err: 34.1655 | W_surf: 1.8935 | Wmx: 0.642 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 14% (7), 'it': 4% (28), '. ': 2% (87)
-Step 930/20003 | Acc: 0.60% | Err: 34.1167 | W_surf: 1.8971 | Wmx: 0.644 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 14% (7), 'it': 3% (29), '. ': 2% (88)
-Step 940/20003 | Acc: 0.60% | Err: 30.7604 | W_surf: 1.8908 | Wmx: 0.641 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 14% (7), 'it': 3% (29), '. ': 2% (89)
-Step 950/20003 | Acc: 0.60% | Err: 29.5702 | W_surf: 1.8992 | Wmx: 0.642 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 14% (7), 'it': 3% (30), '. ': 2% (90)
-Step 960/20003 | Acc: 0.60% | Err: 32.9443 | W_surf: 1.9193 | Wmx: 0.644 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 14% (7), 'it': 3% (30), '. ': 2% (90)
-Step 970/20003 | Acc: 0.60% | Err: 32.2555 | W_surf: 1.9095 | Wmx: 0.639 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 12% (8), 'it': 3% (30), '. ': 2% (91)
-Step 980/20003 | Acc: 0.60% | Err: 34.0373 | W_surf: 1.9150 | Wmx: 0.644 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 12% (8), 'it': 3% (30), '. ': 2% (92)
-Step 990/20003 | Acc: 0.60% | Err: 35.6589 | W_surf: 1.9185 | Wmx: 0.646 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 12% (8), 'it': 3% (30), '. ': 2% (93)
-Step 1000/20003 | Acc: 0.60% | Err: 36.1647 | W_surf: 1.9344 | Wmx: 0.648 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 11% (9), 'it': 3% (30), '. ': 2% (94)
-Step 1010/20003 | Acc: 0.80% | Err: 38.8752 | W_surf: 1.9406 | Wmx: 0.644 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 11% (9), 'o ': 9% (11), 'it': 3% (30)
-Step 1020/20003 | Acc: 0.80% | Err: 36.2199 | W_surf: 1.9325 | Wmx: 0.639 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 11% (9), 'o ': 8% (12), 'it': 3% (30)
-Step 1030/20003 | Acc: 0.80% | Err: 35.7932 | W_surf: 1.9344 | Wmx: 0.641 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 11% (9), 'o ': 8% (12), 'it': 3% (31)
-Step 1040/20003 | Acc: 0.60% | Err: 35.8261 | W_surf: 1.9331 | Wmx: 0.640 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 11% (9), 'o ': 8% (12), 'it': 3% (32)
-Step 1050/20003 | Acc: 0.60% | Err: 37.0150 | W_surf: 1.9327 | Wmx: 0.639 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 11% (9), 'o ': 8% (13), 'it': 3% (32)
-Step 1060/20003 | Acc: 0.60% | Err: 35.4884 | W_surf: 1.9451 | Wmx: 0.641 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 11% (9), 'o ': 8% (13), 'it': 3% (33)
-Step 1070/20003 | Acc: 0.60% | Err: 36.9576 | W_surf: 1.9484 | Wmx: 0.640 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 10% (10), 'o ': 8% (13), 'it': 3% (33)
-Step 1080/20003 | Acc: 0.60% | Err: 39.0479 | W_surf: 1.9709 | Wmx: 0.647 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 10% (10), 'o ': 8% (13), 'it': 3% (33)
-Step 1090/20003 | Acc: 0.60% | Err: 37.5188 | W_surf: 1.9674 | Wmx: 0.649 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 10% (10), 'o ': 8% (13), 'it': 3% (33)
-Step 1100/20003 | Acc: 0.60% | Err: 37.4325 | W_surf: 1.9758 | Wmx: 0.649 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 10% (10), 'o ': 8% (13), 'it': 3% (34)
-Step 1110/20003 | Acc: 0.40% | Err: 36.0036 | W_surf: 1.9833 | Wmx: 0.649 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 9% (11), 'o ': 8% (13), 'it': 3% (34)
-Step 1120/20003 | Acc: 0.40% | Err: 35.7295 | W_surf: 1.9752 | Wmx: 0.648 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 9% (11), 'o ': 7% (14), 'it': 3% (34)
-Step 1130/20003 | Acc: 0.40% | Err: 35.8769 | W_surf: 1.9707 | Wmx: 0.648 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 9% (11), 'o ': 7% (14), 'it': 3% (34)
-Step 1140/20003 | Acc: 0.40% | Err: 36.2008 | W_surf: 1.9736 | Wmx: 0.647 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 9% (11), 'o ': 7% (14), 'it': 3% (35)
-Step 1150/20003 | Acc: 0.40% | Err: 35.1013 | W_surf: 1.9807 | Wmx: 0.643 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 9% (11), 'o ': 7% (14), 'it': 3% (36)
-Step 1160/20003 | Acc: 0.40% | Err: 35.4197 | W_surf: 1.9921 | Wmx: 0.641 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 9% (11), 'o ': 7% (14), 'it': 3% (37)
-Step 1170/20003 | Acc: 0.40% | Err: 33.5995 | W_surf: 1.9838 | Wmx: 0.638 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 9% (11), 'o ': 7% (14), 'it': 3% (37)
-Step 1180/20003 | Acc: 0.40% | Err: 30.4298 | W_surf: 1.9827 | Wmx: 0.637 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 9% (11), 'o ': 7% (14), 'it': 3% (38)
-Step 1190/20003 | Acc: 0.40% | Err: 33.0566 | W_surf: 1.9892 | Wmx: 0.635 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 9% (11), 'o ': 7% (15), 'it': 3% (38)
-Step 1200/20003 | Acc: 0.40% | Err: 30.2016 | W_surf: 1.9825 | Wmx: 0.630 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 9% (11), 'o ': 7% (15), 'it': 3% (38)
-Step 1210/20003 | Acc: 0.20% | Err: 30.3820 | W_surf: 1.9795 | Wmx: 0.628 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 9% (11), 'o ': 7% (15), 'it': 3% (38)
-Step 1220/20003 | Acc: 0.20% | Err: 30.5764 | W_surf: 1.9761 | Wmx: 0.624 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 9% (11), 'o ': 6% (16), 'it': 3% (38)
-Step 1230/20003 | Acc: 0.40% | Err: 29.5661 | W_surf: 1.9705 | Wmx: 0.621 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 9% (11), 'o ': 6% (16), 'it': 3% (39)
-Step 1240/20003 | Acc: 0.40% | Err: 29.4134 | W_surf: 1.9752 | Wmx: 0.616 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 9% (11), 'o ': 6% (16), '. ': 3% (118)
-Step 1250/20003 | Acc: 0.40% | Err: 28.2347 | W_surf: 1.9664 | Wmx: 0.616 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 9% (11), 'o ': 6% (16), '. ': 3% (119)
-Step 1260/20003 | Acc: 0.40% | Err: 28.6754 | W_surf: 1.9765 | Wmx: 0.613 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 9% (11), 'o ': 6% (16), 'it': 2% (40)
-Step 1270/20003 | Acc: 0.40% | Err: 27.5169 | W_surf: 1.9645 | Wmx: 0.612 | Fr: 0.017 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 9% (11), 'o ': 6% (16), '. ': 2% (121)
-Step 1280/20003 | Acc: 0.40% | Err: 29.3640 | W_surf: 1.9865 | Wmx: 0.618 | Fr: 0.017 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 9% (11), 'o ': 6% (16), '. ': 2% (121)
-Step 1290/20003 | Acc: 0.40% | Err: 29.9363 | W_surf: 1.9962 | Wmx: 0.620 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 9% (11), 'o ': 6% (16), 'it': 2% (41)
-Step 1300/20003 | Acc: 0.40% | Err: 32.2386 | W_surf: 2.0085 | Wmx: 0.622 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 8% (12), 'o ': 6% (16), 'it': 2% (41)
-Step 1310/20003 | Acc: 0.40% | Err: 30.6131 | W_surf: 2.0048 | Wmx: 0.621 | Fr: 0.017 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 8% (12), 'o ': 6% (16), '. ': 2% (124)
-Step 1320/20003 | Acc: 0.40% | Err: 32.0382 | W_surf: 2.0125 | Wmx: 0.625 | Fr: 0.017 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 8% (12), 'o ': 6% (16), '. ': 2% (125)
-Step 1330/20003 | Acc: 0.40% | Err: 35.4360 | W_surf: 2.0260 | Wmx: 0.630 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 8% (12), 'o ': 6% (16), '. ': 2% (127)
-Step 1340/20003 | Acc: 0.40% | Err: 35.4695 | W_surf: 2.0208 | Wmx: 0.626 | Fr: 0.017 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 8% (12), 'o ': 6% (16), '. ': 2% (128)
-Step 1350/20003 | Acc: 0.40% | Err: 39.4160 | W_surf: 2.0268 | Wmx: 0.630 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 8% (12), 'o ': 6% (16), '. ': 2% (129)
-Step 1360/20003 | Acc: 0.40% | Err: 37.2036 | W_surf: 2.0241 | Wmx: 0.631 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 8% (12), 'o ': 6% (16), '. ': 2% (129)
-Step 1370/20003 | Acc: 0.40% | Err: 39.7347 | W_surf: 2.0244 | Wmx: 0.632 | Fr: 0.017 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 8% (12), 'o ': 6% (16), '. ': 2% (130)
-Step 1380/20003 | Acc: 0.40% | Err: 39.1368 | W_surf: 2.0366 | Wmx: 0.641 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 8% (12), 'o ': 6% (17), '. ': 2% (131)
-Step 1390/20003 | Acc: 0.40% | Err: 39.0704 | W_surf: 2.0440 | Wmx: 0.642 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 8% (12), 'o ': 6% (18), '. ': 2% (132)
-Step 1400/20003 | Acc: 0.60% | Err: 38.7699 | W_surf: 2.0405 | Wmx: 0.646 | Fr: 0.017 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 8% (12), 'o ': 6% (18), ' a': 3% (36)
-Step 1410/20003 | Acc: 0.60% | Err: 41.6300 | W_surf: 2.0508 | Wmx: 0.646 | Fr: 0.017 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 8% (12), 'o ': 5% (19), ' a': 3% (37)
-Step 1420/20003 | Acc: 0.60% | Err: 40.2552 | W_surf: 2.0398 | Wmx: 0.644 | Fr: 0.017 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 8% (12), 'o ': 5% (19), ' a': 3% (37)
-Step 1430/20003 | Acc: 0.60% | Err: 37.9000 | W_surf: 2.0314 | Wmx: 0.645 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 8% (13), 'o ': 5% (19), ' a': 3% (37)
-Step 1440/20003 | Acc: 0.60% | Err: 36.7551 | W_surf: 2.0193 | Wmx: 0.640 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 8% (13), 'o ': 5% (19), ' a': 3% (37)
-Step 1450/20003 | Acc: 0.60% | Err: 33.7166 | W_surf: 2.0136 | Wmx: 0.638 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 8% (13), 'o ': 5% (19), ' a': 3% (37)
-Step 1460/20003 | Acc: 0.60% | Err: 35.3257 | W_surf: 2.0201 | Wmx: 0.640 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 8% (13), 'o ': 5% (19), ' a': 3% (37)
-Step 1470/20003 | Acc: 0.60% | Err: 37.0742 | W_surf: 2.0325 | Wmx: 0.643 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 7% (14), 'o ': 5% (19), ' a': 3% (37)
-Step 1480/20003 | Acc: 0.60% | Err: 35.7762 | W_surf: 2.0305 | Wmx: 0.641 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 7% (15), 'o ': 5% (19), ' a': 3% (37)
-Step 1490/20003 | Acc: 0.60% | Err: 37.1829 | W_surf: 2.0447 | Wmx: 0.642 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 7% (15), 'o ': 5% (19), ' a': 3% (37)
-Step 1500/20003 | Acc: 0.60% | Err: 35.3276 | W_surf: 2.0321 | Wmx: 0.640 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 7% (15), 'o ': 5% (19), ' a': 3% (37)
-Step 1510/20003 | Acc: 0.40% | Err: 33.7012 | W_surf: 2.0253 | Wmx: 0.639 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 7% (15), 'o ': 5% (19), ' a': 3% (37)
-Step 1520/20003 | Acc: 0.40% | Err: 33.2785 | W_surf: 2.0189 | Wmx: 0.638 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 7% (15), 'o ': 5% (19), ' a': 3% (37)
-Step 1530/20003 | Acc: 0.40% | Err: 33.5797 | W_surf: 2.0170 | Wmx: 0.636 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 7% (15), 'o ': 5% (19), ' a': 3% (37)
-Step 1540/20003 | Acc: 0.40% | Err: 34.8216 | W_surf: 2.0182 | Wmx: 0.636 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 7% (15), 'o ': 5% (19), ' a': 3% (37)
-Step 1550/20003 | Acc: 0.40% | Err: 35.0486 | W_surf: 2.0131 | Wmx: 0.636 | Fr: 0.018 | B: 0.00 | Inh: 0.0008 | 0 tok/s
-  Top Bigrams (min 5): 'll': 7% (15), 'o ': 5% (19), ' a': 3% (37)
-Step 1560/20003 | Acc: 0.40% | Err: 33.7522 | W_surf: 2.0145 | Wmx: 0.637 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 7% (15), 'o ': 5% (19), ' a': 3% (38)
-Step 1570/20003 | Acc: 0.60% | Err: 34.7772 | W_surf: 2.0345 | Wmx: 0.642 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 7% (15), 'o ': 5% (19), 'p ': 3% (37)
-Step 1580/20003 | Acc: 0.80% | Err: 33.1037 | W_surf: 2.0235 | Wmx: 0.640 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 7% (15), 'p ': 5% (38), 'o ': 5% (19)
-Step 1590/20003 | Acc: 0.80% | Err: 30.0291 | W_surf: 2.0190 | Wmx: 0.643 | Fr: 0.017 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 7% (15), 'p ': 5% (38), 'o ': 5% (19)
-Step 1600/20003 | Acc: 0.80% | Err: 31.8311 | W_surf: 2.0246 | Wmx: 0.642 | Fr: 0.017 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 7% (15), 'p ': 5% (38), 'o ': 5% (19)
-Step 1610/20003 | Acc: 0.80% | Err: 31.9146 | W_surf: 2.0205 | Wmx: 0.639 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 7% (15), 'p ': 5% (38), 'o ': 5% (20)
-Step 1620/20003 | Acc: 0.80% | Err: 32.4936 | W_surf: 2.0206 | Wmx: 0.641 | Fr: 0.017 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 7% (15), 'p ': 5% (38), 'o ': 5% (20)
-Step 1630/20003 | Acc: 0.80% | Err: 32.6880 | W_surf: 2.0178 | Wmx: 0.638 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 7% (15), 'p ': 5% (38), 'o ': 5% (20)
-Step 1640/20003 | Acc: 0.80% | Err: 33.9369 | W_surf: 2.0237 | Wmx: 0.638 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 6% (16), 'p ': 5% (38), 'o ': 5% (20)
-Step 1650/20003 | Acc: 0.80% | Err: 32.5949 | W_surf: 2.0132 | Wmx: 0.637 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 6% (16), 'p ': 5% (38), 'o ': 5% (21)
-Step 1660/20003 | Acc: 0.80% | Err: 32.0600 | W_surf: 2.0129 | Wmx: 0.637 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 6% (16), 'p ': 5% (39), 'o ': 5% (21)
-Step 1670/20003 | Acc: 0.80% | Err: 27.8625 | W_surf: 2.0051 | Wmx: 0.636 | Fr: 0.017 | B: 0.00 | Inh: 0.0011 | 0 tok/s
-  Top Bigrams (min 5): 'll': 6% (16), 'p ': 5% (39), 'o ': 5% (21)
-Step 1680/20003 | Acc: 0.80% | Err: 29.2817 | W_surf: 2.0049 | Wmx: 0.640 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 6% (16), 'p ': 5% (39), 'o ': 5% (21)
-Step 1690/20003 | Acc: 0.80% | Err: 28.0020 | W_surf: 1.9956 | Wmx: 0.636 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 6% (16), 'p ': 5% (39), 'o ': 5% (22)
-Step 1700/20003 | Acc: 0.80% | Err: 28.7738 | W_surf: 2.0015 | Wmx: 0.638 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 6% (16), 'p ': 5% (40), 'o ': 5% (22)
-Step 1710/20003 | Acc: 0.80% | Err: 29.7998 | W_surf: 2.0055 | Wmx: 0.638 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 6% (17), 'p ': 5% (40), 'o ': 5% (22)
-Step 1720/20003 | Acc: 0.80% | Err: 30.9467 | W_surf: 2.0128 | Wmx: 0.642 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 6% (17), 'p ': 5% (40), 'o ': 4% (23)
-Step 1730/20003 | Acc: 0.80% | Err: 29.0039 | W_surf: 2.0003 | Wmx: 0.640 | Fr: 0.017 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 6% (17), 'p ': 5% (40), 'o ': 4% (23)
-Step 1740/20003 | Acc: 0.80% | Err: 27.8148 | W_surf: 1.9991 | Wmx: 0.636 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 6% (17), 'p ': 5% (41), 'o ': 4% (23)
-Step 1750/20003 | Acc: 0.80% | Err: 30.3849 | W_surf: 2.0052 | Wmx: 0.635 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 6% (17), 'p ': 5% (42), 'o ': 4% (23)
-Step 1760/20003 | Acc: 0.80% | Err: 30.8546 | W_surf: 2.0013 | Wmx: 0.631 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 6% (17), 'p ': 5% (42), 'o ': 4% (23)
-Step 1770/20003 | Acc: 0.80% | Err: 31.4754 | W_surf: 1.9977 | Wmx: 0.630 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 6% (17), 'p ': 5% (43), 'o ': 4% (23)
-Step 1780/20003 | Acc: 0.80% | Err: 31.3184 | W_surf: 1.9922 | Wmx: 0.627 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 6% (17), 'p ': 5% (43), 'o ': 4% (23)
-Step 1790/20003 | Acc: 0.80% | Err: 32.6524 | W_surf: 1.9899 | Wmx: 0.626 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 6% (17), 'p ': 5% (43), 'o ': 4% (24)
-Step 1800/20003 | Acc: 0.80% | Err: 30.9697 | W_surf: 1.9836 | Wmx: 0.622 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 6% (18), 'p ': 5% (43), 'o ': 4% (24)
-Step 1810/20003 | Acc: 0.80% | Err: 30.6285 | W_surf: 1.9785 | Wmx: 0.618 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (19), 'p ': 5% (43), 'o ': 4% (24)
-Step 1820/20003 | Acc: 0.80% | Err: 27.6475 | W_surf: 1.9730 | Wmx: 0.618 | Fr: 0.017 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (19), 'p ': 5% (43), 'o ': 4% (24)
-Step 1830/20003 | Acc: 0.80% | Err: 29.6954 | W_surf: 1.9698 | Wmx: 0.614 | Fr: 0.017 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (19), 'p ': 5% (44), 'o ': 4% (24)
-Step 1840/20003 | Acc: 0.80% | Err: 29.6420 | W_surf: 1.9659 | Wmx: 0.615 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (19), 'p ': 4% (45), 'o ': 4% (24)
-Step 1850/20003 | Acc: 0.80% | Err: 29.9640 | W_surf: 1.9821 | Wmx: 0.625 | Fr: 0.017 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (19), 'p ': 4% (45), 'o ': 4% (25)
-Step 1860/20003 | Acc: 0.80% | Err: 29.0792 | W_surf: 1.9772 | Wmx: 0.625 | Fr: 0.017 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (19), 'p ': 4% (45), 'o ': 4% (25)
-Step 1870/20003 | Acc: 0.80% | Err: 31.8360 | W_surf: 1.9857 | Wmx: 0.626 | Fr: 0.018 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (19), 'p ': 4% (45), 'o ': 4% (25)
-Step 1880/20003 | Acc: 0.80% | Err: 32.3799 | W_surf: 1.9837 | Wmx: 0.629 | Fr: 0.017 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (19), 'p ': 4% (45), 'o ': 4% (25)
-Step 1890/20003 | Acc: 0.80% | Err: 32.6041 | W_surf: 1.9838 | Wmx: 0.631 | Fr: 0.017 | B: 0.00 | Inh: 0.0009 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (19), 'p ': 4% (46), 'o ': 4% (25)
-Step 1900/20003 | Acc: 0.60% | Err: 34.8061 | W_surf: 1.9914 | Wmx: 0.634 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (19), 'p ': 4% (46), 'o ': 4% (25)
-Step 1910/20003 | Acc: 0.60% | Err: 34.4130 | W_surf: 1.9879 | Wmx: 0.629 | Fr: 0.017 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (19), 'p ': 4% (47), 'o ': 4% (25)
-Step 1920/20003 | Acc: 0.60% | Err: 38.9467 | W_surf: 1.9973 | Wmx: 0.631 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (20), 'p ': 4% (47), 'o ': 4% (25)
-Step 1930/20003 | Acc: 0.60% | Err: 37.0013 | W_surf: 1.9838 | Wmx: 0.630 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (21), 'p ': 4% (47), 'o ': 4% (25)
-Step 1940/20003 | Acc: 0.60% | Err: 36.5717 | W_surf: 1.9819 | Wmx: 0.627 | Fr: 0.017 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (21), 'p ': 4% (47), 'o ': 4% (25)
-Step 1950/20003 | Acc: 0.60% | Err: 35.3566 | W_surf: 1.9802 | Wmx: 0.628 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (21), 'p ': 4% (48), 'o ': 4% (25)
-Step 1960/20003 | Acc: 0.60% | Err: 38.0325 | W_surf: 1.9867 | Wmx: 0.634 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (21), 'p ': 4% (48), 'o ': 4% (25)
-Step 1970/20003 | Acc: 0.60% | Err: 34.6383 | W_surf: 1.9723 | Wmx: 0.631 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (21), 'p ': 4% (49), 'o ': 4% (25)
-Step 1980/20003 | Acc: 0.60% | Err: 35.6768 | W_surf: 1.9750 | Wmx: 0.630 | Fr: 0.017 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (21), 'p ': 4% (49), 'o ': 4% (26)
-Step 1990/20003 | Acc: 0.60% | Err: 35.6035 | W_surf: 1.9785 | Wmx: 0.628 | Fr: 0.017 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (21), 'p ': 4% (49), 'o ': 4% (26)
-Step 2000/20003 | Acc: 0.60% | Err: 36.0169 | W_surf: 1.9865 | Wmx: 0.627 | Fr: 0.017 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (21), 'p ': 4% (51), 'o ': 4% (26)
-Step 2010/20003 | Acc: 0.60% | Err: 36.2332 | W_surf: 1.9889 | Wmx: 0.624 | Fr: 0.017 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (21), 'p ': 4% (52), 'o ': 4% (26)
-Step 2020/20003 | Acc: 0.60% | Err: 33.1500 | W_surf: 1.9808 | Wmx: 0.621 | Fr: 0.017 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (21), 'o ': 4% (26), 'p ': 4% (53)
-Step 2030/20003 | Acc: 0.60% | Err: 36.7711 | W_surf: 1.9991 | Wmx: 0.626 | Fr: 0.018 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (21), 'o ': 4% (26), 'p ': 4% (54)
-Step 2040/20003 | Acc: 0.80% | Err: 35.6617 | W_surf: 1.9912 | Wmx: 0.624 | Fr: 0.017 | B: 0.00 | Inh: 0.0010 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (21), 'o ': 4% (26), 'p ': 4% (54)
-Step 2050/20003 | Acc: 0.80% | Err: 35.9265 | W_surf: 1.9832 | Wmx: 0.621 | Fr: 0.018 | B: 0.00 | Inh: 0.0011 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (21), 'o ': 4% (26), 'p ': 4% (54)
-Step 2060/20003 | Acc: 0.80% | Err: 35.4568 | W_surf: 1.9918 | Wmx: 0.619 | Fr: 0.018 | B: 0.00 | Inh: 0.0011 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (21), 'o ': 4% (26), 'p ': 4% (54)
-Step 2070/20003 | Acc: 0.60% | Err: 35.6587 | W_surf: 1.9835 | Wmx: 0.617 | Fr: 0.018 | B: 0.00 | Inh: 0.0013 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (21), 'o ': 4% (26), 'p ': 4% (54)
-Step 2080/20003 | Acc: 0.40% | Err: 33.1409 | W_surf: 1.9754 | Wmx: 0.612 | Fr: 0.017 | B: 0.00 | Inh: 0.0013 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (21), 'o ': 4% (26), 'p ': 4% (54)
-Step 2090/20003 | Acc: 0.40% | Err: 34.4978 | W_surf: 1.9851 | Wmx: 0.614 | Fr: 0.017 | B: 0.00 | Inh: 0.0013 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (21), 'o ': 4% (26), 'p ': 4% (54)
-Step 2100/20003 | Acc: 0.40% | Err: 32.1874 | W_surf: 1.9806 | Wmx: 0.613 | Fr: 0.018 | B: 0.00 | Inh: 0.0013 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (21), 'p ': 4% (54), 'o ': 4% (27)
-Step 2110/20003 | Acc: 0.40% | Err: 31.7927 | W_surf: 1.9821 | Wmx: 0.613 | Fr: 0.017 | B: 0.00 | Inh: 0.0012 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (21), 'p ': 4% (54), 'o ': 4% (28)
-Step 2120/20003 | Acc: 0.40% | Err: 30.4188 | W_surf: 1.9740 | Wmx: 0.610 | Fr: 0.017 | B: 0.00 | Inh: 0.0012 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (22), 'p ': 4% (54), 'o ': 4% (28)
-Step 2130/20003 | Acc: 0.40% | Err: 29.0398 | W_surf: 1.9722 | Wmx: 0.608 | Fr: 0.017 | B: 0.00 | Inh: 0.0013 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (22), 'p ': 4% (54), 'o ': 4% (28)
-Step 2140/20003 | Acc: 0.40% | Err: 30.7050 | W_surf: 1.9805 | Wmx: 0.611 | Fr: 0.017 | B: 0.00 | Inh: 0.0013 | 0 tok/s
-  Top Bigrams (min 5): 'll': 5% (22), 'p ': 4% (54), 'o ': 3% (29)
+--- Starting Phase: Holophrases ---
+  Steps: Free=100, Nudge=30
+  Learning rate: 0.01, Nudge strength: 5.0
+  DFA alpha: 0.15, Burst apical gain: 1.5
+  Thalamic relay: 64 neurons
+  FRNL: kappa=2.0, target_sparsity=0.1
+  Lateral inhibition: strength=0.5, gain=2.0
+Step 10/20003 | Acc: 0.00% | Err: 60.8738 | Bst: 0.262 | W_surf: 2.8067 | Wmx: 0.178 | Fr: 0.004 | B: 0.00 | Inh: 2.2939 | 2 tok/s
+Step 20/20003 | Acc: 0.00% | Err: 96.4041 | Bst: 0.270 | W_surf: 2.8150 | Wmx: 0.178 | Fr: 0.012 | B: 0.00 | Inh: 2.2935 | 2 tok/s
+Step 30/20003 | Acc: 6.67% | Err: 124.9958 | Bst: 0.274 | W_surf: 2.8216 | Wmx: 0.178 | Fr: 0.026 | B: 0.00 | Inh: 2.2931 | 2 tok/s
+Step 40/20003 | Acc: 5.00% | Err: 139.6085 | Bst: 0.277 | W_surf: 2.8253 | Wmx: 0.178 | Fr: 0.047 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+Step 50/20003 | Acc: 4.00% | Err: 148.3773 | Bst: 0.278 | W_surf: 2.8273 | Wmx: 0.178 | Fr: 0.068 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): '. ': 20% (5), 'e.': 0% (5)
+Step 60/20003 | Acc: 3.33% | Err: 154.5591 | Bst: 0.279 | W_surf: 2.8294 | Wmx: 0.178 | Fr: 0.091 | B: 0.00 | Inh: 2.2931 | 2 tok/s
+  Top Bigrams (min 5): '. ': 17% (6), 'e.': 0% (6)
+Step 70/20003 | Acc: 5.71% | Err: 158.6378 | Bst: 0.279 | W_surf: 2.8343 | Wmx: 0.178 | Fr: 0.111 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): '. ': 29% (7), 'e.': 0% (6)
+Step 80/20003 | Acc: 5.00% | Err: 161.8810 | Bst: 0.280 | W_surf: 2.8381 | Wmx: 0.178 | Fr: 0.130 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): '. ': 25% (8), 'me': 0% (5), 'e.': 0% (7)
+Step 90/20003 | Acc: 4.44% | Err: 164.5676 | Bst: 0.280 | W_surf: 2.8425 | Wmx: 0.178 | Fr: 0.147 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): '. ': 22% (9), 'me': 0% (5), 'e.': 0% (7)
+Step 100/20003 | Acc: 4.00% | Err: 166.7825 | Bst: 0.281 | W_surf: 2.8466 | Wmx: 0.178 | Fr: 0.161 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): '. ': 22% (9), 'me': 0% (5), 'e.': 0% (7)
+Step 110/20003 | Acc: 4.55% | Err: 179.3221 | Bst: 0.283 | W_surf: 2.8519 | Wmx: 0.178 | Fr: 0.174 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): '. ': 22% (9), 'me': 0% (5), 'e.': 0% (7)
+Step 120/20003 | Acc: 5.83% | Err: 184.8227 | Bst: 0.283 | W_surf: 2.8578 | Wmx: 0.178 | Fr: 0.186 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): '. ': 20% (10), 'me': 0% (5), 'e.': 0% (7)
+Step 130/20003 | Acc: 6.15% | Err: 185.1550 | Bst: 0.283 | W_surf: 2.8636 | Wmx: 0.178 | Fr: 0.197 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): '. ': 18% (11), 'me': 0% (5), 'e.': 0% (7)
+Step 140/20003 | Acc: 5.71% | Err: 185.3859 | Bst: 0.283 | W_surf: 2.8663 | Wmx: 0.178 | Fr: 0.207 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): '. ': 17% (12), 'me': 0% (5), 'e.': 0% (7)
+Step 150/20003 | Acc: 5.33% | Err: 185.9404 | Bst: 0.283 | W_surf: 2.8700 | Wmx: 0.178 | Fr: 0.217 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'o ': 20% (5), '. ': 15% (13), 'me': 0% (5)
+Step 160/20003 | Acc: 5.00% | Err: 185.9489 | Bst: 0.283 | W_surf: 2.8745 | Wmx: 0.178 | Fr: 0.224 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'o ': 20% (5), '. ': 14% (14), 'me': 0% (6)
+Step 170/20003 | Acc: 5.29% | Err: 186.4168 | Bst: 0.283 | W_surf: 2.8828 | Wmx: 0.178 | Fr: 0.230 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 40% (5), 'o ': 17% (6), '. ': 13% (15)
+Step 180/20003 | Acc: 5.00% | Err: 186.6923 | Bst: 0.284 | W_surf: 2.8881 | Wmx: 0.178 | Fr: 0.234 | B: 0.00 | Inh: 2.2926 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 40% (5), 'o ': 17% (6), '. ': 12% (16)
+Step 190/20003 | Acc: 4.74% | Err: 186.8935 | Bst: 0.284 | W_surf: 2.8945 | Wmx: 0.178 | Fr: 0.237 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 40% (5), 'o ': 17% (6), '. ': 12% (17)
+Step 200/20003 | Acc: 4.50% | Err: 186.6220 | Bst: 0.284 | W_surf: 2.8993 | Wmx: 0.178 | Fr: 0.242 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 40% (5), 'o ': 14% (7), '. ': 11% (19)
+Step 210/20003 | Acc: 4.76% | Err: 186.6333 | Bst: 0.285 | W_surf: 2.9032 | Wmx: 0.178 | Fr: 0.245 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 40% (5), 'o ': 14% (7), '. ': 10% (20)
+Step 220/20003 | Acc: 4.55% | Err: 186.5885 | Bst: 0.285 | W_surf: 2.9097 | Wmx: 0.178 | Fr: 0.250 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 40% (5), ' i': 20% (5), 'o ': 14% (7)
+Step 230/20003 | Acc: 4.35% | Err: 186.6964 | Bst: 0.286 | W_surf: 2.9163 | Wmx: 0.178 | Fr: 0.254 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 40% (5), ' i': 17% (6), 'o ': 14% (7)
+Step 240/20003 | Acc: 4.17% | Err: 186.6429 | Bst: 0.286 | W_surf: 2.9228 | Wmx: 0.178 | Fr: 0.258 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 40% (5), 'o ': 14% (7), ' i': 14% (7)
+Step 250/20003 | Acc: 4.00% | Err: 186.5381 | Bst: 0.286 | W_surf: 2.9308 | Wmx: 0.178 | Fr: 0.262 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), ' i': 14% (7), 'o ': 12% (8)
+Step 260/20003 | Acc: 3.85% | Err: 186.8448 | Bst: 0.286 | W_surf: 2.9376 | Wmx: 0.178 | Fr: 0.265 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), ' i': 14% (7), 'o ': 11% (9)
+Step 270/20003 | Acc: 3.70% | Err: 186.7297 | Bst: 0.286 | W_surf: 2.9454 | Wmx: 0.178 | Fr: 0.268 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), ' i': 12% (8), 'o ': 11% (9)
+Step 280/20003 | Acc: 3.93% | Err: 186.6568 | Bst: 0.286 | W_surf: 2.9549 | Wmx: 0.178 | Fr: 0.270 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), 'ck': 20% (5), 'k ': 20% (5)
+Step 290/20003 | Acc: 3.79% | Err: 186.5934 | Bst: 0.286 | W_surf: 2.9634 | Wmx: 0.178 | Fr: 0.271 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), 'ck': 20% (5), 'k ': 20% (5)
+Step 300/20003 | Acc: 3.67% | Err: 186.7886 | Bst: 0.285 | W_surf: 2.9702 | Wmx: 0.178 | Fr: 0.273 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), 'ck': 20% (5), 'k ': 20% (5)
+Step 310/20003 | Acc: 3.87% | Err: 186.8018 | Bst: 0.285 | W_surf: 2.9803 | Wmx: 0.178 | Fr: 0.276 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), 'ck': 20% (5), 'k ': 20% (5)
+Step 320/20003 | Acc: 3.75% | Err: 187.1922 | Bst: 0.285 | W_surf: 2.9875 | Wmx: 0.178 | Fr: 0.280 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), 'ck': 20% (5), 'k ': 20% (5)
+Step 330/20003 | Acc: 3.64% | Err: 187.6174 | Bst: 0.285 | W_surf: 2.9947 | Wmx: 0.178 | Fr: 0.282 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), 'lp': 20% (5), 'ck': 20% (5)
+Step 340/20003 | Acc: 3.82% | Err: 187.7561 | Bst: 0.285 | W_surf: 3.0023 | Wmx: 0.178 | Fr: 0.282 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), 'ck': 20% (5), 'k ': 20% (5)
+Step 350/20003 | Acc: 3.71% | Err: 188.0361 | Bst: 0.285 | W_surf: 3.0120 | Wmx: 0.178 | Fr: 0.282 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), 'ck': 20% (5), 'k ': 20% (5)
+Step 360/20003 | Acc: 3.89% | Err: 187.8954 | Bst: 0.285 | W_surf: 3.0225 | Wmx: 0.178 | Fr: 0.283 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), 'ck': 20% (5), 'k ': 20% (5)
+Step 370/20003 | Acc: 4.05% | Err: 188.0207 | Bst: 0.285 | W_surf: 3.0310 | Wmx: 0.178 | Fr: 0.282 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), 'ck': 20% (5), 'k ': 20% (5)
+Step 380/20003 | Acc: 3.95% | Err: 188.0939 | Bst: 0.286 | W_surf: 3.0365 | Wmx: 0.178 | Fr: 0.283 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), 'p.': 20% (5), 'lp': 17% (6)
+Step 390/20003 | Acc: 3.85% | Err: 188.1614 | Bst: 0.285 | W_surf: 3.0483 | Wmx: 0.178 | Fr: 0.286 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), 'lp': 17% (6), 'p.': 17% (6)
+Step 400/20003 | Acc: 3.75% | Err: 188.1451 | Bst: 0.285 | W_surf: 3.0597 | Wmx: 0.178 | Fr: 0.288 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), 'lp': 17% (6), 'ck': 14% (7)
+Step 410/20003 | Acc: 3.66% | Err: 188.1723 | Bst: 0.285 | W_surf: 3.0674 | Wmx: 0.178 | Fr: 0.289 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), 'lp': 17% (6), 'ck': 14% (7)
+Step 420/20003 | Acc: 3.81% | Err: 187.8694 | Bst: 0.285 | W_surf: 3.0780 | Wmx: 0.178 | Fr: 0.291 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), 'lp': 17% (6), 'ck': 14% (7)
+Step 430/20003 | Acc: 3.72% | Err: 187.5469 | Bst: 0.285 | W_surf: 3.0855 | Wmx: 0.178 | Fr: 0.293 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), 's ': 20% (5), ' t': 20% (5)
+Step 440/20003 | Acc: 3.64% | Err: 187.6133 | Bst: 0.285 | W_surf: 3.0929 | Wmx: 0.178 | Fr: 0.296 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), 's ': 20% (5), ' t': 20% (5)
+Step 450/20003 | Acc: 3.56% | Err: 187.1593 | Bst: 0.284 | W_surf: 3.1043 | Wmx: 0.178 | Fr: 0.299 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), 's ': 20% (5), ' t': 20% (5)
+Step 460/20003 | Acc: 3.48% | Err: 187.0466 | Bst: 0.284 | W_surf: 3.1125 | Wmx: 0.178 | Fr: 0.301 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 33% (6), 's ': 20% (5), ' t': 20% (5)
+Step 470/20003 | Acc: 3.40% | Err: 186.7049 | Bst: 0.284 | W_surf: 3.1234 | Wmx: 0.178 | Fr: 0.301 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 29% (7), 's ': 20% (5), ' t': 20% (5)
+Step 480/20003 | Acc: 3.33% | Err: 186.7869 | Bst: 0.284 | W_surf: 3.1333 | Wmx: 0.178 | Fr: 0.298 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 29% (7), 'he': 20% (5), 's ': 20% (5)
+Step 490/20003 | Acc: 3.47% | Err: 186.9170 | Bst: 0.284 | W_surf: 3.1478 | Wmx: 0.178 | Fr: 0.293 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 29% (7), 'he': 20% (5), 's ': 20% (5)
+Step 500/20003 | Acc: 3.40% | Err: 186.8866 | Bst: 0.285 | W_surf: 3.1648 | Wmx: 0.178 | Fr: 0.291 | B: 0.00 | Inh: 2.2932 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 29% (7), 'he': 20% (5), 's ': 20% (5)
+Step 510/20003 | Acc: 3.40% | Err: 186.7377 | Bst: 0.285 | W_surf: 3.1807 | Wmx: 0.178 | Fr: 0.290 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 29% (7), 'he': 20% (5), 's ': 20% (5)
+Step 520/20003 | Acc: 3.40% | Err: 186.5624 | Bst: 0.285 | W_surf: 3.1974 | Wmx: 0.178 | Fr: 0.289 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 29% (7), 'he': 20% (5), 's ': 20% (5)
+Step 530/20003 | Acc: 3.20% | Err: 186.2695 | Bst: 0.285 | W_surf: 3.2105 | Wmx: 0.178 | Fr: 0.288 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 25% (8), 'he': 20% (5), 's ': 20% (5)
+Step 540/20003 | Acc: 3.60% | Err: 186.2402 | Bst: 0.285 | W_surf: 3.2201 | Wmx: 0.178 | Fr: 0.286 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 25% (8), 's ': 20% (5), ' t': 20% (5)
+Step 550/20003 | Acc: 3.60% | Err: 186.3044 | Bst: 0.285 | W_surf: 3.2282 | Wmx: 0.178 | Fr: 0.283 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 25% (8), 's ': 20% (5), ' t': 20% (5)
+Step 560/20003 | Acc: 3.60% | Err: 186.3892 | Bst: 0.286 | W_surf: 3.2445 | Wmx: 0.178 | Fr: 0.281 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 25% (8), 's ': 20% (5), ' t': 20% (5)
+Step 570/20003 | Acc: 3.20% | Err: 186.3098 | Bst: 0.286 | W_surf: 3.2576 | Wmx: 0.178 | Fr: 0.281 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 25% (8), 's ': 20% (5), ' t': 20% (5)
+Step 580/20003 | Acc: 3.40% | Err: 185.9781 | Bst: 0.286 | W_surf: 3.2687 | Wmx: 0.178 | Fr: 0.280 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 25% (8), 's ': 20% (5), ' t': 20% (5)
+Step 590/20003 | Acc: 3.60% | Err: 185.6439 | Bst: 0.286 | W_surf: 3.2879 | Wmx: 0.178 | Fr: 0.281 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 25% (8), 's ': 20% (5), ' t': 20% (5)
+Step 600/20003 | Acc: 3.80% | Err: 185.7128 | Bst: 0.286 | W_surf: 3.3025 | Wmx: 0.178 | Fr: 0.281 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 25% (8), 's ': 20% (5), ' t': 20% (5)
+Step 610/20003 | Acc: 3.60% | Err: 185.8243 | Bst: 0.286 | W_surf: 3.3189 | Wmx: 0.178 | Fr: 0.283 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 25% (8), 's ': 20% (5), ' t': 20% (5)
+Step 620/20003 | Acc: 3.40% | Err: 186.0297 | Bst: 0.286 | W_surf: 3.3370 | Wmx: 0.178 | Fr: 0.285 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 25% (8), 's ': 20% (5), ' t': 20% (5)
+Step 630/20003 | Acc: 3.40% | Err: 186.1806 | Bst: 0.286 | W_surf: 3.3512 | Wmx: 0.178 | Fr: 0.286 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 25% (8), 's ': 20% (5), ' t': 20% (5)
+Step 640/20003 | Acc: 3.40% | Err: 186.4580 | Bst: 0.286 | W_surf: 3.3628 | Wmx: 0.178 | Fr: 0.287 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 25% (8), 's ': 20% (5), ' t': 20% (5)
+Step 650/20003 | Acc: 3.60% | Err: 186.7265 | Bst: 0.286 | W_surf: 3.3726 | Wmx: 0.178 | Fr: 0.290 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 25% (8), 's ': 20% (5), ' t': 20% (5)
+Step 660/20003 | Acc: 3.60% | Err: 187.3211 | Bst: 0.286 | W_surf: 3.3877 | Wmx: 0.178 | Fr: 0.294 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 25% (8), 's ': 20% (5), ' t': 20% (5)
+Step 670/20003 | Acc: 3.40% | Err: 188.1009 | Bst: 0.286 | W_surf: 3.4029 | Wmx: 0.178 | Fr: 0.296 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 25% (8), 'he': 17% (6), 'mo': 17% (6)
+Step 680/20003 | Acc: 3.80% | Err: 188.6263 | Bst: 0.286 | W_surf: 3.4197 | Wmx: 0.178 | Fr: 0.296 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 25% (8), 'he': 17% (6), 'mo': 17% (6)
+Step 690/20003 | Acc: 3.80% | Err: 188.9200 | Bst: 0.285 | W_surf: 3.4321 | Wmx: 0.178 | Fr: 0.296 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 25% (8), 'he': 17% (6), 'mo': 17% (6)
+Step 700/20003 | Acc: 3.80% | Err: 189.3608 | Bst: 0.285 | W_surf: 3.4495 | Wmx: 0.178 | Fr: 0.297 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 25% (8), 'mo': 17% (6), 'he': 14% (7)
+Step 710/20003 | Acc: 3.60% | Err: 189.4695 | Bst: 0.285 | W_surf: 3.4701 | Wmx: 0.178 | Fr: 0.295 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 22% (9), 'mo': 17% (6), 'he': 14% (7)
+Step 720/20003 | Acc: 3.60% | Err: 189.3480 | Bst: 0.285 | W_surf: 3.4919 | Wmx: 0.178 | Fr: 0.293 | B: 0.00 | Inh: 2.2926 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 22% (9), 'mo': 17% (6), 'he': 14% (7)
+Step 730/20003 | Acc: 3.60% | Err: 189.5111 | Bst: 0.286 | W_surf: 3.5066 | Wmx: 0.178 | Fr: 0.290 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 22% (9), 'mo': 17% (6), 'he': 14% (7)
+Step 740/20003 | Acc: 3.80% | Err: 189.1806 | Bst: 0.286 | W_surf: 3.5207 | Wmx: 0.178 | Fr: 0.288 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 20% (10), 'mo': 17% (6), 'he': 14% (7)
+Step 750/20003 | Acc: 3.80% | Err: 188.9929 | Bst: 0.286 | W_surf: 3.5343 | Wmx: 0.178 | Fr: 0.287 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 20% (10), 'mo': 17% (6), 'he': 14% (7)
+Step 760/20003 | Acc: 4.00% | Err: 188.4509 | Bst: 0.286 | W_surf: 3.5432 | Wmx: 0.178 | Fr: 0.285 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 20% (10), 'he': 14% (7), 'No': 14% (7)
+Step 770/20003 | Acc: 4.20% | Err: 187.7416 | Bst: 0.286 | W_surf: 3.5579 | Wmx: 0.178 | Fr: 0.284 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 20% (10), 'he': 14% (7), 'No': 14% (7)
+Step 780/20003 | Acc: 4.00% | Err: 187.4641 | Bst: 0.286 | W_surf: 3.5686 | Wmx: 0.178 | Fr: 0.283 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 20% (10), 'he': 14% (7), 'No': 14% (7)
+Step 790/20003 | Acc: 4.00% | Err: 187.3583 | Bst: 0.286 | W_surf: 3.5763 | Wmx: 0.178 | Fr: 0.284 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 20% (10), 'he': 14% (7), 'No': 14% (7)
+Step 800/20003 | Acc: 4.20% | Err: 187.0710 | Bst: 0.286 | W_surf: 3.5923 | Wmx: 0.178 | Fr: 0.287 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 20% (10), 'he': 14% (7), 'No': 14% (7)
+Step 810/20003 | Acc: 4.00% | Err: 187.0312 | Bst: 0.286 | W_surf: 3.6090 | Wmx: 0.178 | Fr: 0.290 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 20% (10), 'he': 14% (7), 'No': 14% (7)
+Step 820/20003 | Acc: 4.40% | Err: 187.0424 | Bst: 0.285 | W_surf: 3.6193 | Wmx: 0.178 | Fr: 0.290 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 18% (11), 'o ': 17% (18), 'he': 14% (7)
+Step 830/20003 | Acc: 4.60% | Err: 186.9048 | Bst: 0.285 | W_surf: 3.6390 | Wmx: 0.178 | Fr: 0.288 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 18% (11), 'o ': 17% (18), 'he': 14% (7)
+Step 840/20003 | Acc: 4.40% | Err: 186.9203 | Bst: 0.285 | W_surf: 3.6520 | Wmx: 0.178 | Fr: 0.286 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 18% (11), 'o ': 17% (18), 'he': 14% (7)
+Step 850/20003 | Acc: 4.40% | Err: 186.8100 | Bst: 0.285 | W_surf: 3.6633 | Wmx: 0.178 | Fr: 0.284 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 18% (11), 'o ': 16% (19), 'he': 14% (7)
+Step 860/20003 | Acc: 4.20% | Err: 186.6112 | Bst: 0.286 | W_surf: 3.6720 | Wmx: 0.178 | Fr: 0.283 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 18% (11), 'o ': 16% (19), 'he': 14% (7)
+Step 870/20003 | Acc: 4.00% | Err: 186.8442 | Bst: 0.286 | W_surf: 3.6915 | Wmx: 0.178 | Fr: 0.284 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 18% (11), 'o ': 16% (19), 'he': 14% (7)
+Step 880/20003 | Acc: 4.20% | Err: 186.7610 | Bst: 0.286 | W_surf: 3.7060 | Wmx: 0.178 | Fr: 0.283 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 18% (11), 'o ': 16% (19), 'he': 14% (7)
+Step 890/20003 | Acc: 4.20% | Err: 186.8824 | Bst: 0.286 | W_surf: 3.7159 | Wmx: 0.178 | Fr: 0.284 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 18% (11), 'o ': 16% (19), 'he': 14% (7)
+Step 900/20003 | Acc: 4.20% | Err: 187.0346 | Bst: 0.286 | W_surf: 3.7293 | Wmx: 0.178 | Fr: 0.287 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 18% (11), 'o ': 16% (19), 'he': 14% (7)
+Step 910/20003 | Acc: 4.40% | Err: 187.1705 | Bst: 0.286 | W_surf: 3.7398 | Wmx: 0.178 | Fr: 0.288 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'wa': 18% (11), 'o ': 16% (19), 'he': 14% (7)
+Step 920/20003 | Acc: 4.40% | Err: 187.2214 | Bst: 0.286 | W_surf: 3.7592 | Wmx: 0.178 | Fr: 0.288 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 40% (5), 'o ': 20% (20), 'wa': 18% (11)
+Step 930/20003 | Acc: 4.60% | Err: 187.3499 | Bst: 0.286 | W_surf: 3.7757 | Wmx: 0.178 | Fr: 0.288 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 40% (5), 'o ': 20% (20), 'wa': 17% (12)
+Step 940/20003 | Acc: 4.80% | Err: 187.5491 | Bst: 0.286 | W_surf: 3.7947 | Wmx: 0.178 | Fr: 0.287 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 40% (5), 'o ': 19% (21), 'wa': 17% (12)
+Step 950/20003 | Acc: 4.80% | Err: 187.4729 | Bst: 0.286 | W_surf: 3.8088 | Wmx: 0.178 | Fr: 0.286 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 40% (5), 'o ': 19% (21), 'wa': 17% (12)
+Step 960/20003 | Acc: 4.80% | Err: 187.6861 | Bst: 0.286 | W_surf: 3.8361 | Wmx: 0.177 | Fr: 0.284 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 40% (5), 'o ': 18% (22), 'wa': 15% (13)
+Step 970/20003 | Acc: 4.80% | Err: 187.6523 | Bst: 0.286 | W_surf: 3.8520 | Wmx: 0.178 | Fr: 0.283 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 40% (5), 'o ': 18% (22), 'wa': 15% (13)
+Step 980/20003 | Acc: 4.80% | Err: 187.8032 | Bst: 0.286 | W_surf: 3.8677 | Wmx: 0.178 | Fr: 0.283 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 40% (5), 'o ': 18% (22), 'wa': 15% (13)
+Step 990/20003 | Acc: 4.60% | Err: 187.6889 | Bst: 0.286 | W_surf: 3.8853 | Wmx: 0.178 | Fr: 0.282 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 40% (5), 'o ': 18% (22), 'wa': 15% (13)
+Step 1000/20003 | Acc: 4.60% | Err: 187.4452 | Bst: 0.285 | W_surf: 3.9038 | Wmx: 0.178 | Fr: 0.282 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 40% (5), 'o ': 18% (22), 'wa': 15% (13)
+Step 1010/20003 | Acc: 4.80% | Err: 187.3962 | Bst: 0.285 | W_surf: 3.9180 | Wmx: 0.178 | Fr: 0.284 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 40% (5), 'o ': 18% (22), 'wa': 15% (13)
+Step 1020/20003 | Acc: 5.00% | Err: 187.4329 | Bst: 0.285 | W_surf: 3.9366 | Wmx: 0.181 | Fr: 0.284 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 40% (5), 'o ': 18% (22), 'wa': 15% (13)
+Step 1030/20003 | Acc: 5.00% | Err: 187.3640 | Bst: 0.285 | W_surf: 3.9455 | Wmx: 0.184 | Fr: 0.285 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 40% (5), 'o ': 18% (22), 'wa': 15% (13)
+Step 1040/20003 | Acc: 4.60% | Err: 187.1534 | Bst: 0.285 | W_surf: 3.9643 | Wmx: 0.188 | Fr: 0.285 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 40% (5), 'o ': 18% (22), 'wa': 15% (13)
+Step 1050/20003 | Acc: 4.60% | Err: 187.4559 | Bst: 0.285 | W_surf: 3.9819 | Wmx: 0.191 | Fr: 0.285 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 40% (5), 'o ': 18% (22), 'wa': 15% (13)
+Step 1060/20003 | Acc: 4.80% | Err: 187.8829 | Bst: 0.285 | W_surf: 3.9914 | Wmx: 0.190 | Fr: 0.286 | B: 0.00 | Inh: 2.2926 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 40% (5), 'o ': 18% (22), 'wa': 15% (13)
+Step 1070/20003 | Acc: 5.00% | Err: 188.2050 | Bst: 0.286 | W_surf: 4.0034 | Wmx: 0.192 | Fr: 0.286 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 40% (5), 'he': 25% (8), 'o ': 18% (22)
+Step 1080/20003 | Acc: 5.00% | Err: 188.4010 | Bst: 0.286 | W_surf: 4.0194 | Wmx: 0.194 | Fr: 0.286 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 40% (5), 'he': 25% (8), 'o ': 18% (22)
+Step 1090/20003 | Acc: 4.80% | Err: 188.3028 | Bst: 0.286 | W_surf: 4.0362 | Wmx: 0.200 | Fr: 0.287 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 40% (5), 'he': 25% (8), 'o ': 17% (23)
+Step 1100/20003 | Acc: 4.60% | Err: 188.5040 | Bst: 0.286 | W_surf: 4.0505 | Wmx: 0.200 | Fr: 0.287 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 25% (8), 'o ': 17% (23)
+Step 1110/20003 | Acc: 4.60% | Err: 188.6753 | Bst: 0.287 | W_surf: 4.0626 | Wmx: 0.201 | Fr: 0.287 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 25% (8), 'o ': 17% (23)
+Step 1120/20003 | Acc: 4.60% | Err: 188.8949 | Bst: 0.287 | W_surf: 4.0835 | Wmx: 0.202 | Fr: 0.287 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 25% (8), 'o ': 17% (23)
+Step 1130/20003 | Acc: 4.80% | Err: 189.1143 | Bst: 0.287 | W_surf: 4.1024 | Wmx: 0.203 | Fr: 0.287 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 25% (8), 'o ': 17% (23)
+Step 1140/20003 | Acc: 4.80% | Err: 189.3813 | Bst: 0.287 | W_surf: 4.1204 | Wmx: 0.203 | Fr: 0.288 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 25% (8), 'o ': 17% (24)
+Step 1150/20003 | Acc: 4.60% | Err: 189.5897 | Bst: 0.287 | W_surf: 4.1334 | Wmx: 0.205 | Fr: 0.288 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 25% (8), 'o ': 17% (24)
+Step 1160/20003 | Acc: 4.80% | Err: 189.6348 | Bst: 0.287 | W_surf: 4.1490 | Wmx: 0.205 | Fr: 0.289 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 22% (9), 'o ': 17% (24)
+Step 1170/20003 | Acc: 5.20% | Err: 189.5210 | Bst: 0.287 | W_surf: 4.1669 | Wmx: 0.203 | Fr: 0.289 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 22% (9), 'o ': 17% (24)
+Step 1180/20003 | Acc: 4.80% | Err: 189.4481 | Bst: 0.286 | W_surf: 4.1837 | Wmx: 0.205 | Fr: 0.289 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 20% (10), 'o ': 17% (24)
+Step 1190/20003 | Acc: 4.80% | Err: 189.4280 | Bst: 0.286 | W_surf: 4.1936 | Wmx: 0.204 | Fr: 0.288 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 20% (10), 'o ': 17% (24)
+Step 1200/20003 | Acc: 4.80% | Err: 189.1629 | Bst: 0.286 | W_surf: 4.2022 | Wmx: 0.202 | Fr: 0.289 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 20% (10), 'o ': 17% (24)
+Step 1210/20003 | Acc: 5.00% | Err: 188.7567 | Bst: 0.286 | W_surf: 4.2125 | Wmx: 0.206 | Fr: 0.290 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 18% (11), 'o ': 17% (24)
+Step 1220/20003 | Acc: 5.00% | Err: 188.4679 | Bst: 0.286 | W_surf: 4.2265 | Wmx: 0.210 | Fr: 0.290 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 18% (11), 'o ': 17% (24)
+Step 1230/20003 | Acc: 5.00% | Err: 188.1400 | Bst: 0.286 | W_surf: 4.2445 | Wmx: 0.212 | Fr: 0.290 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 18% (11), 'o ': 17% (24)
+Step 1240/20003 | Acc: 4.80% | Err: 187.7790 | Bst: 0.286 | W_surf: 4.2633 | Wmx: 0.215 | Fr: 0.291 | B: 0.00 | Inh: 2.2926 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 18% (11), 'o ': 17% (24)
+Step 1250/20003 | Acc: 5.40% | Err: 187.2395 | Bst: 0.285 | W_surf: 4.2899 | Wmx: 0.223 | Fr: 0.291 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 18% (11), 'o ': 17% (24)
+Step 1260/20003 | Acc: 5.20% | Err: 186.4602 | Bst: 0.285 | W_surf: 4.3093 | Wmx: 0.224 | Fr: 0.291 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 18% (11), 'o ': 16% (25)
+Step 1270/20003 | Acc: 5.00% | Err: 186.3099 | Bst: 0.285 | W_surf: 4.3295 | Wmx: 0.225 | Fr: 0.291 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 18% (11), 'o ': 16% (25)
+Step 1280/20003 | Acc: 5.00% | Err: 185.9023 | Bst: 0.285 | W_surf: 4.3453 | Wmx: 0.219 | Fr: 0.290 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 18% (11), 'o ': 15% (26)
+Step 1290/20003 | Acc: 5.00% | Err: 185.6932 | Bst: 0.285 | W_surf: 4.3622 | Wmx: 0.220 | Fr: 0.290 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 18% (11), 'o ': 15% (26)
+Step 1300/20003 | Acc: 5.00% | Err: 185.7684 | Bst: 0.285 | W_surf: 4.3787 | Wmx: 0.217 | Fr: 0.289 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 18% (11), 'o ': 15% (27)
+Step 1310/20003 | Acc: 5.00% | Err: 185.7741 | Bst: 0.285 | W_surf: 4.3920 | Wmx: 0.215 | Fr: 0.289 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 18% (11), 'o ': 15% (27)
+Step 1320/20003 | Acc: 4.60% | Err: 185.6396 | Bst: 0.285 | W_surf: 4.4094 | Wmx: 0.213 | Fr: 0.287 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 18% (11), 'o ': 15% (27)
+Step 1330/20003 | Acc: 4.40% | Err: 185.9263 | Bst: 0.285 | W_surf: 4.4269 | Wmx: 0.213 | Fr: 0.285 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 18% (11), 'o ': 15% (27)
+Step 1340/20003 | Acc: 4.40% | Err: 186.2227 | Bst: 0.285 | W_surf: 4.4435 | Wmx: 0.216 | Fr: 0.284 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 17% (12), 'o ': 15% (27)
+Step 1350/20003 | Acc: 4.40% | Err: 186.6589 | Bst: 0.286 | W_surf: 4.4556 | Wmx: 0.218 | Fr: 0.284 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 17% (12), 'o ': 15% (27)
+Step 1360/20003 | Acc: 4.40% | Err: 187.3331 | Bst: 0.286 | W_surf: 4.4732 | Wmx: 0.216 | Fr: 0.284 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 17% (12), 'o ': 15% (27)
+Step 1370/20003 | Acc: 4.40% | Err: 187.8452 | Bst: 0.286 | W_surf: 4.4884 | Wmx: 0.218 | Fr: 0.285 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 17% (12), 'o ': 15% (27)
+Step 1380/20003 | Acc: 4.40% | Err: 188.6479 | Bst: 0.287 | W_surf: 4.4984 | Wmx: 0.223 | Fr: 0.288 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 17% (12), 'o ': 15% (27)
+Step 1390/20003 | Acc: 4.60% | Err: 189.4442 | Bst: 0.287 | W_surf: 4.5183 | Wmx: 0.229 | Fr: 0.294 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 17% (12), 'o ': 15% (27)
+Step 1400/20003 | Acc: 4.60% | Err: 189.9748 | Bst: 0.287 | W_surf: 4.5317 | Wmx: 0.231 | Fr: 0.298 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 33% (6), 'he': 17% (12), 'o ': 15% (27)
+Step 1410/20003 | Acc: 4.40% | Err: 190.5565 | Bst: 0.287 | W_surf: 4.5520 | Wmx: 0.231 | Fr: 0.302 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 29% (7), 'he': 17% (12), 'o ': 15% (27)
+Step 1420/20003 | Acc: 4.20% | Err: 191.0822 | Bst: 0.287 | W_surf: 4.5755 | Wmx: 0.232 | Fr: 0.303 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 29% (7), 'he': 15% (13), 'o ': 15% (27)
+Step 1430/20003 | Acc: 4.40% | Err: 191.0003 | Bst: 0.287 | W_surf: 4.5914 | Wmx: 0.234 | Fr: 0.300 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 29% (7), 'mo': 20% (10), 'he': 15% (13)
+Step 1440/20003 | Acc: 4.20% | Err: 190.9474 | Bst: 0.287 | W_surf: 4.6079 | Wmx: 0.234 | Fr: 0.296 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 29% (7), 'mo': 20% (10), 'he': 15% (13)
+Step 1450/20003 | Acc: 4.40% | Err: 190.6044 | Bst: 0.287 | W_surf: 4.6171 | Wmx: 0.235 | Fr: 0.293 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 29% (7), 'mo': 20% (10), 'he': 14% (14)
+Step 1460/20003 | Acc: 4.40% | Err: 190.4227 | Bst: 0.287 | W_surf: 4.6350 | Wmx: 0.236 | Fr: 0.292 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 25% (8), 'mo': 20% (10), 'he': 14% (14)
+Step 1470/20003 | Acc: 4.40% | Err: 190.2433 | Bst: 0.287 | W_surf: 4.6488 | Wmx: 0.237 | Fr: 0.292 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 25% (8), 'mo': 20% (10), 'he': 14% (14)
+Step 1480/20003 | Acc: 4.60% | Err: 189.7948 | Bst: 0.286 | W_surf: 4.6656 | Wmx: 0.241 | Fr: 0.291 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 25% (8), 'mo': 18% (11), 'he': 14% (14)
+Step 1490/20003 | Acc: 4.60% | Err: 189.3329 | Bst: 0.286 | W_surf: 4.6782 | Wmx: 0.243 | Fr: 0.291 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 25% (8), 'mo': 18% (11), 'he': 14% (14)
+Step 1500/20003 | Acc: 4.60% | Err: 188.7367 | Bst: 0.287 | W_surf: 4.6832 | Wmx: 0.240 | Fr: 0.292 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 25% (8), 'mo': 18% (11), 'he': 14% (14)
+Step 1510/20003 | Acc: 4.40% | Err: 188.6545 | Bst: 0.287 | W_surf: 4.6936 | Wmx: 0.242 | Fr: 0.293 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 25% (8), 'mo': 18% (11), 'he': 14% (14)
+Step 1520/20003 | Acc: 4.20% | Err: 188.4594 | Bst: 0.287 | W_surf: 4.7155 | Wmx: 0.244 | Fr: 0.295 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 25% (8), 'mo': 18% (11), 'he': 14% (14)
+Step 1530/20003 | Acc: 4.00% | Err: 188.7993 | Bst: 0.287 | W_surf: 4.7381 | Wmx: 0.246 | Fr: 0.297 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 22% (9), 'mo': 18% (11), 'he': 14% (14)
+Step 1540/20003 | Acc: 4.00% | Err: 188.8977 | Bst: 0.287 | W_surf: 4.7557 | Wmx: 0.246 | Fr: 0.297 | B: 0.00 | Inh: 2.2927 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 22% (9), 'mo': 17% (12), 'he': 14% (14)
+Step 1550/20003 | Acc: 4.00% | Err: 189.1931 | Bst: 0.288 | W_surf: 4.7716 | Wmx: 0.247 | Fr: 0.297 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 22% (9), 'mo': 17% (12), 'he': 14% (14)
+Step 1560/20003 | Acc: 3.80% | Err: 189.1786 | Bst: 0.287 | W_surf: 4.7949 | Wmx: 0.251 | Fr: 0.297 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 22% (9), 'mo': 17% (12), 'he': 14% (14)
+Step 1570/20003 | Acc: 3.60% | Err: 188.6864 | Bst: 0.287 | W_surf: 4.8133 | Wmx: 0.254 | Fr: 0.296 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 22% (9), 'mo': 17% (12), 'he': 14% (14)
+Step 1580/20003 | Acc: 3.60% | Err: 188.2073 | Bst: 0.287 | W_surf: 4.8262 | Wmx: 0.256 | Fr: 0.294 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 22% (9), 'mo': 17% (12), 'he': 14% (14)
+Step 1590/20003 | Acc: 3.60% | Err: 188.1120 | Bst: 0.287 | W_surf: 4.8424 | Wmx: 0.257 | Fr: 0.294 | B: 0.00 | Inh: 2.2930 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 20% (10), 'mo': 17% (12), 'he': 14% (14)
+Step 1600/20003 | Acc: 3.60% | Err: 188.3616 | Bst: 0.287 | W_surf: 4.8609 | Wmx: 0.260 | Fr: 0.295 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 20% (10), 'mo': 17% (12), 'he': 14% (14)
+Step 1610/20003 | Acc: 3.80% | Err: 188.0694 | Bst: 0.287 | W_surf: 4.8798 | Wmx: 0.261 | Fr: 0.295 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 20% (10), 'mo': 17% (12), 'he': 14% (14)
+Step 1620/20003 | Acc: 3.60% | Err: 187.8255 | Bst: 0.286 | W_surf: 4.8984 | Wmx: 0.263 | Fr: 0.294 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 20% (10), 'mo': 15% (13), 'he': 14% (14)
+Step 1630/20003 | Acc: 3.20% | Err: 187.3668 | Bst: 0.286 | W_surf: 4.9159 | Wmx: 0.267 | Fr: 0.292 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 20% (10), 'mo': 15% (13), 'he': 13% (15)
+Step 1640/20003 | Acc: 3.20% | Err: 187.1732 | Bst: 0.286 | W_surf: 4.9281 | Wmx: 0.269 | Fr: 0.290 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 20% (10), 'mo': 15% (13), 'o ': 13% (31)
+Step 1650/20003 | Acc: 3.40% | Err: 187.0404 | Bst: 0.286 | W_surf: 4.9526 | Wmx: 0.271 | Fr: 0.291 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 20% (10), 'mo': 15% (13), 'o ': 13% (31)
+Step 1660/20003 | Acc: 3.20% | Err: 186.6811 | Bst: 0.285 | W_surf: 4.9665 | Wmx: 0.271 | Fr: 0.291 | B: 0.00 | Inh: 2.2926 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 20% (10), 'mo': 15% (13), 'o ': 13% (31)
+Step 1670/20003 | Acc: 2.80% | Err: 186.9293 | Bst: 0.285 | W_surf: 4.9837 | Wmx: 0.272 | Fr: 0.292 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 18% (11), 'mo': 15% (13), 'o ': 13% (31)
+Step 1680/20003 | Acc: 3.00% | Err: 187.4418 | Bst: 0.286 | W_surf: 5.0097 | Wmx: 0.275 | Fr: 0.292 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 18% (11), 'o ': 16% (32), 'mo': 15% (13)
+Step 1690/20003 | Acc: 3.20% | Err: 187.3642 | Bst: 0.286 | W_surf: 5.0303 | Wmx: 0.276 | Fr: 0.292 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 18% (11), 'o ': 16% (32), 'mo': 15% (13)
+Step 1700/20003 | Acc: 3.20% | Err: 187.2571 | Bst: 0.286 | W_surf: 5.0437 | Wmx: 0.279 | Fr: 0.291 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 18% (11), 'mo': 15% (13), 'o ': 15% (33)
+Step 1710/20003 | Acc: 3.00% | Err: 187.1734 | Bst: 0.286 | W_surf: 5.0631 | Wmx: 0.282 | Fr: 0.289 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 18% (11), 'mo': 15% (13), 'o ': 15% (33)
+Step 1720/20003 | Acc: 3.20% | Err: 187.4044 | Bst: 0.286 | W_surf: 5.0842 | Wmx: 0.280 | Fr: 0.287 | B: 0.00 | Inh: 2.2929 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 18% (11), 'mo': 15% (13), 'o ': 15% (33)
+Step 1730/20003 | Acc: 3.40% | Err: 187.4958 | Bst: 0.286 | W_surf: 5.1002 | Wmx: 0.283 | Fr: 0.287 | B: 0.00 | Inh: 2.2931 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 18% (11), 'mo': 15% (13), 'o ': 15% (33)
+Step 1740/20003 | Acc: 3.60% | Err: 187.9953 | Bst: 0.285 | W_surf: 5.1162 | Wmx: 0.285 | Fr: 0.287 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 18% (11), 'mo': 15% (13), 'o ': 15% (33)
+Step 1750/20003 | Acc: 3.00% | Err: 188.5289 | Bst: 0.286 | W_surf: 5.1322 | Wmx: 0.286 | Fr: 0.288 | B: 0.00 | Inh: 2.2926 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 18% (11), 'mo': 15% (13), 'o ': 15% (33)
+Step 1760/20003 | Acc: 3.40% | Err: 188.9867 | Bst: 0.285 | W_surf: 5.1410 | Wmx: 0.287 | Fr: 0.291 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 18% (11), 'mo': 15% (13), 'o ': 15% (33)
+Step 1770/20003 | Acc: 3.40% | Err: 189.3986 | Bst: 0.285 | W_surf: 5.1570 | Wmx: 0.288 | Fr: 0.294 | B: 0.00 | Inh: 2.2928 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 18% (11), 'mo': 15% (13), 'o ': 15% (33)
+Step 1780/20003 | Acc: 3.40% | Err: 189.6366 | Bst: 0.285 | W_surf: 5.1869 | Wmx: 0.290 | Fr: 0.296 | B: 0.00 | Inh: 2.2926 | 2 tok/s
+  Top Bigrams (min 5): 'n.': 18% (11), 'mo': 15% (13), 'o ': 15% (33)

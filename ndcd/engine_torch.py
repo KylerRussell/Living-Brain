@@ -1908,11 +1908,9 @@ class PredictiveCodingEngine:
             # 1b. Fisher Information Matrix (Diagonal Approximation) for Pruning
             self.fisher_diag = self.fisher_diag * 0.999 + grad.pow(2) * 0.001
 
-            # 2. Hebbian Update with Traces and LMD Scaling
-            # Scaling proportional to current total weight + noise floor (0.01)
-            # This ensures learned changes accumulate multiplicatively (as spine growth)
-            scaling = self._weight_values_raw.abs() + self.w_surface.abs() + 0.01
-            self.w_surface += learning_rate * scaling * self.eligibility_traces
+            # 2. Additive Hebbian Update with Traces
+            # Use constant scaling to avoid dead zones where near-zero weights can never grow
+            self.w_surface += learning_rate * self.eligibility_traces
 
             # 3. Dale's Law Enforcement
             src_inh = self.is_inhibitory[self.indices[0]]
@@ -1955,9 +1953,9 @@ class PredictiveCodingEngine:
                 neuron_w_sum.scatter_add_(0, dst_idx, w_eff)
                 
                 # target_per_neuron ensures manageable spectral properties (e.g. SR ~ 1)
-                # Raised from 1.0→2.0: base weights already consume ~1.0 of budget,
-                # leaving zero headroom for plastic layers to express learned changes.
-                target_per_neuron = 2.0
+                # Raised from 2.0→5.0: give plastic weights sufficient room to grow
+                # beyond the base topology budget.
+                target_per_neuron = 5.0
                 scaling_factor = target_per_neuron / torch.clamp(neuron_w_sum, min=target_per_neuron)
                 
                 # Scale components to maintain the budget
@@ -1987,13 +1985,13 @@ class PredictiveCodingEngine:
                     self.temporal_A[mod_idx] += a_mod - 0.001 * self.temporal_A[mod_idx]
                     self.temporal_A[mod_idx].clamp_(-1.0, 1.0)
 
-            # 7. Weight Decay on surface weights to prevent saturation
-            self.w_surface -= 0.0001 * self.w_surface
+            # 7. Weight Decay REMOVED — homeostatic scaling provides sufficient regularization
+            # self.w_surface -= 0.0001 * self.w_surface
 
             # 8. Additive Cascade Transfer (No drain)
-            # Moves learned structure to slow memory layers without erasing the surface.
-            eta_mid = 0.001
-            eta_deep = 0.0001
+            # Reduced rates so surface weights persist and accumulate before transfer.
+            eta_mid = 0.0001
+            eta_deep = 0.00001
             self.w_mid += eta_mid * self.w_surface
             self.w_deep += eta_deep * self.w_mid
 
@@ -2235,6 +2233,70 @@ class PredictiveCodingEngine:
                             'std': vals.std().item(),
                         }
             return stats
+
+    def inject_apical_nudge(self, target_256, strength=2.0):
+        """
+        Inject a teaching signal into the apical compartment of L5/6 neurons.
+
+        In the brain, top-down predictions arrive at the apical tufts of L5
+        pyramidal neurons (in Layer 1). When this apical input coincides with
+        bottom-up basal drive, the neuron enters burst mode — producing a
+        high-frequency burst that reliably drives downstream motor targets.
+
+        Uses a fixed random projection matrix (created once, cached) to map
+        the 256-dim target vector into L5/6 space. Each L5/6 neuron receives
+        a distinct signal component, enabling selective burst activation.
+
+        Args:
+            target_256: [256] target activation vector (e.g., one-hot next byte)
+            strength: Gain factor for the apical injection
+        """
+        with torch.no_grad():
+            l56_mask = self.is_l56
+            n_l56 = l56_mask.sum().item()
+            if n_l56 == 0:
+                return
+
+            # Create and cache fixed random projection: [n_l56, 256]
+            if not hasattr(self, '_apical_proj'):
+                import numpy as np
+                self._apical_proj = torch.randn(
+                    n_l56, 256, device=self.device
+                ) / np.sqrt(256)
+
+            # Project target into L5/6 space — each neuron gets a distinct signal
+            apical_drive = self._apical_proj @ target_256  # [n_l56]
+            self.state_apical[l56_mask] += strength * apical_drive
+
+    def compute_burst_coincidence(self):
+        """
+        Compute burst probability for L5/6 neurons based on apical-basal coincidence.
+
+        In thick-tufted L5 pyramidal neurons, a Ca²⁺ spike is triggered when:
+        - Basal dendrites receive bottom-up excitation (sensory/lateral)
+        - Apical tufts receive top-down context (predictions)
+        - Both arrive within a narrow coincidence window
+
+        The burst transforms single spikes into doublets/triplets that
+        reliably activate downstream targets (the "output-potent" signal.
+
+        Uses |tanh| instead of relu to detect co-activity even with
+        negative membrane potentials (inhibitory-driven neurons).
+
+        Returns:
+            burst: [N] tensor of burst probabilities (0-1) for all nodes
+                   (non-L5/6 nodes are 0)
+        """
+        with torch.no_grad():
+            burst = torch.zeros(self.num_nodes, device=self.device)
+            l56_mask = self.is_l56
+            # Coincidence = both compartments active (regardless of sign)
+            basal_act = torch.tanh(self.state_basal[l56_mask]).abs()
+            apical_act = torch.tanh(self.state_apical[l56_mask]).abs()
+            # Burst when both compartments show strong activity
+            coincidence = basal_act * apical_act
+            burst[l56_mask] = torch.sigmoid(8.0 * (coincidence - 0.15))
+            return burst
 
 # --- BPTT Architecture Additions ---
 
