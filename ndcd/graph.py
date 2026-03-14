@@ -496,17 +496,14 @@ class DynamicGraph:
             # Apply mask to PV+ weights, amplifying surround ring and suppressing center
             weight_vals[src_is_pv] *= spatial_mask * 5.0
 
-        # Apply E/I Balance Ratio g ≈ 5.0 (Brunel 2000 AI regime)
-        # Inhibitory weights are scaled to be ~5x stronger than excitatory ones to 
-        # ensure the network operates in the fluctuation-driven balanced state.
-        weight_vals[src_is_inh] = -np.abs(weight_vals[src_is_inh]) * 5.0
+        weight_vals[src_is_inh] = -np.abs(weight_vals[src_is_inh]) * 0.1
 
         # --- Item 4: Lateral PEON Inhibition ---
         src_is_peon = self.is_neg_pe[edge_rows]
         dst_is_peon = self.is_neg_pe[edge_cols]
         # Lateral inhibitory connections between PEON streams across different modules
         is_lat_peon = src_is_peon & dst_is_peon & (src_modules != dst_modules) & (src_modules != -1) & (dst_modules != -1)
-        weight_vals[is_lat_peon] = -np.abs(weight_vals[is_lat_peon]) * 5.0 # Strong lateral inhibition
+        weight_vals[is_lat_peon] = -np.abs(weight_vals[is_lat_peon]) * 0.5 # Strong lateral inhibition
 
         # Input nodes (0-255) are CLAMPED during settling — edges from/to
         # them are external forcing, not autonomous recurrence. Tuning
@@ -521,7 +518,7 @@ class DynamicGraph:
             shape=(num_nodes, num_nodes)
         )
 
-        target_sr = 1.10
+        target_sr = 1.60
         try:
             from scipy.sparse.linalg import eigs as sp_eigs
             eigvals = sp_eigs(free_sparse.astype(np.float64),
@@ -549,12 +546,12 @@ class DynamicGraph:
         # Dynamically calibrate input boost against lateral recurrence strength
         # instead of hardcoded 6.5x which overwhelmed lateral recurrence
         lateral_rms = np.sqrt(np.mean(weight_vals[free_mask] ** 2)) if free_mask.sum() > 0 else 0.1
-        input_target_rms = 0.25 * lateral_rms  # 0.25x lateral (reduced from 3.0x)
+        input_target_rms = 6.0 * lateral_rms  # 6.0x lateral (MAX boost for firing breakout)
         input_current_rms = np.sqrt(np.mean(weight_vals[input_proj_mask] ** 2)) if input_proj_mask.sum() > 0 else 0.1
         input_boost = input_target_rms / max(input_current_rms, 1e-8)
         input_boost = np.clip(input_boost, 0.25, 6.0)  # Safety bounds
         weight_vals[input_proj_mask] *= input_boost
-        print(f"Input boost: {input_boost:.2f}x (calibrated to 0.25x lateral RMS={lateral_rms:.4f})")
+        print(f"Input boost: {input_boost:.2f}x (calibrated to 3.0x lateral RMS={lateral_rms:.4f})")
 
         n_input = int(input_proj_mask.sum())
         n_free = int(free_mask.sum())

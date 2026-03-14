@@ -4,7 +4,7 @@ from typing import Optional, Tuple, List
 from torch.utils.checkpoint import checkpoint
 
 
-@torch.jit.script
+# @torch.jit.script
 def get_soma(v_m: torch.Tensor, i_exc: torch.Tensor, i_inh: torch.Tensor, a: torch.Tensor, cahva: torch.Tensor, 
              is_neg_pe: torch.Tensor, threshold: torch.Tensor, is_sst: torch.Tensor, is_pv: torch.Tensor, 
              is_dg: torch.Tensor, ip_gain: torch.Tensor, ip_bias: torch.Tensor, nmda_ratio: torch.Tensor) -> torch.Tensor:
@@ -69,7 +69,7 @@ def get_soma(v_m: torch.Tensor, i_exc: torch.Tensor, i_inh: torch.Tensor, a: tor
     i_final = i_drive / effective_threshold.clamp(min=0.1)
     return torch.tanh(i_final) + pos_drive * 0.1
 
-@torch.jit.script
+# @torch.jit.script
 def jit_solve_dynamics_imex(
     initial_basal: torch.Tensor,
     initial_apical: torch.Tensor,
@@ -290,10 +290,9 @@ def jit_solve_dynamics_imex(
         # Proposal 2: Shunting Inhibition in Activation Function
         rho = get_soma(current_b, i_exc, i_inh, current_a, cahva_states, is_neg_pe, current_threshold, is_sst, is_pv, is_dg, current_ip_gain, current_ip_bias, nmda_ratio)
         
-        # Add fluctuation-driven noise at the somatic output level (from Phase 1)
-        # This preserves AI-state variability during dynamics without biasing diagnostics.
+        # Add fluctuation-driven noise (reduced for stability)
         threshold_gap = (current_threshold - rho.abs()).clamp(min=0.05)
-        rho = rho + 0.05 * threshold_gap * torch.randn_like(rho)
+        rho = rho + 0.02 * threshold_gap * torch.randn_like(rho)
 
         
         # Proposal 2: Soft Recurrent Competition (E→PV→E feedback loop)
@@ -590,7 +589,7 @@ class PredictiveCodingEngine:
         # Sparse weights (COO)
         self.indices = torch.tensor(indices, dtype=torch.long, device=device)
         self.num_edges = self.indices.shape[1]
-        self.weight_values = torch.tensor(values, dtype=torch.float32, device=device)
+        self._weight_values_raw = torch.tensor(values, dtype=torch.float32, device=device)
 
         # Parameters
         self.taus = torch.tensor(taus, dtype=torch.float32, device=device)
@@ -604,6 +603,7 @@ class PredictiveCodingEngine:
         self.cahva_states = torch.zeros(num_nodes, dtype=torch.float32, device=device)
         self.rho_slow_states = torch.zeros(num_nodes, dtype=torch.float32, device=device)
         self.ais_distance = torch.ones(num_nodes, dtype=torch.float32, device=device)
+        self.previous_state = torch.zeros(num_nodes, dtype=torch.float32, device=device)
         
         # AI State & Stabilization Variables
         self.threshold_adaptation = torch.ones(num_nodes, dtype=torch.float32, device=device)
@@ -615,6 +615,9 @@ class PredictiveCodingEngine:
         self.ip_gain = torch.ones(num_nodes, dtype=torch.float32, device=device) * 1.0 # Initialized to 1.0
         self.ip_bias = torch.zeros(num_nodes, dtype=torch.float32, device=device) # Initialized to 0.0
         self.activation_ema = torch.zeros(num_nodes, dtype=torch.float32, device=device)
+        self.w_surface = torch.zeros(self.num_edges, dtype=torch.float32, device=device)
+        self.w_mid = torch.zeros(self.num_edges, dtype=torch.float32, device=device)
+        self.w_deep = torch.zeros(self.num_edges, dtype=torch.float32, device=device)
         self.activation_var = torch.ones(num_nodes, dtype=torch.float32, device=device)
         self.burst_ema = torch.zeros(num_nodes, dtype=torch.float32, device=device)
         
@@ -628,7 +631,8 @@ class PredictiveCodingEngine:
         self.context_ema_alpha = 0.1  # Blend rate: 10% new, 90% old
 
         # Fisher Information Matrix (Diagonal Approximation) for Pruning
-        self.fisher_diag = torch.ones(self.num_edges, dtype=torch.float32, device=device)
+        self.fisher_diag = torch.ones(self.num_edges, dtype=torch.float32, device=device) * 1e-6
+        self.eligibility_traces = torch.zeros(self.num_edges, dtype=torch.float32, device=device)
         self.w_max = 5.0 # For Log-STDP
 
         # Synaptic Correlation Stats for Sleep/Pruning (Item 4)
@@ -729,7 +733,7 @@ class PredictiveCodingEngine:
         # Increase the weight of recurrent excitatory connections (W_EE) linearly with level
         # This increases topic persistence in higher association areas (L2-L3)
         lateral_recurrent_mask = (src_levels == dst_levels) & (src_levels >= 0) & (~self.is_inhibitory[self.indices[0]])
-        self.weight_values[lateral_recurrent_mask] *= (1.0 + src_levels[lateral_recurrent_mask].float())
+        self._weight_values_raw[lateral_recurrent_mask] *= (1.0 + src_levels[lateral_recurrent_mask].float())
 
         # Top-down: source at strictly higher level than destination
         self.topdown_edge_mask = src_levels > dst_levels
@@ -807,9 +811,9 @@ class PredictiveCodingEngine:
         # Surface: fast, updated every step
         # Mid: medium, τ ≈ 100 steps
         # Deep: slow, τ ≈ 10000 steps
-        self.w_deep = torch.zeros_like(self.weight_values)
-        self.w_surface = torch.zeros_like(self.weight_values)
-        self.w_mid = torch.zeros_like(self.weight_values)
+        self.w_deep = torch.zeros_like(self._weight_values_raw)
+        self.w_surface = torch.zeros_like(self._weight_values_raw)
+        self.w_mid = torch.zeros_like(self._weight_values_raw)
 
         # Cascade transfer rates — significantly increased to allow transient
         # syntactic rules to meaningfully accumulate in surface weights.
@@ -817,7 +821,7 @@ class PredictiveCodingEngine:
         
         # We now track separate mid-to-deep transfer rates per edge depending on 
         # whether the source node belongs to a hippocampal or neocortical module.
-        self.tau_mid_to_deep = torch.ones_like(self.weight_values) * 1000.0
+        self.tau_mid_to_deep = torch.ones_like(self._weight_values_raw) * 1000.0
 
         # Metaplastic scaling: how much accumulated deep weight
         # reduces surface learning rate. Reduced from 1.0 to 0.1 because
@@ -831,20 +835,20 @@ class PredictiveCodingEngine:
         # This is the SR-tuned initialization; effective weights should
         # never exceed ~2x this norm during training.
         # CHANGED: Compute on free edges only, matching graph.py's tuning.
-        self._initial_deep_frob = self.weight_values[self.free_edge_mask].norm().item()
+        self._initial_deep_frob = self._weight_values_raw[self.free_edge_mask].norm().item()
 
         # --- Synaptic intelligence (Zenke et al., 2017) ---
-        self.omega = torch.zeros_like(self.weight_values)       # accumulated importance
+        self.omega = torch.zeros_like(self._weight_values_raw)       # accumulated importance
         self.prev_weights = self.effective_weights.clone()       # for computing Δw per step
         self.si_baseline_weights = self.effective_weights.clone() # for computing total Δw over epoch
-        self.running_contribution = torch.zeros_like(self.weight_values)  # path integral
+        self.running_contribution = torch.zeros_like(self._weight_values_raw)  # path integral
         self.si_damping = 0.1  # prevents omega from growing unboundedly
 
         # Tsodyks-Markram STSP (Phase 3)
         # u: facilitation (residual calcium), x: depression (vesicle availability)
         # These operate on the ms-to-seconds timescale for activity-silent memory.
-        self.u_facilitation = torch.ones_like(self.weight_values) * 0.2
-        self.x_depression = torch.ones_like(self.weight_values)
+        self.u_facilitation = torch.ones_like(self._weight_values_raw) * 0.2
+        self.x_depression = torch.ones_like(self._weight_values_raw)
         self.tau_facil = 1500.0   # τ_F ≈ 1500ms
         self.tau_depress = 200.0  # τ_D ≈ 200ms
         self.U0 = 0.2             # Inherent release probability
@@ -870,7 +874,7 @@ class PredictiveCodingEngine:
         self.tau_calcium = 1000.0
         self.hss_rho = 0.001
         # Three-Factor Learning (Eligibility Traces)
-        self.eligibility_traces = torch.zeros_like(self.weight_values)
+        self.eligibility_traces = torch.zeros_like(self._weight_values_raw)
         self.tau_eligibility = 2.0  # Short-term memory of local coincidence
 
         # --- Item 3: Gap-Junction Coupling for PV Interneurons ---
@@ -891,7 +895,7 @@ class PredictiveCodingEngine:
         else:
             self.gap_junction_indices = torch.zeros((2, 0), dtype=torch.long, device=device)
             self.gap_junction_weights = torch.zeros(0, dtype=torch.float32, device=device)
-        self.eligibility_traces = torch.zeros_like(self.weight_values)
+        self.eligibility_traces = torch.zeros_like(self._weight_values_raw)
         self.tau_eligibility = 2.0  # Short-term memory of local coincidence
 
     def _build_module_tensors(self):
@@ -909,7 +913,14 @@ class PredictiveCodingEngine:
     @property
     def effective_weights(self):
         """Effective weight is base topology + learned cascade deltas."""
-        return self.weight_values + self.w_surface + self.w_mid + self.w_deep
+        return self._weight_values_raw + self.w_surface + self.w_mid + self.w_deep
+
+    def reset_plastic_weights(self):
+        """Emergency reset of corrupted synaptic cascade."""
+        self.w_surface.zero_()
+        self.w_mid.zero_()
+        self.w_deep.zero_()
+        self._weight_values_raw.clamp_(-1.0, 1.0)
 
     def cascade_transfer(self, include_deep=True, surface_floor=0.01):
         """Call periodically (every ~500 steps) after weight update.
@@ -978,8 +989,8 @@ class PredictiveCodingEngine:
         activity_correlation = (rho[idx_i] * rho[idx_j])
         
         if not hasattr(self, 'corr_ema'):
-            self.corr_ema = torch.zeros_like(self.weight_values)
-            self.corr_var = torch.ones_like(self.weight_values)
+            self.corr_ema = torch.zeros_like(self._weight_values_raw)
+            self.corr_var = torch.ones_like(self._weight_values_raw)
             
         # Update mean and variance (Fisher Information Proxy)
         self.corr_ema = 0.99 * self.corr_ema + 0.01 * activity_correlation
@@ -1062,12 +1073,12 @@ class PredictiveCodingEngine:
                 self.w_surface *= surface_scaling
                 self.w_mid *= (surface_scaling + deep_scaling) / 2.0
                 self.w_deep *= deep_scaling
-                self.weight_values *= deep_scaling
+                self._weight_values_raw *= deep_scaling
                 
                 # Threshold elimination to create bimodal distribution (margin widening)
                 theta_min = 0.005
                 prune_mask = self.effective_weights.abs() < theta_min
-                self.weight_values[prune_mask] = 0.0
+                self._weight_values_raw[prune_mask] = 0.0
                 self.w_surface[prune_mask] = 0.0
                 self.w_mid[prune_mask] = 0.0
                 self.w_deep[prune_mask] = 0.0
@@ -1146,11 +1157,11 @@ class PredictiveCodingEngine:
             src_inh = self.is_inhibitory[self.indices[0, prune_mask]]
             
             # Reinitialize based on parent distribution (Log-Normal inspired)
-            avg_magnitude = self.weight_values[self.free_edge_mask].abs().mean().item()
+            avg_magnitude = self._weight_values_raw[self.free_edge_mask].abs().mean().item()
             new_weights = torch.exp(torch.randn(n_reset, device=self.device) * 0.5) * (avg_magnitude * 0.5)
             new_weights = torch.where(src_inh, -new_weights, new_weights)
             
-            self.weight_values[prune_mask] = new_weights
+            self._weight_values_raw[prune_mask] = new_weights
             
         
             
@@ -1173,7 +1184,7 @@ class PredictiveCodingEngine:
             self.previous_state.zero_()
 
     def settle(self, input_vector, max_steps=40, tol=5e-3,
-               input_mask=None, damping=0.15, implicit_damping=2.0,
+               input_mask=None, damping=0.15, implicit_damping=0.1,
                sigma_noise=0.05):
         """Single-phase settling using IMEX integration."""
         if not isinstance(input_vector, torch.Tensor):
@@ -1200,14 +1211,14 @@ class PredictiveCodingEngine:
          self.ip_gain, self.ip_bias, self.apical_bp1, self.apical_bp2, 
          self.lifetime_firing, _) = jit_solve_dynamics_imex(
             self.state_basal, self.state_apical,
-            self.weight_values, self.indices,
+            self.effective_weights, self.indices,
             self.basal_intra_mask, self.basal_inter_mask,
             self.apical_intra_mask, self.apical_inter_mask,
             self.biases, self.taus, input_vector, self.dt, max_steps, tol, input_mask,
             self.mod_starts, self.mod_ends,
             self.is_pv, self.is_sst, self.is_vip, self.is_lts, self.is_inhibitory,
             self.is_l23, self.is_l56, self.is_neg_pe, self.is_dg,
-            self.activation_ema, self.ip_gain, self.ip_bias,
+            self.activation_ema, self.ip_gain, self.biases + self.ip_bias,
             self.node_to_level,
             self.sparsity_alpha, 
             self.sfa_states, self.cahva_states,
@@ -1323,7 +1334,7 @@ class PredictiveCodingEngine:
             temporal_energy += 0.5 * torch.sum(t_error ** 2).item()
 
         # Total free energy with Metabolic Cost (minimizing surprisal and restricting activity bounds)
-        metabolic_cost = 0.001 * torch.sum(self.state.abs()).item()
+        metabolic_cost = 0.0 * torch.sum(self.state.abs()).item()
         total_energy = spatial_energy + self.temporal_alpha * temporal_energy + metabolic_cost
 
         return total_energy
@@ -1405,7 +1416,7 @@ class PredictiveCodingEngine:
             idx_i = self.indices[0]
             idx_j = self.indices[1]
 
-            grad = torch.zeros_like(self.weight_values)
+            grad = torch.zeros_like(self._weight_values_raw)
 
             # --- Item 1: Differential Hebbian Update (Apical - Basal) ---
             # The local difference between apical expectation and basal reality 
@@ -1525,7 +1536,7 @@ class PredictiveCodingEngine:
                 # Specifically applied to input projections (sensory -> DG).
                 dg_input_mask = self.is_dg[self.indices[1]] & (self.indices[0] < 512)
                 if dg_input_mask.any():
-                    dg_w = self.weight_values[dg_input_mask]
+                    dg_w = self._weight_values_raw[dg_input_mask]
                     dg_w_var = dg_w.detach().clone().requires_grad_(True)
                     # Contrastive penalty: minimize dot product between different input weights
                     # We treat each DG node's input weight vector as a point in high-D space
@@ -1561,7 +1572,7 @@ class PredictiveCodingEngine:
             # --- Metabolic Cost (Weight Penalty) ---
             grad -= 0.0001 * self.effective_weights.sign()
 
-            grad = grad.clamp(-1.0, 1.0)
+            grad = grad.clamp(-0.2, 0.2)
 
             # --- Dale's ANNs (DANNs) Fisher Information Scaling ---
             if not hasattr(self, 'fisher_info'):
@@ -1626,7 +1637,7 @@ class PredictiveCodingEngine:
             # Multiplicative Update Requirement (Item 5)
             # dw ∝ w * grad
             # To preserve sign, we use abs(w) and apply to w
-            delta_w = meta_lr * self.eligibility_traces * (self.weight_values.abs() + 0.01)
+            delta_w = meta_lr * self.eligibility_traces * (self._weight_values_raw.abs() + 0.01)
             self.w_surface += delta_w
             
             # --- Anti-Hebbian Lateral Competition (Oja-like) ---
@@ -1641,8 +1652,31 @@ class PredictiveCodingEngine:
             hss_mod = -self.hss_rho * calcium_dev
             src_inh = self.is_inhibitory[self.indices[0]]
             hss_mod[src_inh] *= -1.0  
-            w_plastic = self.w_surface + self.w_mid + self.w_deep
-            self.w_surface += hss_mod * w_plastic
+            # Synaptic scaling and Hard Clipping (Biological Homeostasis)
+            with torch.no_grad():
+                # Enforce Budget on Effective Weights
+                dst_idx = self.indices[1]
+                neuron_w_sum = torch.zeros(self.num_nodes, device=self.device)
+                
+                # We scale the entire effective weight budget
+                w_eff = self._weight_values_raw + self.w_surface + self.w_mid + self.w_deep
+                neuron_w_sum.scatter_add_(0, dst_idx, w_eff.abs())
+                
+                # target_per_neuron of 1.0 ensures manageable spectral properties
+                target_per_neuron = 1.0
+                scaling_factor = target_per_neuron / torch.clamp(neuron_w_sum, min=target_per_neuron)
+                
+                # Scale EVERYTHING to maintain the budget
+                self._weight_values_raw *= scaling_factor[dst_idx]
+                self.w_surface *= scaling_factor[dst_idx]
+                self.w_mid *= scaling_factor[dst_idx]
+                self.w_deep *= scaling_factor[dst_idx]
+
+                # Hard clip all to prevent local spikes
+                self._weight_values_raw.clamp_(-0.5, 0.5)
+                self.w_surface.clamp_(-0.5, 0.5)
+                self.w_mid.clamp_(-0.5, 0.5)
+                self.w_deep.clamp_(-0.5, 0.5)
 
             # Fisher-Weighted Pruning
             # Instead of uniform RMS normalization, selectively decay weights based on their Fisher Information.
@@ -1678,16 +1712,15 @@ class PredictiveCodingEngine:
             self.w_surface[td_idx] -= correction
 
             # --- Dale's Law: Enforce E/I constraints ---
-            # Excitatory neurons can only have positive outgoing weights.
-            # Inhibitory neurons can only have negative outgoing weights.
             src_inh = self.is_inhibitory[self.indices[0]]
-            cascade_all = self.w_surface + self.w_mid + self.w_deep + self.weight_values
             
             # Constraint: total effective_weight >= 0 for Exc, <= 0 for Inh
-            cascade_all_clamped = torch.where(src_inh, cascade_all.clamp(max=0.0), cascade_all.clamp(min=0.0))
-            
-            # Reconstruct w_surface from the clamped effective weight
-            self.w_surface = cascade_all_clamped - self.w_mid - self.w_deep - self.weight_values
+            # Clamp all levels to their respective half-spaces to ensure sum is safe
+            with torch.no_grad():
+                self._weight_values_raw = torch.where(src_inh, self._weight_values_raw.clamp(max=0.0), self._weight_values_raw.clamp(min=0.0))
+                self.w_surface = torch.where(src_inh, self.w_surface.clamp(max=0.0), self.w_surface.clamp(min=0.0))
+                self.w_mid = torch.where(src_inh, self.w_mid.clamp(max=0.0), self.w_mid.clamp(min=0.0))
+                self.w_deep = torch.where(src_inh, self.w_deep.clamp(max=0.0), self.w_deep.clamp(min=0.0))
 
             # --- Bias/AIS update from prediction errors + IP ---
             bias_grad = (rho_nudge - rho_free) + self.temporal_alpha * self.temporal_errors
@@ -1718,6 +1751,251 @@ class PredictiveCodingEngine:
                 self.temporal_A[mod_idx] += a_mod
 
                 self.temporal_A[mod_idx].clamp_(-1.0, 1.0)
+
+    def update_weights_minimal(self, free_state, nudge_state, learning_rate=0.01):
+        """Stripped-down EqProp update. No metaplasticity, no Fisher, no HSS."""
+        with torch.no_grad():
+            rho_free = torch.tanh(free_state)
+            rho_nudge = torch.tanh(nudge_state)
+
+            idx_i = self.indices[0]
+            idx_j = self.indices[1]
+
+            # Core contrastive Hebbian rule:
+            # ΔW_ij = lr * (rho_nudge_i * rho_nudge_j - rho_free_i * rho_free_j)
+            grad = (rho_nudge[idx_i] * rho_nudge[idx_j] -
+                    rho_free[idx_i] * rho_free[idx_j])
+
+            # Gradient clipping (per-element, not norm)
+            grad = grad.clamp(-0.2, 0.2)
+
+            # Eligibility traces (Phase 2d): Low-pass filter on gradients
+            tau_e = 5.0
+            self.eligibility_traces = self.eligibility_traces * (1.0 - 1.0/tau_e) + grad * (1.0/tau_e)
+
+            # Fisher Information Matrix (Diagonal Approximation) for Pruning (Phase 2g)
+            # EMA of squared gradients
+            self.fisher_diag = self.fisher_diag * 0.999 + grad.pow(2) * 0.001
+
+            # Update w_surface using traces scaled by weight magnitude (Phase 2e)
+            scaling = self._weight_values_raw.abs() + self.w_surface.abs() + 0.01
+            self.w_surface += learning_rate * scaling * self.eligibility_traces
+
+            # Dale's law enforcement (keep it, it's structural)
+            src_inh = self.is_inhibitory[self.indices[0]]
+            eff = self._weight_values_raw + self.w_surface + self.w_mid + self.w_deep
+            eff_clamped = torch.where(src_inh, eff.clamp(max=0.0), eff.clamp(min=0.0))
+            self.w_surface = eff_clamped - self.w_mid - self.w_deep - self._weight_values_raw
+
+            # --- Temporal Transition Matrix Update (Phase 1) ---
+            # Rule: ΔA = eta_t * (temporal_errors * previous_state) - decay
+            # Only update if previous_state exists
+            if self.previous_state is not None:
+                eta_t = 0.05
+                for mod_idx, (start, end) in enumerate(self.module_ranges):
+                    t_error = self.temporal_errors[start:end]
+                    prev = torch.tanh(self.previous_state[start:end])
+                    
+                    # Compute temporal gradient
+                    a_mod = eta_t * t_error * prev
+                    
+                    # Apply update with small weight decay to prevent runaway
+                    self.temporal_A[mod_idx] += a_mod - 0.001 * self.temporal_A[mod_idx]
+                    self.temporal_A[mod_idx].clamp_(-1.0, 1.0)
+
+            # --- Intrinsic Plasticity (Phase 2a) ---
+            # Rule: Δbias = eta_ip * (target_rate - mean_firing)
+            # lifetime_firing tracks mean firing rates over time.
+            eta_ip = 0.001
+            target_rate = 0.40
+            
+            # Update biases homeostatically
+            # Note: biases are added to somatic input, so negative feedback:
+            # high firing -> lower bias, low firing -> higher bias
+            delta_bias = eta_ip * (target_rate - self.lifetime_firing)
+            self.biases += delta_bias
+            self.biases.clamp_(-2.0, 2.0)
+
+            # --- Inhibitory Plasticity (Phase 2b) ---
+            # Rule: Dw_ij = eta * pre * (post - target)
+            # Homeostatically balances inhibitory weights to maintain target firing rate.
+            eta_inh = 0.0001
+            if src_inh.any():
+                rho_pre = rho_free[idx_i]
+                rho_post = rho_free[idx_j]
+                
+                inh_error = rho_post - target_rate
+                inh_grad = rho_pre * inh_error
+                
+                # Subtract because inhibitory weights are negative
+                # If post activity > target (error > 0), make weight more negative (stronger inhibition)
+                self.w_surface[src_inh] -= eta_inh * inh_grad[src_inh]
+
+            # --- Metaplastic Cascade (Phase 2c) ---
+            # Moves learned structure from fast surface layer to slow memory layers.
+            eta_mid = 0.001
+            eta_deep = 0.0001
+            
+            # Surface -> Mid
+            mid_increment = eta_mid * self.w_surface
+            self.w_mid += mid_increment
+            self.w_surface -= mid_increment
+            
+            # Mid -> Deep
+            deep_increment = eta_deep * self.w_mid
+            self.w_deep += deep_increment
+            self.w_mid -= deep_increment
+
+    def apply_fisher_pruning(self, threshold_ratio=0.01):
+        """
+        Prunes weights with low Fisher Information.
+        threshold_ratio: Fraction of mean Fisher info to use as threshold.
+        """
+        mean_fisher = self.fisher_diag.mean()
+        threshold = mean_fisher * threshold_ratio
+        prune_mask = self.fisher_diag < threshold
+        
+        # Zero out the cascade weights (surface, mid, deep) for pruned edges
+        self.w_surface[prune_mask] = 0.0
+        self.w_mid[prune_mask] = 0.0
+        self.w_deep[prune_mask] = 0.0
+        
+        # TOPOLOGY PROTECTION: Never prune the base 'weight_values' in streaming mode. 
+        # Pruning the base structure destroys the underlying connectivity graph (connectome)
+        # which is needed for future learning of the same edges.
+        # self._weight_values_raw[free_prune] = 0.0  # REMOVED TO PROTECT TOPOLOGY
+        
+        num_pruned = prune_mask.sum().item()
+        f_min = self.fisher_diag.min().item()
+        f_max = self.fisher_diag.max().item()
+        print(f"Fisher Pruning: {num_pruned} edges removed (threshold={threshold:.8f}, f_min={f_min:.8f}, f_max={f_max:.8f})")
+
+    def update_weights_phase0(self, free_state, nudge_state, learning_rate=0.01):
+        """Minimalist Hebbian update for Phase 0 recovery."""
+        with torch.no_grad():
+            rho_free = torch.tanh(free_state)
+            rho_nudge = torch.tanh(nudge_state)
+            idx_i = self.indices[0]
+            idx_j = self.indices[1]
+
+            grad = (rho_nudge[idx_i] * rho_nudge[idx_j] -
+                    rho_free[idx_i] * rho_free[idx_j])
+            grad = grad.clamp(-0.2, 0.2)
+
+            self.w_surface += learning_rate * grad
+
+            src_inh = self.is_inhibitory[self.indices[0]]
+            eff = self._weight_values_raw + self.w_surface + self.w_mid + self.w_deep
+            eff_clamped = torch.where(src_inh, eff.clamp(max=0.0), eff.clamp(min=0.0))
+            self.w_surface = eff_clamped - self.w_mid - self.w_deep - self._weight_values_raw
+
+    def update_weights_phase2(self, free_state, nudge_state, learning_rate=0.01):
+        """Phase 2 update: Adds Eligibility Traces, Inhibitory Plasticity, and Intrinsic Plasticity."""
+        with torch.no_grad():
+            rho_free = torch.tanh(free_state)
+            rho_nudge = torch.tanh(nudge_state)
+            idx_i = self.indices[0]
+            idx_j = self.indices[1]
+
+            # 1. Eligibility Traces (Low-pass filter on gradients)
+            grad = (rho_nudge[idx_i] * rho_nudge[idx_j] -
+                    rho_free[idx_i] * rho_free[idx_j])
+            grad = grad.clamp(-0.2, 0.2)
+            
+            tau_e = 5.0
+            self.eligibility_traces = self.eligibility_traces * (1.0 - 1.0/tau_e) + grad * (1.0/tau_e)
+
+            # 1b. Fisher Information Matrix (Diagonal Approximation) for Pruning
+            self.fisher_diag = self.fisher_diag * 0.999 + grad.pow(2) * 0.001
+
+            # 2. Hebbian Update with Traces and LMD Scaling
+            # Scaling proportional to current total weight + noise floor (0.01)
+            # This ensures learned changes accumulate multiplicatively (as spine growth)
+            scaling = self._weight_values_raw.abs() + self.w_surface.abs() + 0.01
+            self.w_surface += learning_rate * scaling * self.eligibility_traces
+
+            # 3. Dale's Law Enforcement
+            src_inh = self.is_inhibitory[self.indices[0]]
+            eff = self._weight_values_raw + self.w_surface + self.w_mid + self.w_deep
+            eff_clamped = torch.where(src_inh, eff.clamp(max=0.0), eff.clamp(min=0.0))
+            self.w_surface = eff_clamped - self.w_mid - self.w_deep - self._weight_values_raw
+
+            # 4. Intrinsic Plasticity (Homeostatic Biases) — DISABLED
+            # The IP here accumulated massive bias (norm→70) before firing 
+            # rates caught up to target, saturating most neurons.
+            # With Bug 1 fixed (effective_weights visible to solver), firing
+            # rates self-correct via the dynamics without explicit bias push.
+            # The KL-divergence IP in update_weights_predictive is more
+            # principled if IP is needed in a future training path.
+
+            # 5. Inhibitory Plasticity (Balance inhibition)
+            # Rule: Δw_inh = eta_inh * pre * (post - target)
+            target_rate = 0.10  # Sparse target for inhibitory balance
+            eta_inh = 0.0001
+            if src_inh.any():
+                rho_pre = rho_free[idx_i]
+                rho_post = rho_free[idx_j]
+                inh_error = rho_post - target_rate
+                inh_grad = rho_pre * inh_error
+                # update_mask ensures we only update inhibitory weights
+                self.w_surface[src_inh] -= eta_inh * inh_grad[src_inh]
+                # Global inhibitory decay to prevent suppression lock
+                self.w_surface[src_inh] -= 0.0001 * self.w_surface[src_inh]
+
+            # 6. Homeostatic Synaptic Scaling and Hard Clipping (Biological Stability)
+            # This prevents weights from exploding (observed reaching 200+)
+            # and maintains the spectral budget of the network.
+            with torch.no_grad():
+                dst_idx = self.indices[1]
+                neuron_w_sum = torch.zeros(self.num_nodes, device=self.device)
+                
+                # We scale the entire effective weight budget to prevent local hotspots
+                w_eff = (self._weight_values_raw.abs() + self.w_surface.abs() + 
+                        self.w_mid.abs() + self.w_deep.abs())
+                neuron_w_sum.scatter_add_(0, dst_idx, w_eff)
+                
+                # target_per_neuron ensures manageable spectral properties (e.g. SR ~ 1)
+                # Raised from 1.0→2.0: base weights already consume ~1.0 of budget,
+                # leaving zero headroom for plastic layers to express learned changes.
+                target_per_neuron = 2.0
+                scaling_factor = target_per_neuron / torch.clamp(neuron_w_sum, min=target_per_neuron)
+                
+                # Scale components to maintain the budget
+                # BUG FIX: Do NOT scale _weight_values_raw — preserve SR-tuned base topology
+                self.w_surface *= scaling_factor[dst_idx]
+                self.w_mid *= scaling_factor[dst_idx]
+                self.w_deep *= scaling_factor[dst_idx]
+
+                # Hard clip to prevent runaway synaptic growth
+                self._weight_values_raw.clamp_(-1.0, 1.0)
+                self.w_surface.clamp_(-1.0, 1.0)
+                self.w_mid.clamp_(-1.0, 1.0)
+                self.w_deep.clamp_(-1.0, 1.0)
+
+            # 6. Temporal Transition Matrix Update (Phase 1)
+            # Only update if previous_state exists
+            if self.previous_state is not None:
+                eta_t = 0.05
+                for mod_idx, (start, end) in enumerate(self.module_ranges):
+                    t_error = self.temporal_errors[start:end]
+                    prev_s = torch.tanh(self.previous_state[start:end])
+                    
+                    # Compute temporal gradient
+                    a_mod = eta_t * t_error * prev_s
+                    
+                    # Apply update with small weight decay to prevent runaway
+                    self.temporal_A[mod_idx] += a_mod - 0.001 * self.temporal_A[mod_idx]
+                    self.temporal_A[mod_idx].clamp_(-1.0, 1.0)
+
+            # 7. Weight Decay on surface weights to prevent saturation
+            self.w_surface -= 0.0001 * self.w_surface
+
+            # 8. Additive Cascade Transfer (No drain)
+            # Moves learned structure to slow memory layers without erasing the surface.
+            eta_mid = 0.001
+            eta_deep = 0.0001
+            self.w_mid += eta_mid * self.w_surface
+            self.w_deep += eta_deep * self.w_mid
 
     def store_previous_state(self):
         """Store current state as previous state for temporal prediction."""
@@ -1963,336 +2241,3 @@ class PredictiveCodingEngine:
 import torch.nn as nn
 import torch.nn.functional as F
 
-class EILinear(nn.Module):
-    def __init__(self, in_features, out_features, is_inhibitory=False):
-        super().__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-        self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
-        nn.init.xavier_normal_(self.weight)
-        self.is_inhibitory = is_inhibitory
-
-    def forward(self, x):
-        # Force weights to be strictly positive (excitatory) or negative (inhibitory)
-        w_functional = torch.abs(self.weight) 
-        if self.is_inhibitory:
-            w_functional = -w_functional
-        return F.linear(x, w_functional)
-
-
-class STSPLinear(nn.Module):
-    def __init__(self, in_features, out_features):
-        super().__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-        self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
-        nn.init.xavier_normal_(self.weight)
-        
-        self.Lambda_raw = nn.Parameter(torch.ones(1) * -4.6) # Initialized to ~0.01 via sigmoid
-        self.Gamma_raw = nn.Parameter(torch.ones(1) * -1.1)  # Initialized to ~0.25 via sigmoid
-        
-    def forward(self, x, F_state):
-        # x: (batch, in_features)
-        # F_state: (batch, out_features, in_features)
-        
-        W_exp = self.weight.unsqueeze(0) # (1, out_features, in_features)
-        G = W_exp * (1.0 + F_state)
-        
-        # y = G * x
-        y = torch.bmm(G, x.unsqueeze(2)).squeeze(2)
-        return y
-        
-    def update_state(self, F_state, x, h, c_apical=None):
-        # x: pre-synaptic (batch, in_features)
-        # h: post-synaptic (batch, out_features)
-        outer = torch.bmm(h.unsqueeze(2), x.unsqueeze(1))
-        
-        Lambda = torch.sigmoid(self.Lambda_raw).unsqueeze(0).unsqueeze(2) # forget
-        Gamma = torch.sigmoid(self.Gamma_raw).unsqueeze(0).unsqueeze(2) # learn
-        
-        if c_apical is not None:
-            context_gain = torch.sigmoid(c_apical.mean(dim=-1, keepdim=True)).unsqueeze(2)
-            Gamma = Gamma * (1.0 + context_gain)
-            
-        F_new = F_state - Lambda * F_state + Gamma * outer
-        return F_new
-
-
-class PMSNCell(nn.Module):
-    def __init__(self, in_features, hidden_dim, sparsity_alpha=0.1):
-        super().__init__()
-        self.hidden_dim = hidden_dim
-        self.sparsity_alpha = sparsity_alpha
-        
-        # Basal: bottom-up from input
-        self.basal_ff = EILinear(in_features, hidden_dim, is_inhibitory=False)
-        # Basal: lateral recurrent
-        self.basal_rec = STSPLinear(hidden_dim, hidden_dim)
-        
-        # Apical: top-down / context 
-        self.apical_rec = EILinear(hidden_dim, hidden_dim, is_inhibitory=False)
-        
-        # SFA Params
-        self.tau_fast = 3.75
-        self.tau_slow = 10.0
-        self.a_sfa = 0.5
-        self.b_sfa = 0.1
-        self.dt = 1.0
-        
-        
-        # Functional Lateralization: Left half fast (syntax), Right half slow (semantics)
-        self.tau_basal_raw = nn.Parameter(torch.cat([
-            torch.randn(hidden_dim // 2) * 0.1 - 2.0, # Fast (sigmoid(-2) is small -> ~1.0 t_basal)
-            torch.randn(hidden_dim - hidden_dim // 2) * 0.1 + 2.0 # Slow (sigmoid(2) is large -> ~20.0 t_basal)
-        ]))
-        
-        self.tau_apical_raw = nn.Parameter(torch.cat([
-            torch.randn(hidden_dim // 2) * 0.1 - 2.0, # Fast
-            torch.randn(hidden_dim - hidden_dim // 2) * 0.1 + 2.0 # Slow
-        ]))
-        
-        self.shunt_weight = nn.Parameter(torch.ones(hidden_dim) * 0.5)
-        
-        self.gamma = nn.Parameter(torch.ones(hidden_dim) * 0.5)
-        self.kappa = nn.Parameter(torch.ones(hidden_dim) * 2.0)
-        
-        self.layer_norm = nn.LayerNorm(hidden_dim, eps=1e-5) # LayerNorm (Stability Anchor)
-        
-        # Intrinsic Placticity buffers
-        self.register_buffer('ip_bias', torch.zeros(hidden_dim))
-        self.register_buffer('activation_ema', torch.zeros(hidden_dim))
-        
-    def get_taus(self):
-        t_basal = 1.0 + 20.0 * torch.sigmoid(self.tau_basal_raw)
-        t_apical = 10.0 + 100.0 * torch.sigmoid(self.tau_apical_raw)
-        return t_basal, t_apical
-
-    def forward(self, x_in, c_apical, state, progress=1.0):
-        V_b, V_a, V_out, w_sfa, F_stsp, h_prev, apical_ema, fatigue = state
-        
-        t_basal, t_apical = self.get_taus()
-        
-        x_basal_ff = self.basal_ff(x_in)
-        x_basal_rec = self.basal_rec(h_prev, F_stsp)
-        x_basal_total = x_basal_ff + x_basal_rec
-        
-        # Basal Update
-        V_b_new = torch.exp(-1.0 / t_basal) * V_b + x_basal_total
-        
-        # Apical Update
-        x_apical_total = self.apical_rec(c_apical)
-        V_a_new = torch.exp(-1.0 / t_apical) * V_a + x_apical_total
-        
-        # Apical "Precision" Gating (Dendritic AND-Gate with Apical Smoothing)
-        apical_ema_new = 0.5 * apical_ema + 0.5 * V_a_new
-        prime = torch.sigmoid((V_b_new * apical_ema_new * self.gamma) - 1.0)
-        
-        # Soft Lateral Inhibition
-        # Penalize neurons if their neighbors (the layer mean) are highly active
-        local_activity = torch.relu(V_b_new).mean(dim=1, keepdim=True).clamp(min=1e-6)
-        soft_inh = 1.0 / (1.0 + local_activity * 0.5) # Relaxed 10x
-        
-        # Maturity Factor
-        maturity = torch.clamp(torch.tensor(progress * 5.0, device=x_in.device), 0.0, 1.0)
-        
-        # The gate is permissive (1.0) at the start, and becomes an AND-gate (0.5 + prime) later
-        gate_strength = (1.0 - maturity) + (maturity * (0.5 + prime))
-        V_soma = V_b_new * soft_inh * gate_strength + (self.kappa * prime)
-        
-        # Somatic Adaptation (Neural Fatigue): tire out repeated signals
-        V_soma = V_soma - fatigue * 0.1
-        
-        V_soma = self.layer_norm(V_soma + self.ip_bias) # Add IP and LayerNorm
-        
-        # SFA 
-        V_out_new = V_out + (self.dt / self.tau_fast) * (-V_out + V_soma - w_sfa)
-        h_pre = torch.relu(V_out_new)
-        
-        # Inter-Hemispheric Inhibition (Broca-Wernicke Coordination)
-        h_left, h_right = torch.split(h_pre, self.hidden_dim // 2, dim=1)
-        h_left_gated = h_left / (1.0 + h_right.mean(dim=1, keepdim=True))
-        h_right_gated = h_right / (1.0 + h_left.mean(dim=1, keepdim=True))
-        h_pre = torch.cat([h_left_gated, h_right_gated], dim=1)
-        
-        # kWTA Soft Gating with Shunting Lateral Inhibition
-        k = max(1, int(self.hidden_dim * self.sparsity_alpha))
-        topk, _ = torch.topk(h_pre, k, dim=1)
-        threshold = topk[:, -1:]
-        
-        # Compute layer average to penalize non-winners
-        layer_mean = h_pre.mean(dim=1, keepdim=True)
-        
-        # Divisive penalty for losers (pushing them to 0 rapidly)
-        h_kwta = torch.where(
-            h_pre >= threshold,
-            h_pre,
-            h_pre / (1.0 + 5.0 * layer_mean)
-        )
-        
-        # Sharpening
-        h_kwta = torch.relu((h_kwta - threshold * 0.5) * 2.0)
-        
-        h_new = torch.clamp(h_kwta, 0.0, 10.0)
-        
-        # Track Fatigue for next step (Non-Linear Somatic Fatigue)
-        # The more a neuron fires, the faster it tires (activations are squared)
-        fatigue_new = 0.9 * fatigue + 0.1 * (h_new.detach() ** 2)
-        
-        # Post-spike SFA adaptation
-        w_sfa_new = w_sfa + (self.dt / self.tau_slow) * (self.a_sfa * V_out_new - w_sfa) + self.b_sfa * h_new
-        
-        # STSP Update
-        F_stsp_new = self.basal_rec.update_state(F_stsp, h_prev, h_new, c_apical)
-        
-        new_state = (V_b_new, V_a_new, V_out_new, w_sfa_new, F_stsp_new, h_new, apical_ema_new, fatigue_new)
-        return h_new, new_state
-
-
-class MultiCompartmentSTSPNet(nn.Module):
-    def __init__(self, vocab_size=256, hidden_dim=256, num_layers=2, sparsity_alpha=0.1):
-        super().__init__()
-        self.embedding = nn.Embedding(vocab_size, hidden_dim)
-        self.dropout = nn.Dropout(0.1)
-        
-        self.layers = nn.ModuleList([
-            PMSNCell(hidden_dim, hidden_dim, sparsity_alpha=sparsity_alpha) for _ in range(num_layers)
-        ])
-        
-        self.top_down_projs = nn.ModuleList([
-            nn.Linear(hidden_dim, hidden_dim) for _ in range(num_layers - 1)
-        ])
-        for proj in self.top_down_projs:
-            nn.init.orthogonal_(proj.weight, gain=2.0)
-        
-        self.readout = nn.Linear(hidden_dim, vocab_size)
-        
-    def forward(self, x_seq, use_sleep_noise=False, progress=1.0):
-        batch_size, seq_len = x_seq.size()
-        hidden_dim = self.layers[0].hidden_dim
-        device = x_seq.device
-        
-        states = []
-        for _ in range(len(self.layers)):
-            V_b = torch.zeros(batch_size, hidden_dim, device=device)
-            V_a = torch.zeros(batch_size, hidden_dim, device=device)
-            V_out = torch.zeros(batch_size, hidden_dim, device=device)
-            w_sfa = torch.zeros(batch_size, hidden_dim, device=device)
-            F_stsp = torch.zeros(batch_size, hidden_dim, hidden_dim, device=device)
-            h_prev = torch.zeros(batch_size, hidden_dim, device=device)
-            apical_ema = torch.zeros(batch_size, hidden_dim, device=device)
-            fatigue = torch.zeros(batch_size, hidden_dim, device=device)
-            states.append((V_b, V_a, V_out, w_sfa, F_stsp, h_prev, apical_ema, fatigue))
-            
-        emb_seq = self.embedding(x_seq)
-        if use_sleep_noise:
-            emb_seq = emb_seq * 0.0  + torch.randn_like(emb_seq) * 0.1
-            
-        logits = []
-        pred_losses = []
-        
-        layer_acts_accum = [torch.zeros(hidden_dim, device=device) for _ in range(len(self.layers))]
-        c_apical_prev = [torch.zeros(batch_size, hidden_dim, device=device) for _ in range(len(self.layers) - 1)]
-        
-        for t in range(seq_len):
-            x_t = emb_seq[:, t, :]
-            tokens_t = x_seq[:, t]
-            
-            # Decay short term memories on word/sentence boundaries (spaces or periods)
-            is_boundary = ((tokens_t == 32) | (tokens_t == 46)).float().unsqueeze(1)
-            new_states_before_step = []
-            for state_tuple in states:
-                V_b, V_a, V_out, w_sfa, F_stsp, h_prev, apical_ema, fatigue = state_tuple
-                decay = 1.0 - is_boundary
-                
-                # Clone and detach to avoid inplace autograd errors during checkpointing
-                V_b_d = (V_b * decay).clone().detach().requires_grad_(True)
-                V_a_d = (V_a * decay).clone().detach().requires_grad_(True)
-                V_out_d = (V_out * decay).clone().detach().requires_grad_(True)
-                F_stsp_d = (F_stsp * decay.unsqueeze(2)).clone().detach().requires_grad_(True)
-                h_prev_d = (h_prev * decay).clone().detach().requires_grad_(True)
-                apical_ema_d = (apical_ema * decay).clone().detach().requires_grad_(True)
-                fatigue_d = (fatigue * decay).clone().detach().requires_grad_(True)
-                
-                w_sfa_d = w_sfa.clone().detach().requires_grad_(True)
-                
-                new_states_before_step.append((V_b_d, V_a_d, V_out_d, w_sfa_d, F_stsp_d, h_prev_d, apical_ema_d, fatigue_d))
-            states = new_states_before_step
-            
-            new_states = []
-            h_current_layer = x_t
-            
-            for l, cell in enumerate(self.layers):
-                if l < len(self.layers) - 1:
-                    _, _, _, _, _, h_above_prev, _, _ = states[l+1]
-                    c_apical = self.top_down_projs[l](h_above_prev)
-                    c_apical_delayed = c_apical_prev[l]
-                    c_apical_prev[l] = c_apical
-                else:
-                    c_apical_delayed = torch.zeros_like(h_current_layer)
-                    
-                # Thalamic Gating for input layer (filter out predictable noise)
-                if l == 0:
-                    surprise = torch.norm(h_current_layer - c_apical_delayed, dim=1, keepdim=True) + 1e-6
-                    # Emergency Recovery: 100% persistence (disabled gating)
-                    thalamic_gate = torch.sigmoid(surprise * 5.0 - 2.0) * 0.0 + 1.0
-                    h_current_layer = h_current_layer * thalamic_gate
-                    
-                if self.training:
-                    def custom_forward(x_in, c_ap, v_b, v_a, v_o, w_s, f_s, h_p, a_e, fat, cell_ref=cell, prog=progress):
-                        return cell_ref(x_in, c_ap, (v_b, v_a, v_o, w_s, f_s, h_p, a_e, fat), progress=prog)
-                    
-                    # Ensure one input requires grad for checkpoint to work properly
-                    if not h_current_layer.requires_grad:
-                        h_current_layer.requires_grad_(True)
-                        
-                    out = checkpoint(custom_forward, h_current_layer, c_apical_delayed, *states[l], use_reentrant=False)
-                    h_out, new_state = out[0], out[1]
-                else:
-                    h_out, new_state = cell(h_current_layer, c_apical_delayed, states[l], progress=progress)
-                
-                # Continuous Stochastic Facilitation (Thermal Noise)
-                # Apply 0.005 noise to all states (training and generation) to prevent local minima / loops
-                h_out = h_out + torch.randn_like(h_out) * 0.005
-                
-                if l < len(self.layers) - 1:
-                    pred_loss = F.mse_loss(h_out, c_apical_delayed) 
-                    pred_losses.append(pred_loss)
-                
-                h_current_layer = h_out
-                new_states.append(new_state)
-                
-                # Accumulate for IP
-                layer_acts_accum[l] = layer_acts_accum[l] + h_out.detach().mean(dim=0)
-                
-            states = new_states
-            logits_t = self.readout(self.dropout(h_current_layer))
-            logits.append(logits_t)
-            
-        logits = torch.stack(logits, dim=1) # (B, S, V)
-        total_pred_loss = sum(pred_losses) / max(1, len(pred_losses)) if pred_losses else torch.tensor(0.0, device=device)
-        
-        # Entropy-Adaptive Readout (Confidence Sharpening)
-        temp = torch.clamp(torch.sigmoid(total_pred_loss.detach()) * 2.0, min=0.5, max=1.5)
-        logits = logits / temp
-        
-        layer_acts_stacked = torch.stack(layer_acts_accum, dim=0)
-        return logits, total_pred_loss, states, layer_acts_stacked
-        
-    @torch.no_grad()
-    def apply_intrinsic_plasticity(self, layer_acts_stacked, seq_len, target_rate=0.04, lr=0.0001):
-        beta = 0.99
-        for l, cell in enumerate(self.layers):
-            mean_act = layer_acts_stacked[l] / seq_len
-            cell.activation_ema.mul_(beta).add_(mean_act, alpha=1 - beta)
-            
-            # REMOVE .clamp(min=0.0) -> This allows the bias to drop 
-            # for neurons that are over-active, preserving sparsity.
-            diff = target_rate - cell.activation_ema
-            cell.ip_bias += lr * diff
-
-    @torch.no_grad()
-    def apply_sleep_homeostasis(self, eta_sleep=0.05):
-        # Apply global synaptic downscaling (SHY)
-        for name, param in self.named_parameters():
-            if 'weight' in name:
-                param.mul_(1.0 - eta_sleep)
