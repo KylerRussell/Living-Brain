@@ -248,6 +248,70 @@ def create_dfa_matrices(engine, n_output=256, device='cpu'):
     return dfa_matrices
 
 
+def run_linear_probe(engine, data, batch_size=200, free_steps=100, device='cpu'):
+    """
+    Diagnostic: Freeze the engine, collect latent L5/6 activations for 200 samples,
+    and train a temporary linear probe to see if the internal representation
+    is actually learning anything, bypassing the complex motor readout.
+    """
+    print(f"\n[DIAGNOSTIC] Running Linear Probe on {batch_size} samples...")
+    engine.state.zero_()
+    engine.state_basal.zero_()
+    engine.state_apical.zero_()
+
+    l56_indices = torch.where(engine.is_l56)[0]
+    num_features = len(l56_indices)
+    
+    X = []
+    Y = []
+    
+    # 1. Collect Dataset
+    # We sample random indices from the data (avoiding the very end)
+    sample_indices = np.random.randint(0, len(data) - 1, size=batch_size)
+    
+    input_mask = torch.zeros(engine.num_nodes, device=device)
+    input_mask[:256] = 1.0
+
+    with torch.no_grad():
+        for idx in sample_indices:
+            curr_byte = int(data[idx])
+            next_byte = int(data[idx+1])
+            
+            input_vec = torch.zeros(engine.num_nodes, device=device)
+            input_vec[curr_byte] = 10.0
+            
+            # Settle engine (FREE phase only)
+            engine.settle(
+                input_vec, input_mask=input_mask, max_steps=free_steps, 
+                tol=0.0, sigma_noise=0.0, damping=0.8
+            )
+            
+            X.append(engine.state[l56_indices].clone())
+            Y.append(next_byte)
+
+    X = torch.stack(X) # [batch_size, num_features]
+    Y = torch.tensor(Y, device=device) # [batch_size]
+
+    # 2. Train Probe
+    # Simple linear readout: X -> logits -> CrossEntropy
+    probe = torch.nn.Linear(num_features, 256).to(device)
+    optimizer = torch.optim.Adam(probe.parameters(), lr=0.01)
+    
+    for ep in range(50):
+        logits = probe(X)
+        loss = F.cross_entropy(logits, Y)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+    
+    # 3. Eval Probe Accuracy
+    with torch.no_grad():
+        preds = torch.argmax(probe(X), dim=1)
+        acc = (preds == Y).float().mean().item()
+    
+    return acc
+
+
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -269,7 +333,7 @@ def main():
     # =====================================================================
     # ARCHITECTURAL ENHANCEMENT 2: Thalamic relay bottleneck
     # =====================================================================
-    N_THALAMIC = 64
+    N_THALAMIC = 128
     edge_index, edge_weight, biases, taus, num_nodes = add_thalamic_relay(
         graph, edge_index, edge_weight, biases, taus, num_nodes,
         n_thalamic=N_THALAMIC, device=device
@@ -279,6 +343,18 @@ def main():
     mod_ends = torch.tensor([m["end"] for m in graph.modules], dtype=torch.long)
     mod_levels = torch.tensor([m["level"] for m in graph.modules], dtype=torch.long)
 
+    # --- Learnable FRNL (Firing Rate Nonlinearity) for output untangling ---
+    # Threshold-power-law: r = k * [u - theta]^kappa_+
+    # Sparsifies output manifold, filtering sub-threshold noise
+    frnl_theta = torch.zeros(256, device=device)      # Learnable threshold per output neuron
+    frnl_kappa = 1.2                                    # Softened power-law exponent
+    frnl_k = 1.0                                        # Gain factor
+    frnl_lr = 0.001                                     # Learning rate for threshold adaptation
+
+    # --- Lateral Inhibitory Sharpening (L4→L5 translaminar circuit) ---
+    # Simulates FS interneuron-mediated suppression of non-preferred outputs
+    lateral_inh_strength = 0.5                          # Strength of mean-subtraction inhibition
+    lateral_inh_gain = 2.0                              # Post-inhibition gain boost
 
     # Pad cell-type arrays for thalamic relay neurons (excitatory, non-interneuron)
     thal_pad = np.zeros(N_THALAMIC, dtype=bool)
@@ -319,6 +395,19 @@ def main():
     # =====================================================================
     dfa_matrices = create_dfa_matrices(engine, n_output=256, device=device)
 
+    # =====================================================================
+    # HYBRID OPTIMIZATION: Adam for terminal (thalamic -> motor) layer
+    # =====================================================================
+    # Find indices of thalamic -> motor edges in W_surf
+    dst = engine.indices[1]
+    src = engine.indices[0]
+    thal_start = num_nodes - N_THALAMIC
+    terminal_mask = (src >= thal_start) & (dst >= 256) & (dst < 512)
+    # We'll use a local optimizer on just these weights
+    terminal_edge_vals = engine.w_surface[terminal_mask].detach().clone()
+    terminal_edge_vals.requires_grad = True
+    terminal_optimizer = torch.optim.Adam([terminal_edge_vals], lr=0.001)
+
     # Curriculum setup
     script_dir = os.path.dirname(os.path.abspath(__file__))
     data_dir = os.path.join(script_dir, "data")
@@ -348,6 +437,8 @@ def main():
     LEAK_FACTOR = 0.95
     ALPHA_DFA = 0.15         # DFA feedback strength (reduced: 0.5 caused error saturation)
     BURST_APICAL_GAIN = 1.5  # Apical injection strength for burst coincidence
+    FRNL_ADAPT_RATE = 0.001  # Rate at which FRNL thresholds adapt to maintain target sparsity
+    TARGET_SPARSITY = 0.1    # Target fraction of active output neurons (90% should be zero)
 
     for phase_info in phases:
         phase_name = phase_info["name"]
@@ -358,6 +449,8 @@ def main():
         print(f"  Learning rate: {lr}, Nudge strength: {nudge_strength}")
         print(f"  DFA alpha: {ALPHA_DFA}, Burst apical gain: {BURST_APICAL_GAIN}")
         print(f"  Thalamic relay: {N_THALAMIC} neurons")
+        print(f"  FRNL: kappa={frnl_kappa}, adaptive_sparsity=True")
+        print(f"  Terminal Optimizer: Adam(lr=0.001)")
 
         if not os.path.exists(file_path):
             print(f"File not found: {file_path}")
@@ -402,11 +495,32 @@ def main():
             free_basal = engine.state_basal.clone()
             free_apical = engine.state_apical.clone()
 
-            # Read output prediction from raw output nodes
-            logits = free_state[256:512]
-            pred_byte = torch.argmax(logits).item()
+            # Read output prediction with FRNL
+            raw_motor = free_state[256:512]
+
+            # FRNL: r = k * [u - theta]^kappa_+ (manifold untangling)
+            above_thresh = torch.relu(raw_motor - frnl_theta)
+            frnl_output = frnl_k * above_thresh.pow(frnl_kappa)
+
+            # Population Vector Readout (instead of WTA/Lateral Inh)
+            # Softmax allows the network to weight distributed information properly
+            logits = 5.0 * frnl_output  # Scaling for softmax temperature
+            probs = torch.softmax(logits, dim=0)
+            pred_byte = torch.argmax(probs).item()
             is_correct = pred_byte == next_byte
             accuracies.append(1.0 if is_correct else 0.0)
+
+            # Adapt FRNL thresholds toward target sparsity (homeostatic)
+            with torch.no_grad():
+                fraction_active = (above_thresh > 0).float().mean().item()
+                # Adaptive TARGET_SPARSITY based on accuracy
+                # If accurately predicting, tighten (sparsify). If failing, loosen (explore).
+                window_acc = np.mean(accuracies[-50:]) if len(accuracies) > 50 else 0.05
+                current_target = 0.30 * (1 - window_acc) + 0.05 * window_acc
+                current_target = np.clip(current_target, 0.05, 0.30)
+                
+                # If too many active: raise threshold. Too few: lower it.
+                frnl_theta += FRNL_ADAPT_RATE * (fraction_active - current_target)
 
             key = (current_byte, next_byte)
             bigram_total[key] = bigram_total.get(key, 0) + 1
@@ -459,12 +573,34 @@ def main():
             avg_burst = burst[engine.is_l56].mean().item()
             burst_strengths.append(avg_burst)
 
-            # Phase 2 Hebbian update (Biological Stabilization)
+            # Hybrid Update:
+            # 1. Biological EqProp/DFA for all deep layers
             engine.update_weights_phase2(
                 free_state,
                 nudge_pos,
                 learning_rate=lr,
             )
+
+            # 2. Local Adam for terminal thalamic -> motor layers
+            # This mimics cerebellar/climbing-fiber precision tuning
+            with torch.set_grad_enabled(True):
+                # Gradient is essentially prediction error projected back to thalamic nodes
+                # target_one_hot is [256], nudge_pos[thal_start:thal_start+128] is [128]
+                thal_act = nudge_pos[thal_start : thal_start + N_THALAMIC].detach()
+                motor_err = target_one_hot - torch.tanh(nudge_pos[256:512]) # [256]
+                
+                terminal_optimizer.zero_grad()
+                # Construct local loss for the terminal weights
+                # Loss = (Target - Motor)^2
+                # We apply the weights manually to get the grad
+                curr_w = terminal_edge_vals.view(N_THALAMIC, 256)
+                pred = thal_act @ curr_w
+                loss = F.mse_loss(pred, target_one_hot)
+                loss.backward()
+                terminal_optimizer.step()
+                
+                # Push updated values back to engine
+                engine.w_surface[terminal_mask] = terminal_edge_vals.detach()
 
             # Logging and periodic tasks
             if (i + 1) % 10 == 0:
@@ -491,6 +627,18 @@ def main():
                     f"Fr: {mean_firing:.3f} | B: {bias_norm:.2f} | Inh: {inh_w_norm:.4f} | "
                     f"{tps:.0f} tok/s"
                 )
+
+                # Diagnostic Linear Probe every 500 steps
+                if (i + 1) % 500 == 0:
+                    probe_acc = run_linear_probe(
+                        engine, data, batch_size=200, 
+                        free_steps=FREE_STEPS, device=device
+                    )
+                    print(f"  >>> LINEAR PROBE ACCURACY: {probe_acc:.2%} (Internal Representation Quality)")
+                    if probe_acc > avg_acc * 2:
+                        print(f"  [!] ALERT: Representation ({probe_acc:.1%}) >> Readout ({avg_acc:.1%}). Readout is the bottleneck.")
+                    else:
+                        print(f"  [!] NOTE: Representation ({probe_acc:.1%}) ≈ Readout ({avg_acc:.1%}). Hebbian learning is the bottleneck.")
 
                 # Bigram stats
                 top_bigrams = sorted(
