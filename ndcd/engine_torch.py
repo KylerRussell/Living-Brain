@@ -779,6 +779,9 @@ class PredictiveCodingEngine:
         # Weights are left completely asymmetric.
 
 
+        # Identification of output projections (to motor nodes 256-511)
+        self.output_edge_mask = (self.indices[1] >= 256) & (self.indices[1] < 512)
+
         # --- Free-edge mask for spectral radius enforcement ---
         # I/O projection edges (source or dest < 512) are external forcing,
         # not autonomous recurrence. They are 6.5x boosted and constitute
@@ -1911,6 +1914,18 @@ class PredictiveCodingEngine:
             # 2. Additive Hebbian Update with Traces
             # Use constant scaling to avoid dead zones where near-zero weights can never grow
             self.w_surface += learning_rate * self.eligibility_traces
+
+            # 2b. Structural Hebbian Plasticity for Output Projections
+            # Allows the output layer to "discover" and latch onto informative internal modules.
+            if self.output_edge_mask.any():
+                motor_bursts = self.compute_burst_coincidence() # [N]
+                pre_acts = torch.tanh(free_state[self.indices[0][self.output_edge_mask]])
+                post_bursts = motor_bursts[self.indices[1][self.output_edge_mask]]
+                
+                # Neuromodulated Hebbian rule: delta_w = eta * burst_j * act_i
+                # Using a small learning rate for structural discovery
+                output_hebb_grad = pre_acts * post_bursts
+                self.w_surface[self.output_edge_mask] += learning_rate * 0.5 * output_hebb_grad
 
             # 3. Dale's Law Enforcement
             src_inh = self.is_inhibitory[self.indices[0]]

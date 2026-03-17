@@ -190,7 +190,7 @@ def add_thalamocortical_loop(graph, edge_index, edge_weight, biases, taus, num_n
     return edge_index, edge_weight, biases, taus, new_num_nodes
 
 
-def add_cerebellar_module(graph, num_nodes, n_granule=2048, sparsity=0.05, device='cpu'):
+def add_cerebellar_module(graph, num_nodes, n_granule=2048, sparsity=0.05, device='cpu', thalamic_indices=None):
     """
     Cerebellar output module: Granule Cell expansion + Purkinje readout.
 
@@ -212,29 +212,37 @@ def add_cerebellar_module(graph, num_nodes, n_granule=2048, sparsity=0.05, devic
     Args:
         n_granule: Number of granule cells (2048 recommended, ~8x output dim)
         sparsity: Fraction of L5/6 nodes each granule cell samples from
+        thalamic_indices: Optional indices for thalamic relay smoothing
     Returns:
         cerebellum: dict with all cerebellar state
     """
-    # Gather all L5/6 indices
+    # Gather all L5/6 indices for reference
     all_l56 = []
     for mod in graph.modules:
         all_l56.extend(mod['l56_indices'].tolist())
     all_l56 = np.array(all_l56, dtype=np.int64)
-    n_l56 = len(all_l56)
+
+    # Determine mossy fiber input sources (Thalamic relay if available, else all L5/6)
+    if thalamic_indices is not None:
+        input_indices = np.array(thalamic_indices, dtype=np.int64)
+    else:
+        input_indices = all_l56
+    
+    n_input = len(input_indices)
 
     # --- Mossy Fiber Projection Matrix (FIXED, non-plastic) ---
-    # Each granule cell samples from ~4-5% of L5/6 nodes (biological: ~4 mossy fibers)
-    # Stored as a dense [n_granule, n_l56] matrix for simplicity.
-    n_inputs_per_granule = max(4, int(n_l56 * sparsity))
+    # Each granule cell samples from ~4-5% of input nodes (biological: ~4 mossy fibers)
+    # Stored as a dense [n_granule, n_input] matrix for simplicity.
+    n_inputs_per_granule = max(4, int(n_input * sparsity))
 
     # Build sparse binary connectivity mask
-    mossy_mask = torch.zeros(n_granule, n_l56, dtype=torch.bool)
+    mossy_mask = torch.zeros(n_granule, n_input, dtype=torch.bool)
     for g in range(n_granule):
-        selected = np.random.choice(n_l56, n_inputs_per_granule, replace=False)
+        selected = np.random.choice(n_input, n_inputs_per_granule, replace=False)
         mossy_mask[g, selected] = True
 
     # Random weights, masked and normalized
-    mossy_weights = torch.randn(n_granule, n_l56) * mossy_mask.float()
+    mossy_weights = torch.randn(n_granule, n_input) * mossy_mask.float()
     # Normalize each granule cell's input weights to unit variance
     row_norms = mossy_weights.norm(dim=1, keepdim=True).clamp(min=1e-6)
     mossy_weights = mossy_weights / row_norms
@@ -254,11 +262,15 @@ def add_cerebellar_module(graph, num_nodes, n_granule=2048, sparsity=0.05, devic
     cerebellum = {
         'n_granule': n_granule,
         'l56_indices': torch.tensor(all_l56, dtype=torch.long),
+        'thalamic_indices': torch.tensor(thalamic_indices, dtype=torch.long) if thalamic_indices is not None else None,
         'mossy_weights': mossy_weights.to(device),     # [n_granule, n_l56] FIXED
         'purkinje_weights': purkinje_weights.to(device), # [256, n_granule] PLASTIC
         'granule_state': granule_state.to(device),       # [n_granule]
         'bg_confidence_threshold': bg_confidence_threshold,
         'bg_gate_sharpness': bg_gate_sharpness,
+        'granule_threshold': 0.1,                         # Target ~10% sparsity (0.1 given unit-norm MF weights)
+        'granule_activation_ema': 0.1,                    # EMA of GC sparsity
+        'eta_ip_gc': 0.01,                                # Intrinsic plasticity rate for GC threshold
         'climbing_fiber_lr': 0.01,                        # Climbing fiber learning rate
         'purkinje_eligibility': torch.zeros(256, n_granule, device=device),  # Eligibility trace
         'tau_eligibility': 5.0,                           # Eligibility trace time constant
@@ -274,10 +286,11 @@ def cerebellar_forward(engine, cerebellum):
     Cerebellar forward pass: compute output logits from L5/6 state.
 
     1. Basal ganglia gate: check if settle has converged
-    2. Extract L5/6 activations
+    2. Extract L5/6 or Thalamic activations
     3. Mossy fiber → Granule cell activation (fixed weights, ReLU)
-    4. Parallel fiber → Purkinje cell activation (plastic weights)
-    5. Return raw logits (256-dim)
+    4. Adaptive threshold update (Intrinsic Plasticity)
+    5. Parallel fiber → Purkinje cell activation (plastic weights)
+    6. Return raw logits (256-dim)
 
     Returns:
         logits: [256] tensor of output predictions
@@ -291,13 +304,28 @@ def cerebellar_forward(engine, cerebellum):
             sharpness=cerebellum['bg_gate_sharpness']
         )
 
-        # 2. Extract L5/6 activations
-        l56_idx = cerebellum['l56_indices']
-        l56_acts = torch.tanh(engine.state[l56_idx])  # [n_l56]
+        # 2. Extract input activations (Thalamic relay if available, else L5/6)
+        if cerebellum['thalamic_indices'] is not None:
+            # Use thalamic relay for temporal smoothing
+            input_idx = cerebellum['thalamic_indices']
+        else:
+            input_idx = cerebellum['l56_indices']
+            
+        input_acts = torch.tanh(engine.state[input_idx])  # [n_input]
 
-        # 3. Mossy fiber → Granule cells (fixed projection + ReLU)
-        granule_pre = cerebellum['mossy_weights'] @ l56_acts  # [n_granule]
-        granule_acts = torch.relu(granule_pre)  # Sparse ReLU activation
+        # 3. Mossy fiber → Granule cells (fixed projection + ReLU + Adaptive Threshold)
+        # Biological granule cells require coincidence of multiple mossy fibers.
+        granule_pre = cerebellum['mossy_weights'] @ input_acts  # [n_granule]
+        granule_acts = torch.relu(granule_pre - cerebellum['granule_threshold'])
+
+        # 4. Adaptive Threshold Update (Intrinsic Plasticity)
+        # Target 10% sparsity to prevent signal starvation or saturation
+        gc_sparsity = (granule_acts > 0).float().mean().item()
+        cerebellum['granule_activation_ema'] = 0.95 * cerebellum['granule_activation_ema'] + 0.05 * gc_sparsity
+        
+        # Adjust threshold: if sparsity too low, lower threshold; if too high, raise it.
+        delta_theta = cerebellum['eta_ip_gc'] * (cerebellum['granule_activation_ema'] - 0.1)
+        cerebellum['granule_threshold'] = np.clip(cerebellum['granule_threshold'] + delta_theta, 0.01, 1.0)
 
         # Apply gate: scale granule activity by basal ganglia confidence
         granule_acts = granule_acts * gate_value
@@ -305,7 +333,7 @@ def cerebellar_forward(engine, cerebellum):
         # Store for diagnostics
         cerebellum['granule_state'] = granule_acts
 
-        # 4. Parallel fiber → Purkinje (plastic weights, linear readout)
+        # 5. Parallel fiber → Purkinje (plastic weights, linear readout)
         logits = cerebellum['purkinje_weights'] @ granule_acts  # [256]
 
         return logits, granule_acts, gate_value
@@ -338,8 +366,8 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value):
         target = torch.zeros(256, device=logits.device)
         target[target_byte] = 1.0
 
-        # Inferior olive error signal (climbing fiber)
-        purkinje_output = torch.softmax(logits, dim=0)
+        # Biological climbing fibers signal element-wise error, not cross-class normalization
+        purkinje_output = torch.sigmoid(logits)  # [256]
         climbing_fiber_error = target - purkinje_output  # [256]
 
         # Update eligibility trace (low-pass filter of granule activity)
@@ -542,7 +570,8 @@ def main():
     )
 
     # Cerebellar output module (replaces FRNL + lateral inhibition + terminal Adam optimizer)
-    cerebellum = add_cerebellar_module(graph, num_nodes, n_granule=2048, device=device)
+    thal_indices = np.arange(num_nodes - N_THALAMIC, num_nodes)
+    cerebellum = add_cerebellar_module(graph, num_nodes, n_granule=2048, device=device, thalamic_indices=thal_indices)
 
     # =====================================================================
     # ARCHITECTURAL ENHANCEMENT 3: Direct Feedback Alignment matrices
@@ -606,6 +635,7 @@ def main():
         burst_strengths = []
         bigram_total = {}
         bigram_correct = {}
+        settle_history = deque(maxlen=50) # Track settle diffs for adaptive gating
 
         # Reset weights for the tuned run to ensure no stale associations
         engine.reset_plastic_weights()
@@ -629,6 +659,18 @@ def main():
                 input_vec, input_mask=input_mask, max_steps=FREE_STEPS, tol=0.0,
                 sigma_noise=sigma_noise_free, damping=0.8
             )
+            
+            # Adaptive Gating: "Leaky" Basal Ganglia logic
+            # If settle has stabilized (low variance), slowly raise threshold to allow output
+            settle_history.append(engine.last_settle_diff)
+            if len(settle_history) == settle_history.maxlen:
+                settle_var = np.var(settle_history)
+                if settle_var < 0.05: # Stabilized
+                    # Drift threshold upward to allow 'best available' representation
+                    # ensures the system doesn't remain muted if it can't reach 0.3
+                    cerebellum['bg_confidence_threshold'] += 0.0005
+                    cerebellum['bg_confidence_threshold'] = min(cerebellum['bg_confidence_threshold'], 0.8)
+
             free_state = engine.state.clone()
             free_basal = engine.state_basal.clone()
             free_apical = engine.state_apical.clone()
@@ -657,7 +699,8 @@ def main():
             target_one_hot[next_byte] = 1.0
 
             # Compute output error for DFA (injecting cerebellar precision error)
-            output_error = target_one_hot - torch.softmax(logits, dim=0)
+            # Use Sigmoid here too, matching the independent CF error signals
+            output_error = target_one_hot - torch.sigmoid(logits)
 
             # Restore to free state before nudge
             engine.state = free_state.clone()

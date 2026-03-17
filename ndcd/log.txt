@@ -2,23 +2,23 @@ Using device: cuda
 Building DynamicGraph with 3500 nodes, 10 modules, 2 levels...
 CLS: 0 hippocampal modules, 10 neocortical modules
 Lateralization: 1 Broca (seq), 1 Wernicke (sem)
-Hierarchical graph: 3500 nodes, 64961 edges, 10 modules across 2 levels
+Hierarchical graph: 3500 nodes, 64992 edges, 10 modules across 2 levels
   Level 0: 2 modules, avg size 299 nodes
   Level 1: 8 modules, avg size 299 nodes
-Free-edge spectral radius tuned: 1.2860 -> 1.6
-Input boost: 6.00x (calibrated to 3.0x lateral RMS=0.2683)
-Edges: 2048 input-proj (2x, outside SR), 62913 free (SR-tuned to 1.6)
-Scale-invariant E/I balancing (1/sqrt(K)) applied to 62913 free edges.
-Weight magnitudes: input=1.0105, free=0.2018
+Free-edge spectral radius tuned: 1.3572 -> 1.6
+Input boost: 6.00x (calibrated to 3.0x lateral RMS=0.2546)
+Edges: 2048 input-proj (2x, outside SR), 62944 free (SR-tuned to 1.6)
+Scale-invariant E/I balancing (1/sqrt(K)) applied to 62944 free edges.
+Weight magnitudes: input=1.0344, free=0.1923
 Applied hierarchical recurrent excitatory gradient (η=0.68) to 0 edges.
 Level 0 lateral edges: 496 made positive, fan-in normalized (avg fan-in=2)
-Bottom-up edges: 2483 fan-in normalized (bounded, min_mag=0.01)
+Bottom-up edges: 2495 fan-in normalized (bounded, min_mag=0.01)
 PFA: 20480 independent feedback edges enabling Product Feedback Alignment.
 Output boost: added 24576 new output projections from higher-level modules
 Thalamocortical loop: 128 relay neurons (stabilization only, no motor output)
 Initializing PredictiveCodingEngine...
-Cerebellum: 2048 granule cells, 60 mossy fibers each, 256 Purkinje outputs
-DFA: Created connectivity-weighted feedback for 2 levels, 3116 nodes, avg motor connectivity: 0.164
+Cerebellum: 2048 granule cells, 6 mossy fibers each, 256 Purkinje outputs
+DFA: Created connectivity-weighted feedback for 2 levels, 3116 nodes, avg motor connectivity: 0.163
 
 --- Starting Phase: Holophrases ---
   Steps: Free=100, Nudge=30
@@ -26,789 +26,199 @@ DFA: Created connectivity-weighted feedback for 2 levels, 3116 nodes, avg motor 
   DFA alpha: 0.15, Burst apical gain: 1.5
   Thalamocortical loop: 128 neurons
   Cerebellum: 2048 granule cells
-Step 10/20003 | Acc: 0.00% | Gate: 0.94 | GC_spars: 51.37% | CF_err: 0.0078 | PK_w: 15.98 | Settle: 9.9508
-Step 20/20003 | Acc: 5.00% | Gate: 0.91 | GC_spars: 49.46% | CF_err: 0.0078 | PK_w: 15.97 | Settle: 10.0427
-Step 30/20003 | Acc: 13.33% | Gate: 0.90 | GC_spars: 48.63% | CF_err: 0.0077 | PK_w: 15.96 | Settle: 10.4682
-Step 40/20003 | Acc: 10.00% | Gate: 0.90 | GC_spars: 51.42% | CF_err: 0.0073 | PK_w: 15.95 | Settle: 11.5455
-Step 50/20003 | Acc: 8.00% | Gate: 0.90 | GC_spars: 50.78% | CF_err: 0.0078 | PK_w: 15.94 | Settle: 11.5753
-  Top Bigrams (min 5): 'e.': 0% (5), '. ': 0% (5)
-Step 60/20003 | Acc: 8.33% | Gate: 0.89 | GC_spars: 51.17% | CF_err: 0.0073 | PK_w: 15.93 | Settle: 11.6819
-  Top Bigrams (min 5): 'e.': 0% (6), '. ': 0% (6)
-Step 70/20003 | Acc: 7.14% | Gate: 0.88 | GC_spars: 49.76% | CF_err: 0.0076 | PK_w: 15.91 | Settle: 11.8247
-  Top Bigrams (min 5): 'e.': 0% (6), '. ': 0% (7)
-Step 80/20003 | Acc: 7.50% | Gate: 0.88 | GC_spars: 49.56% | CF_err: 0.0074 | PK_w: 15.90 | Settle: 12.0602
-  Top Bigrams (min 5): 'me': 20% (5), 'e.': 0% (7), '. ': 0% (8)
-Step 90/20003 | Acc: 6.67% | Gate: 0.89 | GC_spars: 49.95% | CF_err: 0.0075 | PK_w: 15.89 | Settle: 12.0039
-  Top Bigrams (min 5): 'me': 20% (5), 'e.': 0% (7), '. ': 0% (9)
-Step 100/20003 | Acc: 8.00% | Gate: 0.88 | GC_spars: 49.85% | CF_err: 0.0078 | PK_w: 15.87 | Settle: 12.2397
-  Top Bigrams (min 5): 'me': 20% (5), 'e.': 0% (7), '. ': 0% (9)
-Step 110/20003 | Acc: 10.00% | Gate: 0.88 | GC_spars: 48.14% | CF_err: 0.0078 | PK_w: 15.86 | Settle: 11.9987
-  Top Bigrams (min 5): 'me': 20% (5), 'e.': 0% (7), '. ': 0% (9)
-Step 120/20003 | Acc: 10.83% | Gate: 0.87 | GC_spars: 49.46% | CF_err: 0.0078 | PK_w: 15.85 | Settle: 12.2551
-  Top Bigrams (min 5): 'me': 20% (5), '. ': 10% (10), 'e.': 0% (7)
-Step 130/20003 | Acc: 11.54% | Gate: 0.88 | GC_spars: 49.37% | CF_err: 0.0065 | PK_w: 15.84 | Settle: 12.1650
-  Top Bigrams (min 5): 'me': 20% (5), '. ': 9% (11), 'e.': 0% (7)
-Step 140/20003 | Acc: 11.43% | Gate: 0.88 | GC_spars: 48.63% | CF_err: 0.0076 | PK_w: 15.82 | Settle: 12.0297
-  Top Bigrams (min 5): 'me': 20% (5), '. ': 8% (12), 'e.': 0% (7)
-Step 150/20003 | Acc: 11.33% | Gate: 0.89 | GC_spars: 48.97% | CF_err: 0.0072 | PK_w: 15.81 | Settle: 12.1076
-  Top Bigrams (min 5): 'o ': 60% (5), 'me': 20% (5), '. ': 8% (13)
-Step 160/20003 | Acc: 11.25% | Gate: 0.88 | GC_spars: 50.88% | CF_err: 0.0074 | PK_w: 15.80 | Settle: 12.1346
-  Top Bigrams (min 5): 'o ': 60% (5), 'me': 17% (6), '. ': 7% (14)
-Step 170/20003 | Acc: 11.18% | Gate: 0.88 | GC_spars: 49.90% | CF_err: 0.0074 | PK_w: 15.79 | Settle: 12.2469
-  Top Bigrams (min 5): 'o ': 67% (6), 'me': 17% (6), '. ': 7% (15)
-Step 180/20003 | Acc: 11.11% | Gate: 0.88 | GC_spars: 50.73% | CF_err: 0.0063 | PK_w: 15.78 | Settle: 12.1346
-  Top Bigrams (min 5): 're': 80% (5), 'o ': 67% (6), 'me': 14% (7)
-Step 190/20003 | Acc: 10.53% | Gate: 0.88 | GC_spars: 48.14% | CF_err: 0.0072 | PK_w: 15.76 | Settle: 12.0623
-  Top Bigrams (min 5): 're': 80% (5), 'o ': 67% (6), 'me': 14% (7)
-Step 200/20003 | Acc: 10.00% | Gate: 0.87 | GC_spars: 48.83% | CF_err: 0.0069 | PK_w: 15.75 | Settle: 12.0737
-  Top Bigrams (min 5): 're': 67% (6), 'o ': 57% (7), 'me': 14% (7)
-Step 210/20003 | Acc: 9.52% | Gate: 0.89 | GC_spars: 49.37% | CF_err: 0.0078 | PK_w: 15.74 | Settle: 11.9778
-  Top Bigrams (min 5): 're': 67% (6), 'o ': 57% (7), 'p ': 20% (5)
-Step 220/20003 | Acc: 10.00% | Gate: 0.88 | GC_spars: 49.37% | CF_err: 0.0078 | PK_w: 15.72 | Settle: 12.2847
-  Top Bigrams (min 5): 't ': 100% (5), 're': 67% (6), 'o ': 57% (7)
-Step 230/20003 | Acc: 9.57% | Gate: 0.88 | GC_spars: 48.19% | CF_err: 0.0074 | PK_w: 15.71 | Settle: 12.1483
-  Top Bigrams (min 5): 't ': 100% (5), 're': 67% (6), 'o ': 57% (7)
-Step 240/20003 | Acc: 9.58% | Gate: 0.87 | GC_spars: 48.93% | CF_err: 0.0078 | PK_w: 15.69 | Settle: 12.2489
-  Top Bigrams (min 5): 't ': 83% (6), 're': 67% (6), 'o ': 57% (7)
-Step 250/20003 | Acc: 10.00% | Gate: 0.87 | GC_spars: 49.17% | CF_err: 0.0077 | PK_w: 15.68 | Settle: 12.5551
-  Top Bigrams (min 5): 't ': 83% (6), 're': 67% (6), 'o ': 62% (8)
-Step 260/20003 | Acc: 10.00% | Gate: 0.88 | GC_spars: 48.10% | CF_err: 0.0072 | PK_w: 15.67 | Settle: 12.4869
-  Top Bigrams (min 5): 't ': 83% (6), 'o ': 67% (9), 're': 57% (7)
-Step 270/20003 | Acc: 10.37% | Gate: 0.87 | GC_spars: 49.61% | CF_err: 0.0077 | PK_w: 15.66 | Settle: 12.1865
-  Top Bigrams (min 5): 't ': 86% (7), 'o ': 67% (9), 're': 57% (7)
-Step 280/20003 | Acc: 10.36% | Gate: 0.86 | GC_spars: 50.10% | CF_err: 0.0076 | PK_w: 15.64 | Settle: 12.4513
-  Top Bigrams (min 5): 'k ': 100% (5), 't ': 86% (7), 'o ': 67% (9)
-Step 290/20003 | Acc: 10.34% | Gate: 0.88 | GC_spars: 48.39% | CF_err: 0.0067 | PK_w: 15.63 | Settle: 12.1172
-  Top Bigrams (min 5): 'k ': 100% (5), 't ': 75% (8), 'o ': 67% (9)
-Step 300/20003 | Acc: 10.00% | Gate: 0.88 | GC_spars: 48.93% | CF_err: 0.0068 | PK_w: 15.62 | Settle: 12.5966
-  Top Bigrams (min 5): 'k ': 100% (5), 'o ': 67% (9), 't ': 67% (9)
-Step 310/20003 | Acc: 9.68% | Gate: 0.87 | GC_spars: 49.56% | CF_err: 0.0077 | PK_w: 15.60 | Settle: 12.5015
-  Top Bigrams (min 5): 'k ': 100% (5), 'o ': 67% (9), 't ': 60% (10)
-Step 320/20003 | Acc: 9.69% | Gate: 0.87 | GC_spars: 49.32% | CF_err: 0.0065 | PK_w: 15.59 | Settle: 12.3961
-  Top Bigrams (min 5): 'k ': 100% (5), 'o ': 60% (10), 't ': 60% (10)
-Step 330/20003 | Acc: 9.39% | Gate: 0.87 | GC_spars: 49.51% | CF_err: 0.0076 | PK_w: 15.57 | Settle: 12.4964
-  Top Bigrams (min 5): 'k ': 100% (5), 'o ': 60% (10), 't ': 60% (10)
-Step 340/20003 | Acc: 9.41% | Gate: 0.88 | GC_spars: 49.80% | CF_err: 0.0067 | PK_w: 15.56 | Settle: 12.2774
-  Top Bigrams (min 5): 'k ': 100% (5), 'o ': 60% (10), 't ': 60% (10)
-Step 350/20003 | Acc: 9.43% | Gate: 0.88 | GC_spars: 50.00% | CF_err: 0.0077 | PK_w: 15.55 | Settle: 12.2705
-  Top Bigrams (min 5): 'k ': 100% (5), 't ': 64% (11), 'o ': 60% (10)
-Step 360/20003 | Acc: 9.44% | Gate: 0.88 | GC_spars: 50.05% | CF_err: 0.0076 | PK_w: 15.53 | Settle: 12.1527
-  Top Bigrams (min 5): 'k ': 100% (5), 't ': 64% (11), 'o ': 60% (10)
-Step 370/20003 | Acc: 9.46% | Gate: 0.87 | GC_spars: 50.20% | CF_err: 0.0065 | PK_w: 15.52 | Settle: 12.4288
-  Top Bigrams (min 5): 'k ': 100% (5), 'o ': 60% (10), 't ': 58% (12)
-Step 380/20003 | Acc: 9.47% | Gate: 0.88 | GC_spars: 47.85% | CF_err: 0.0065 | PK_w: 15.51 | Settle: 12.0833
-  Top Bigrams (min 5): 'k ': 100% (6), 'o ': 60% (10), 't ': 54% (13)
-Step 390/20003 | Acc: 9.49% | Gate: 0.88 | GC_spars: 48.44% | CF_err: 0.0071 | PK_w: 15.49 | Settle: 12.1605
-  Top Bigrams (min 5): 'k ': 86% (7), 'o ': 60% (10), 't ': 54% (13)
-Step 400/20003 | Acc: 9.50% | Gate: 0.87 | GC_spars: 48.97% | CF_err: 0.0073 | PK_w: 15.48 | Settle: 12.2416
-  Top Bigrams (min 5): 'k ': 86% (7), 'o ': 60% (10), 're': 50% (8)
-Step 410/20003 | Acc: 9.76% | Gate: 0.87 | GC_spars: 48.05% | CF_err: 0.0070 | PK_w: 15.47 | Settle: 12.2273
-  Top Bigrams (min 5): 'k ': 86% (7), 'o ': 60% (10), 're': 50% (8)
-Step 420/20003 | Acc: 9.52% | Gate: 0.88 | GC_spars: 47.56% | CF_err: 0.0078 | PK_w: 15.45 | Settle: 12.1432
-  Top Bigrams (min 5): 'k ': 86% (7), 'o ': 60% (10), 're': 50% (8)
-Step 430/20003 | Acc: 9.53% | Gate: 0.87 | GC_spars: 49.46% | CF_err: 0.0074 | PK_w: 15.44 | Settle: 12.5072
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 86% (7), 'o ': 60% (10)
-Step 440/20003 | Acc: 9.77% | Gate: 0.87 | GC_spars: 48.78% | CF_err: 0.0072 | PK_w: 15.43 | Settle: 12.3264
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 88% (8), 'o ': 60% (10)
-Step 450/20003 | Acc: 9.78% | Gate: 0.88 | GC_spars: 48.73% | CF_err: 0.0074 | PK_w: 15.42 | Settle: 12.1831
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 88% (8), 'o ': 60% (10)
-Step 460/20003 | Acc: 9.78% | Gate: 0.87 | GC_spars: 47.56% | CF_err: 0.0076 | PK_w: 15.40 | Settle: 12.2473
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 88% (8), 'o ': 60% (10)
-Step 470/20003 | Acc: 10.00% | Gate: 0.87 | GC_spars: 48.78% | CF_err: 0.0078 | PK_w: 15.38 | Settle: 12.4754
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 88% (8), 'o ': 64% (11)
-Step 480/20003 | Acc: 10.00% | Gate: 0.88 | GC_spars: 49.95% | CF_err: 0.0069 | PK_w: 15.37 | Settle: 12.5296
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 88% (8), 'o ': 64% (11)
-Step 490/20003 | Acc: 9.80% | Gate: 0.86 | GC_spars: 50.54% | CF_err: 0.0077 | PK_w: 15.36 | Settle: 12.7305
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 88% (8), 'o ': 64% (11)
-Step 500/20003 | Acc: 10.00% | Gate: 0.87 | GC_spars: 49.41% | CF_err: 0.0076 | PK_w: 15.34 | Settle: 12.3901
+Step 10/20003 | Acc: 10.00% | Gate: 0.90 | GC_spars: 32.67% | CF_err: 0.3976 | PK_w: 16.12 | Settle: 9.9858
+Step 20/20003 | Acc: 10.00% | Gate: 0.91 | GC_spars: 29.59% | CF_err: 0.3459 | PK_w: 16.44 | Settle: 11.2857
+Step 30/20003 | Acc: 13.33% | Gate: 0.90 | GC_spars: 26.81% | CF_err: 0.3134 | PK_w: 16.78 | Settle: 11.5097
+Step 40/20003 | Acc: 12.50% | Gate: 0.90 | GC_spars: 22.95% | CF_err: 0.2966 | PK_w: 17.12 | Settle: 11.1645
+Step 50/20003 | Acc: 16.00% | Gate: 0.89 | GC_spars: 22.80% | CF_err: 0.2960 | PK_w: 17.46 | Settle: 11.5818
+  Top Bigrams (min 5): '. ': 40% (5), 'e.': 0% (5)
+Step 60/20003 | Acc: 15.00% | Gate: 0.90 | GC_spars: 19.68% | CF_err: 0.3009 | PK_w: 17.79 | Settle: 11.7535
+  Top Bigrams (min 5): '. ': 33% (6), 'e.': 0% (6)
+Step 70/20003 | Acc: 14.29% | Gate: 0.91 | GC_spars: 19.24% | CF_err: 0.2952 | PK_w: 18.12 | Settle: 11.8096
+  Top Bigrams (min 5): '. ': 29% (7), 'e.': 0% (6)
+Step 80/20003 | Acc: 15.00% | Gate: 0.91 | GC_spars: 18.70% | CF_err: 0.2782 | PK_w: 18.43 | Settle: 11.7311
+  Top Bigrams (min 5): 'me': 40% (5), '. ': 38% (8), 'e.': 0% (7)
+Step 90/20003 | Acc: 15.56% | Gate: 0.92 | GC_spars: 14.06% | CF_err: 0.3363 | PK_w: 18.74 | Settle: 12.1188
+  Top Bigrams (min 5): '. ': 44% (9), 'me': 40% (5), 'e.': 0% (7)
+Step 100/20003 | Acc: 16.00% | Gate: 0.92 | GC_spars: 16.80% | CF_err: 0.2768 | PK_w: 19.04 | Settle: 12.2406
+  Top Bigrams (min 5): '. ': 44% (9), 'me': 40% (5), 'e.': 0% (7)
+Step 110/20003 | Acc: 17.27% | Gate: 0.91 | GC_spars: 14.16% | CF_err: 0.3086 | PK_w: 19.34 | Settle: 12.0830
+  Top Bigrams (min 5): '. ': 44% (9), 'me': 40% (5), 'e.': 0% (7)
+Step 120/20003 | Acc: 17.50% | Gate: 0.93 | GC_spars: 12.55% | CF_err: 0.3149 | PK_w: 19.62 | Settle: 11.7654
+  Top Bigrams (min 5): '. ': 50% (10), 'me': 40% (5), 'e.': 0% (7)
+Step 130/20003 | Acc: 18.46% | Gate: 0.93 | GC_spars: 12.89% | CF_err: 0.2953 | PK_w: 19.90 | Settle: 11.9622
+  Top Bigrams (min 5): '. ': 55% (11), 'me': 40% (5), 'e.': 0% (7)
+Step 140/20003 | Acc: 18.57% | Gate: 0.94 | GC_spars: 11.77% | CF_err: 0.3201 | PK_w: 20.18 | Settle: 11.7921
+  Top Bigrams (min 5): '. ': 58% (12), 'me': 40% (5), 'e.': 0% (7)
+Step 150/20003 | Acc: 18.67% | Gate: 0.95 | GC_spars: 11.13% | CF_err: 0.3192 | PK_w: 20.46 | Settle: 11.8586
+  Top Bigrams (min 5): 'o ': 100% (5), '. ': 62% (13), 'me': 40% (5)
+Step 160/20003 | Acc: 18.75% | Gate: 0.95 | GC_spars: 10.45% | CF_err: 0.3115 | PK_w: 20.73 | Settle: 11.7418
+  Top Bigrams (min 5): 'o ': 100% (5), '. ': 64% (14), 'me': 33% (6)
+Step 170/20003 | Acc: 18.82% | Gate: 0.95 | GC_spars: 11.23% | CF_err: 0.3159 | PK_w: 21.00 | Settle: 12.1855
+  Top Bigrams (min 5): 'o ': 100% (6), '. ': 67% (15), 'me': 33% (6)
+Step 180/20003 | Acc: 18.89% | Gate: 0.96 | GC_spars: 11.87% | CF_err: 0.2949 | PK_w: 21.28 | Settle: 12.3093
+  Top Bigrams (min 5): 'o ': 100% (6), '. ': 69% (16), 'me': 29% (7)
+Step 190/20003 | Acc: 18.95% | Gate: 0.96 | GC_spars: 9.72% | CF_err: 0.3414 | PK_w: 21.56 | Settle: 12.3838
+  Top Bigrams (min 5): 'o ': 100% (6), '. ': 71% (17), 'me': 29% (7)
+Step 200/20003 | Acc: 19.50% | Gate: 0.96 | GC_spars: 11.04% | CF_err: 0.2686 | PK_w: 21.82 | Settle: 12.1370
+  Top Bigrams (min 5): 'o ': 100% (7), '. ': 74% (19), 'me': 29% (7)
+Step 210/20003 | Acc: 19.52% | Gate: 0.96 | GC_spars: 11.28% | CF_err: 0.2762 | PK_w: 22.10 | Settle: 11.9982
+  Top Bigrams (min 5): 'o ': 100% (7), 'p ': 80% (5), '. ': 75% (20)
+Step 220/20003 | Acc: 19.55% | Gate: 0.96 | GC_spars: 10.06% | CF_err: 0.2941 | PK_w: 22.37 | Settle: 11.9877
+  Top Bigrams (min 5): 'o ': 100% (7), 't ': 100% (5), 'p ': 80% (5)
+Step 230/20003 | Acc: 19.57% | Gate: 0.97 | GC_spars: 9.03% | CF_err: 0.3045 | PK_w: 22.63 | Settle: 12.2712
+  Top Bigrams (min 5): 'o ': 100% (7), 't ': 100% (5), 'p ': 83% (6)
+Step 240/20003 | Acc: 20.00% | Gate: 0.97 | GC_spars: 8.20% | CF_err: 0.3209 | PK_w: 22.89 | Settle: 12.2928
+  Top Bigrams (min 5): 'o ': 100% (7), 't ': 100% (6), 'p ': 83% (6)
+Step 250/20003 | Acc: 20.00% | Gate: 0.97 | GC_spars: 11.23% | CF_err: 0.2508 | PK_w: 23.13 | Settle: 12.2580
+  Top Bigrams (min 5): 'o ': 100% (8), 't ': 100% (6), 'p ': 83% (6)
+Step 260/20003 | Acc: 20.00% | Gate: 0.98 | GC_spars: 10.25% | CF_err: 0.2978 | PK_w: 23.41 | Settle: 11.9068
+  Top Bigrams (min 5): 'o ': 100% (9), 't ': 100% (6), 'p ': 83% (6)
+Step 270/20003 | Acc: 20.37% | Gate: 0.98 | GC_spars: 10.01% | CF_err: 0.3108 | PK_w: 23.67 | Settle: 11.9789
+  Top Bigrams (min 5): 'o ': 100% (9), 't ': 100% (7), 'p ': 83% (6)
+Step 280/20003 | Acc: 20.36% | Gate: 0.98 | GC_spars: 12.06% | CF_err: 0.2203 | PK_w: 23.93 | Settle: 12.0386
+  Top Bigrams (min 5): 'o ': 100% (9), 't ': 100% (7), 'k ': 100% (5)
+Step 290/20003 | Acc: 20.69% | Gate: 0.98 | GC_spars: 10.60% | CF_err: 0.2501 | PK_w: 24.18 | Settle: 12.3295
+  Top Bigrams (min 5): 'o ': 100% (9), 't ': 100% (8), 'k ': 100% (5)
+Step 300/20003 | Acc: 20.67% | Gate: 0.98 | GC_spars: 10.50% | CF_err: 0.2428 | PK_w: 24.44 | Settle: 12.3858
+  Top Bigrams (min 5): 'o ': 100% (9), 't ': 100% (9), 'k ': 100% (5)
+Step 310/20003 | Acc: 20.65% | Gate: 0.99 | GC_spars: 7.91% | CF_err: 0.3132 | PK_w: 24.70 | Settle: 12.1871
+  Top Bigrams (min 5): 'o ': 100% (9), 't ': 100% (10), 'k ': 100% (5)
+Step 320/20003 | Acc: 20.94% | Gate: 0.99 | GC_spars: 8.89% | CF_err: 0.3047 | PK_w: 24.95 | Settle: 11.5481
+  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (10), 'k ': 100% (5)
+Step 330/20003 | Acc: 20.61% | Gate: 0.99 | GC_spars: 10.69% | CF_err: 0.2573 | PK_w: 25.20 | Settle: 11.9044
+  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (10), 'k ': 100% (5)
+Step 340/20003 | Acc: 20.88% | Gate: 0.99 | GC_spars: 10.40% | CF_err: 0.2472 | PK_w: 25.45 | Settle: 12.2402
+  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (10), 'k ': 100% (5)
+Step 350/20003 | Acc: 20.86% | Gate: 0.99 | GC_spars: 10.01% | CF_err: 0.2536 | PK_w: 25.70 | Settle: 12.1838
+  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (11), 'k ': 100% (5)
+Step 360/20003 | Acc: 20.83% | Gate: 0.98 | GC_spars: 6.79% | CF_err: 0.3295 | PK_w: 25.95 | Settle: 12.6561
+  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (11), 'k ': 100% (5)
+Step 370/20003 | Acc: 20.81% | Gate: 0.98 | GC_spars: 9.77% | CF_err: 0.2283 | PK_w: 26.19 | Settle: 12.8498
+  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (12), 'k ': 100% (5)
+Step 380/20003 | Acc: 21.05% | Gate: 0.98 | GC_spars: 8.35% | CF_err: 0.2813 | PK_w: 26.42 | Settle: 12.4886
+  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (13), 'k ': 100% (6)
+Step 390/20003 | Acc: 21.03% | Gate: 0.99 | GC_spars: 9.57% | CF_err: 0.2463 | PK_w: 26.66 | Settle: 12.1483
+  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (13), 'k ': 100% (7)
+Step 400/20003 | Acc: 21.00% | Gate: 0.99 | GC_spars: 11.43% | CF_err: 0.1900 | PK_w: 26.88 | Settle: 11.8281
+  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (14), 'k ': 100% (7)
+Step 410/20003 | Acc: 21.22% | Gate: 0.99 | GC_spars: 11.23% | CF_err: 0.1966 | PK_w: 27.12 | Settle: 11.9855
+  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (15), 'k ': 100% (7)
+Step 420/20003 | Acc: 21.19% | Gate: 0.99 | GC_spars: 8.30% | CF_err: 0.2640 | PK_w: 27.34 | Settle: 12.3129
+  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (15), 'k ': 100% (7)
+Step 430/20003 | Acc: 21.16% | Gate: 0.99 | GC_spars: 10.69% | CF_err: 0.2018 | PK_w: 27.58 | Settle: 12.2566
+  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (16), 's ': 100% (5)
+Step 440/20003 | Acc: 21.14% | Gate: 0.99 | GC_spars: 9.57% | CF_err: 0.2391 | PK_w: 27.80 | Settle: 12.2163
+  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (16), 's ': 100% (5)
+Step 450/20003 | Acc: 21.33% | Gate: 0.99 | GC_spars: 9.47% | CF_err: 0.2322 | PK_w: 28.02 | Settle: 12.1381
+  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (18), 's ': 100% (5)
+Step 460/20003 | Acc: 21.30% | Gate: 0.99 | GC_spars: 10.21% | CF_err: 0.2214 | PK_w: 28.24 | Settle: 11.9063
+  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (19), 's ': 100% (5)
+Step 470/20003 | Acc: 21.28% | Gate: 0.99 | GC_spars: 9.38% | CF_err: 0.2410 | PK_w: 28.45 | Settle: 12.0450
+  Top Bigrams (min 5): 'o ': 100% (11), 't ': 100% (19), 's ': 100% (5)
+Step 480/20003 | Acc: 21.25% | Gate: 0.99 | GC_spars: 11.67% | CF_err: 0.1721 | PK_w: 28.68 | Settle: 12.2261
+  Top Bigrams (min 5): 'o ': 100% (11), 't ': 100% (19), 's ': 100% (5)
+Step 490/20003 | Acc: 21.22% | Gate: 0.99 | GC_spars: 12.21% | CF_err: 0.1292 | PK_w: 28.89 | Settle: 12.4148
+  Top Bigrams (min 5): 'o ': 100% (11), 't ': 100% (19), 's ': 100% (5)
+Step 500/20003 | Acc: 21.40% | Gate: 0.99 | GC_spars: 8.59% | CF_err: 0.2357 | PK_w: 29.10 | Settle: 12.3981
 
 [DIAGNOSTIC] Running Linear Probe on 200 samples...
   >>> LINEAR PROBE ACCURACY: 99.00% (Internal Representation Quality)
-  [!] ALERT: Representation (99.0%) >> Readout (10.0%). Readout is the bottleneck.
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 89% (9), 'o ': 64% (11)
-Step 510/20003 | Acc: 10.40% | Gate: 0.94 | GC_spars: 48.83% | CF_err: 0.0078 | PK_w: 15.34 | Settle: 9.9562
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 90% (10), 'o ': 64% (11)
-Step 520/20003 | Acc: 10.80% | Gate: 0.90 | GC_spars: 49.27% | CF_err: 0.0062 | PK_w: 15.33 | Settle: 11.3816
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 90% (10), 'o ': 67% (12)
-Step 530/20003 | Acc: 10.60% | Gate: 0.91 | GC_spars: 48.78% | CF_err: 0.0078 | PK_w: 15.31 | Settle: 11.2983
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 90% (10), 'o ': 69% (13)
-Step 540/20003 | Acc: 10.80% | Gate: 0.90 | GC_spars: 48.68% | CF_err: 0.0068 | PK_w: 15.30 | Settle: 11.3689
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 90% (10), 'o ': 69% (13)
-Step 550/20003 | Acc: 11.00% | Gate: 0.90 | GC_spars: 50.10% | CF_err: 0.0078 | PK_w: 15.29 | Settle: 11.4407
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 90% (10), 'o ': 69% (13)
-Step 560/20003 | Acc: 11.00% | Gate: 0.89 | GC_spars: 49.41% | CF_err: 0.0074 | PK_w: 15.27 | Settle: 12.0226
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 90% (10), 'o ': 69% (13)
-Step 570/20003 | Acc: 11.60% | Gate: 0.88 | GC_spars: 49.12% | CF_err: 0.0064 | PK_w: 15.26 | Settle: 12.2883
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 91% (11), 'o ': 69% (13)
-Step 580/20003 | Acc: 11.60% | Gate: 0.88 | GC_spars: 48.78% | CF_err: 0.0077 | PK_w: 15.25 | Settle: 12.0639
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 91% (11), 'o ': 71% (14)
-Step 590/20003 | Acc: 12.00% | Gate: 0.88 | GC_spars: 48.93% | CF_err: 0.0078 | PK_w: 15.23 | Settle: 12.3402
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 91% (11), 'o ': 71% (14)
-Step 600/20003 | Acc: 11.80% | Gate: 0.88 | GC_spars: 47.56% | CF_err: 0.0073 | PK_w: 15.22 | Settle: 12.0129
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 91% (11), 'o ': 71% (14)
-Step 610/20003 | Acc: 11.60% | Gate: 0.88 | GC_spars: 48.73% | CF_err: 0.0077 | PK_w: 15.21 | Settle: 12.1244
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 92% (12), 'o ': 71% (14)
-Step 620/20003 | Acc: 11.60% | Gate: 0.87 | GC_spars: 49.02% | CF_err: 0.0074 | PK_w: 15.20 | Settle: 12.5515
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 92% (13), 'o ': 71% (14)
-Step 630/20003 | Acc: 11.40% | Gate: 0.86 | GC_spars: 48.10% | CF_err: 0.0068 | PK_w: 15.18 | Settle: 12.1171
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 92% (13), 'o ': 71% (14)
-Step 640/20003 | Acc: 11.20% | Gate: 0.88 | GC_spars: 48.49% | CF_err: 0.0072 | PK_w: 15.17 | Settle: 12.3591
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 92% (13), 'o ': 71% (14)
-Step 650/20003 | Acc: 11.20% | Gate: 0.88 | GC_spars: 48.73% | CF_err: 0.0078 | PK_w: 15.15 | Settle: 12.3154
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 92% (13), 'o ': 71% (14)
-Step 660/20003 | Acc: 11.00% | Gate: 0.88 | GC_spars: 49.41% | CF_err: 0.0078 | PK_w: 15.14 | Settle: 12.3010
-  Top Bigrams (min 5): 's ': 100% (5), 'k ': 92% (13), 'o ': 71% (14)
-Step 670/20003 | Acc: 11.20% | Gate: 0.88 | GC_spars: 48.93% | CF_err: 0.0076 | PK_w: 15.12 | Settle: 12.5067
-  Top Bigrams (min 5): 's ': 100% (6), 'k ': 92% (13), 'o ': 71% (14)
-Step 680/20003 | Acc: 11.40% | Gate: 0.87 | GC_spars: 49.90% | CF_err: 0.0072 | PK_w: 15.11 | Settle: 12.3449
-  Top Bigrams (min 5): 's ': 100% (6), 'k ': 92% (13), 'o ': 71% (14)
-Step 690/20003 | Acc: 11.80% | Gate: 0.87 | GC_spars: 50.20% | CF_err: 0.0068 | PK_w: 15.10 | Settle: 12.2446
-  Top Bigrams (min 5): 's ': 100% (7), 'k ': 92% (13), 'o ': 71% (14)
-Step 700/20003 | Acc: 12.20% | Gate: 0.88 | GC_spars: 48.83% | CF_err: 0.0076 | PK_w: 15.08 | Settle: 11.9173
-  Top Bigrams (min 5): 's ': 100% (7), 'k ': 92% (13), 'o ': 71% (14)
-Step 710/20003 | Acc: 12.60% | Gate: 0.88 | GC_spars: 49.07% | CF_err: 0.0066 | PK_w: 15.07 | Settle: 12.0498
-  Top Bigrams (min 5): 's ': 100% (7), 'k ': 92% (13), 'o ': 73% (15)
-Step 720/20003 | Acc: 12.20% | Gate: 0.89 | GC_spars: 48.44% | CF_err: 0.0078 | PK_w: 15.05 | Settle: 11.9314
-  Top Bigrams (min 5): 's ': 100% (7), 'k ': 92% (13), 'o ': 73% (15)
-Step 730/20003 | Acc: 12.60% | Gate: 0.88 | GC_spars: 49.41% | CF_err: 0.0075 | PK_w: 15.04 | Settle: 12.4418
-  Top Bigrams (min 5): 's ': 100% (7), 'k ': 92% (13), 'o ': 73% (15)
-Step 740/20003 | Acc: 12.60% | Gate: 0.89 | GC_spars: 49.27% | CF_err: 0.0070 | PK_w: 15.03 | Settle: 12.0012
-  Top Bigrams (min 5): 's ': 100% (7), 'k ': 92% (13), 'o ': 75% (16)
-Step 750/20003 | Acc: 12.40% | Gate: 0.88 | GC_spars: 49.37% | CF_err: 0.0077 | PK_w: 15.01 | Settle: 12.1396
-  Top Bigrams (min 5): 's ': 100% (8), 'k ': 92% (13), 'o ': 75% (16)
-Step 760/20003 | Acc: 12.60% | Gate: 0.88 | GC_spars: 49.02% | CF_err: 0.0066 | PK_w: 15.00 | Settle: 11.9371
-  Top Bigrams (min 5): 's ': 100% (8), 'k ': 92% (13), 'o ': 76% (17)
-Step 770/20003 | Acc: 12.60% | Gate: 0.88 | GC_spars: 48.97% | CF_err: 0.0074 | PK_w: 14.99 | Settle: 11.9651
-  Top Bigrams (min 5): 's ': 100% (9), 'k ': 92% (13), 'o ': 76% (17)
-Step 780/20003 | Acc: 12.40% | Gate: 0.88 | GC_spars: 49.32% | CF_err: 0.0076 | PK_w: 14.98 | Settle: 11.8378
-  Top Bigrams (min 5): 's ': 100% (9), 'k ': 92% (13), 'o ': 76% (17)
-Step 790/20003 | Acc: 12.40% | Gate: 0.87 | GC_spars: 49.12% | CF_err: 0.0074 | PK_w: 14.97 | Settle: 12.3587
-  Top Bigrams (min 5): 's ': 100% (10), 'k ': 92% (13), 'o ': 76% (17)
-Step 800/20003 | Acc: 12.80% | Gate: 0.88 | GC_spars: 47.85% | CF_err: 0.0063 | PK_w: 14.95 | Settle: 12.3131
-  Top Bigrams (min 5): 's ': 100% (10), 'k ': 93% (14), 'o ': 76% (17)
-Step 810/20003 | Acc: 13.20% | Gate: 0.88 | GC_spars: 48.88% | CF_err: 0.0066 | PK_w: 14.93 | Settle: 12.0635
-  Top Bigrams (min 5): 's ': 100% (10), 'k ': 93% (14), 'l ': 80% (5)
-Step 820/20003 | Acc: 13.40% | Gate: 0.88 | GC_spars: 50.05% | CF_err: 0.0078 | PK_w: 14.92 | Settle: 11.9621
-  Top Bigrams (min 5): 's ': 100% (10), 'k ': 93% (14), 'l ': 80% (5)
-Step 830/20003 | Acc: 13.80% | Gate: 0.87 | GC_spars: 51.12% | CF_err: 0.0075 | PK_w: 14.91 | Settle: 12.4650
-  Top Bigrams (min 5): 's ': 100% (10), 'k ': 93% (14), 'l ': 80% (5)
-Step 840/20003 | Acc: 13.60% | Gate: 0.87 | GC_spars: 50.44% | CF_err: 0.0074 | PK_w: 14.89 | Settle: 12.1242
-  Top Bigrams (min 5): 's ': 100% (10), 'k ': 93% (14), 'o ': 78% (18)
-Step 850/20003 | Acc: 13.60% | Gate: 0.88 | GC_spars: 50.73% | CF_err: 0.0074 | PK_w: 14.88 | Settle: 11.9084
-  Top Bigrams (min 5): 's ': 100% (10), 'k ': 93% (14), 'o ': 79% (19)
-Step 860/20003 | Acc: 13.80% | Gate: 0.89 | GC_spars: 50.44% | CF_err: 0.0076 | PK_w: 14.87 | Settle: 11.7562
-  Top Bigrams (min 5): 's ': 100% (10), 'k ': 93% (14), 'o ': 79% (19)
-Step 870/20003 | Acc: 14.00% | Gate: 0.89 | GC_spars: 49.12% | CF_err: 0.0068 | PK_w: 14.86 | Settle: 11.7991
-  Top Bigrams (min 5): 's ': 100% (11), 'k ': 93% (14), 'o ': 79% (19)
-Step 880/20003 | Acc: 14.00% | Gate: 0.88 | GC_spars: 50.39% | CF_err: 0.0074 | PK_w: 14.85 | Settle: 12.0996
-  Top Bigrams (min 5): 's ': 100% (12), 'k ': 93% (14), 'o ': 79% (19)
-Step 890/20003 | Acc: 13.80% | Gate: 0.87 | GC_spars: 49.51% | CF_err: 0.0076 | PK_w: 14.83 | Settle: 12.1694
-  Top Bigrams (min 5): 's ': 100% (12), 'k ': 93% (14), 'o ': 79% (19)
-Step 900/20003 | Acc: 13.80% | Gate: 0.89 | GC_spars: 48.24% | CF_err: 0.0074 | PK_w: 14.82 | Settle: 11.9814
-  Top Bigrams (min 5): 's ': 100% (12), 'k ': 93% (14), 'o ': 79% (19)
-Step 910/20003 | Acc: 14.00% | Gate: 0.89 | GC_spars: 47.61% | CF_err: 0.0078 | PK_w: 14.81 | Settle: 12.1120
-  Top Bigrams (min 5): 's ': 100% (12), 'k ': 93% (14), 'o ': 79% (19)
-Step 920/20003 | Acc: 14.40% | Gate: 0.88 | GC_spars: 48.83% | CF_err: 0.0077 | PK_w: 14.79 | Settle: 12.1924
-  Top Bigrams (min 5): 's ': 100% (12), 'k ': 93% (14), 'o ': 80% (20)
-Step 930/20003 | Acc: 14.60% | Gate: 0.88 | GC_spars: 49.71% | CF_err: 0.0072 | PK_w: 14.78 | Settle: 12.1773
-  Top Bigrams (min 5): 's ': 100% (12), 'k ': 93% (15), 'o ': 80% (20)
-Step 940/20003 | Acc: 14.80% | Gate: 0.89 | GC_spars: 48.19% | CF_err: 0.0077 | PK_w: 14.76 | Settle: 12.0753
-  Top Bigrams (min 5): 's ': 100% (12), 'k ': 93% (15), 'o ': 81% (21)
-Step 950/20003 | Acc: 14.80% | Gate: 0.89 | GC_spars: 47.56% | CF_err: 0.0068 | PK_w: 14.75 | Settle: 11.8775
-  Top Bigrams (min 5): 's ': 100% (12), 'k ': 93% (15), 'o ': 81% (21)
-Step 960/20003 | Acc: 14.60% | Gate: 0.88 | GC_spars: 48.19% | CF_err: 0.0074 | PK_w: 14.74 | Settle: 12.5839
-  Top Bigrams (min 5): 's ': 100% (12), 'k ': 93% (15), 'o ': 77% (22)
-Step 970/20003 | Acc: 14.60% | Gate: 0.88 | GC_spars: 49.32% | CF_err: 0.0077 | PK_w: 14.73 | Settle: 12.0626
-  Top Bigrams (min 5): 's ': 100% (12), 'k ': 93% (15), 'o ': 77% (22)
-Step 980/20003 | Acc: 14.80% | Gate: 0.88 | GC_spars: 48.00% | CF_err: 0.0077 | PK_w: 14.71 | Settle: 12.0089
-  Top Bigrams (min 5): 's ': 100% (12), 'k ': 93% (15), 'o ': 77% (22)
-Step 990/20003 | Acc: 15.00% | Gate: 0.89 | GC_spars: 48.93% | CF_err: 0.0077 | PK_w: 14.70 | Settle: 12.0480
-  Top Bigrams (min 5): 's ': 100% (13), 'k ': 93% (15), 'o ': 77% (22)
-Step 1000/20003 | Acc: 15.20% | Gate: 0.89 | GC_spars: 48.93% | CF_err: 0.0077 | PK_w: 14.69 | Settle: 12.0640
-
-[DIAGNOSTIC] Running Linear Probe on 200 samples...
-  >>> LINEAR PROBE ACCURACY: 98.50% (Internal Representation Quality)
-  [!] ALERT: Representation (98.5%) >> Readout (15.2%). Readout is the bottleneck.
-  Top Bigrams (min 5): 's ': 100% (13), 'k ': 94% (16), 'o ': 77% (22)
-Step 1010/20003 | Acc: 15.20% | Gate: 0.88 | GC_spars: 49.85% | CF_err: 0.0077 | PK_w: 14.69 | Settle: 9.9805
-  Top Bigrams (min 5): 's ': 100% (13), 'k ': 94% (16), 'o ': 77% (22)
-Step 1020/20003 | Acc: 15.00% | Gate: 0.90 | GC_spars: 49.07% | CF_err: 0.0076 | PK_w: 14.67 | Settle: 11.4383
-  Top Bigrams (min 5): 's ': 100% (14), 'k ': 94% (16), 'o ': 77% (22)
-Step 1030/20003 | Acc: 15.00% | Gate: 0.91 | GC_spars: 49.61% | CF_err: 0.0076 | PK_w: 14.66 | Settle: 11.3622
-  Top Bigrams (min 5): 's ': 100% (14), 'k ': 94% (16), 'o ': 77% (22)
-Step 1040/20003 | Acc: 15.20% | Gate: 0.90 | GC_spars: 49.02% | CF_err: 0.0073 | PK_w: 14.65 | Settle: 11.3474
-  Top Bigrams (min 5): 's ': 100% (14), 'k ': 94% (16), 'o ': 77% (22)
-Step 1050/20003 | Acc: 15.60% | Gate: 0.89 | GC_spars: 48.78% | CF_err: 0.0065 | PK_w: 14.64 | Settle: 11.6565
-  Top Bigrams (min 5): 's ': 100% (14), 'k ': 94% (16), 'o ': 77% (22)
-Step 1060/20003 | Acc: 15.80% | Gate: 0.89 | GC_spars: 49.76% | CF_err: 0.0078 | PK_w: 14.62 | Settle: 11.5861
-  Top Bigrams (min 5): 's ': 100% (14), 'k ': 94% (16), 'o ': 77% (22)
-Step 1070/20003 | Acc: 15.60% | Gate: 0.89 | GC_spars: 48.88% | CF_err: 0.0065 | PK_w: 14.61 | Settle: 11.7010
-  Top Bigrams (min 5): 's ': 100% (14), 'k ': 94% (16), 'o ': 77% (22)
-Step 1080/20003 | Acc: 15.40% | Gate: 0.89 | GC_spars: 48.49% | CF_err: 0.0078 | PK_w: 14.60 | Settle: 11.8314
-  Top Bigrams (min 5): 's ': 100% (14), 'k ': 94% (16), 'o ': 77% (22)
-Step 1090/20003 | Acc: 15.40% | Gate: 0.88 | GC_spars: 48.97% | CF_err: 0.0078 | PK_w: 14.58 | Settle: 12.0189
-  Top Bigrams (min 5): 's ': 100% (14), 'k ': 94% (16), 'o ': 78% (23)
-Step 1100/20003 | Acc: 15.60% | Gate: 0.88 | GC_spars: 47.71% | CF_err: 0.0073 | PK_w: 14.57 | Settle: 12.4046
-  Top Bigrams (min 5): 's ': 100% (14), 'k ': 94% (16), 'o ': 78% (23)
-Step 1110/20003 | Acc: 15.60% | Gate: 0.87 | GC_spars: 49.32% | CF_err: 0.0073 | PK_w: 14.56 | Settle: 12.2262
-  Top Bigrams (min 5): 's ': 100% (14), 'k ': 94% (16), 'o ': 78% (23)
-Step 1120/20003 | Acc: 15.40% | Gate: 0.89 | GC_spars: 48.88% | CF_err: 0.0066 | PK_w: 14.55 | Settle: 11.9655
-  Top Bigrams (min 5): 's ': 100% (14), 'k ': 94% (16), 'o ': 78% (23)
-Step 1130/20003 | Acc: 15.40% | Gate: 0.88 | GC_spars: 48.93% | CF_err: 0.0078 | PK_w: 14.53 | Settle: 11.9562
-  Top Bigrams (min 5): 's ': 100% (14), 'k ': 94% (16), 'o ': 78% (23)
-Step 1140/20003 | Acc: 15.80% | Gate: 0.88 | GC_spars: 48.49% | CF_err: 0.0071 | PK_w: 14.52 | Settle: 12.1211
-  Top Bigrams (min 5): 's ': 100% (14), 'k ': 94% (16), 'o ': 79% (24)
-Step 1150/20003 | Acc: 16.00% | Gate: 0.89 | GC_spars: 48.24% | CF_err: 0.0078 | PK_w: 14.51 | Settle: 11.9275
-  Top Bigrams (min 5): 's ': 100% (14), 'k ': 94% (16), 'o ': 79% (24)
-Step 1160/20003 | Acc: 16.40% | Gate: 0.88 | GC_spars: 49.85% | CF_err: 0.0076 | PK_w: 14.49 | Settle: 12.0643
-  Top Bigrams (min 5): 's ': 100% (14), 'k ': 94% (16), 'o ': 79% (24)
-Step 1170/20003 | Acc: 16.20% | Gate: 0.88 | GC_spars: 49.07% | CF_err: 0.0069 | PK_w: 14.48 | Settle: 12.2384
-  Top Bigrams (min 5): 's ': 100% (15), 'k ': 94% (16), 'o ': 79% (24)
-Step 1180/20003 | Acc: 16.00% | Gate: 0.89 | GC_spars: 50.00% | CF_err: 0.0077 | PK_w: 14.47 | Settle: 11.9651
-  Top Bigrams (min 5): 's ': 100% (15), 'k ': 94% (16), 'o ': 79% (24)
-Step 1190/20003 | Acc: 16.00% | Gate: 0.89 | GC_spars: 49.22% | CF_err: 0.0077 | PK_w: 14.45 | Settle: 11.8984
-  Top Bigrams (min 5): 's ': 100% (15), 'k ': 94% (16), 'o ': 79% (24)
-Step 1200/20003 | Acc: 15.80% | Gate: 0.89 | GC_spars: 48.19% | CF_err: 0.0076 | PK_w: 14.44 | Settle: 11.9402
-  Top Bigrams (min 5): 's ': 100% (16), 'k ': 94% (16), 'o ': 79% (24)
-Step 1210/20003 | Acc: 15.60% | Gate: 0.89 | GC_spars: 49.46% | CF_err: 0.0065 | PK_w: 14.43 | Settle: 11.9192
-  Top Bigrams (min 5): 's ': 100% (16), 'k ': 94% (16), 'o ': 79% (24)
-Step 1220/20003 | Acc: 16.00% | Gate: 0.89 | GC_spars: 50.88% | CF_err: 0.0075 | PK_w: 14.42 | Settle: 11.8769
-  Top Bigrams (min 5): 's ': 100% (16), 'k ': 94% (16), 'o ': 79% (24)
-Step 1230/20003 | Acc: 16.00% | Gate: 0.89 | GC_spars: 49.76% | CF_err: 0.0076 | PK_w: 14.41 | Settle: 11.7749
-  Top Bigrams (min 5): 's ': 100% (17), 'k ': 94% (16), 'o ': 79% (24)
-Step 1240/20003 | Acc: 16.40% | Gate: 0.88 | GC_spars: 48.83% | CF_err: 0.0077 | PK_w: 14.39 | Settle: 11.8371
-  Top Bigrams (min 5): 's ': 100% (17), 'k ': 94% (17), 'o ': 79% (24)
-Step 1250/20003 | Acc: 16.60% | Gate: 0.87 | GC_spars: 49.37% | CF_err: 0.0074 | PK_w: 14.38 | Settle: 12.0984
-  Top Bigrams (min 5): 's ': 100% (17), 'k ': 94% (18), 'o ': 79% (24)
-Step 1260/20003 | Acc: 16.80% | Gate: 0.87 | GC_spars: 49.90% | CF_err: 0.0078 | PK_w: 14.37 | Settle: 12.2584
-  Top Bigrams (min 5): 's ': 100% (17), 'k ': 94% (18), 'o ': 80% (25)
-Step 1270/20003 | Acc: 16.80% | Gate: 0.87 | GC_spars: 49.32% | CF_err: 0.0071 | PK_w: 14.36 | Settle: 12.5060
-  Top Bigrams (min 5): 's ': 100% (17), 'k ': 95% (19), 'o ': 80% (25)
-Step 1280/20003 | Acc: 17.40% | Gate: 0.88 | GC_spars: 48.68% | CF_err: 0.0074 | PK_w: 14.34 | Settle: 12.1520
-  Top Bigrams (min 5): 's ': 100% (17), 'k ': 95% (19), 'o ': 81% (26)
-Step 1290/20003 | Acc: 17.60% | Gate: 0.88 | GC_spars: 49.90% | CF_err: 0.0066 | PK_w: 14.33 | Settle: 12.1124
-  Top Bigrams (min 5): 's ': 100% (17), 'k ': 95% (20), 'o ': 81% (26)
-Step 1300/20003 | Acc: 17.80% | Gate: 0.88 | GC_spars: 48.73% | CF_err: 0.0064 | PK_w: 14.32 | Settle: 12.1833
-  Top Bigrams (min 5): 's ': 100% (17), 'k ': 95% (20), 'o ': 81% (27)
-Step 1310/20003 | Acc: 17.60% | Gate: 0.87 | GC_spars: 48.68% | CF_err: 0.0075 | PK_w: 14.31 | Settle: 12.3767
-  Top Bigrams (min 5): 's ': 100% (17), 'k ': 95% (20), 'o ': 81% (27)
-Step 1320/20003 | Acc: 17.80% | Gate: 0.87 | GC_spars: 48.97% | CF_err: 0.0068 | PK_w: 14.29 | Settle: 12.1916
-  Top Bigrams (min 5): 's ': 100% (17), 'k ': 95% (20), 'o ': 81% (27)
-Step 1330/20003 | Acc: 17.60% | Gate: 0.88 | GC_spars: 49.71% | CF_err: 0.0076 | PK_w: 14.28 | Settle: 12.3506
-  Top Bigrams (min 5): 's ': 100% (17), 'k ': 95% (20), 'o ': 81% (27)
-Step 1340/20003 | Acc: 18.00% | Gate: 0.88 | GC_spars: 48.83% | CF_err: 0.0072 | PK_w: 14.27 | Settle: 12.2999
-  Top Bigrams (min 5): 's ': 100% (17), 'k ': 95% (20), 'o ': 81% (27)
-Step 1350/20003 | Acc: 18.20% | Gate: 0.88 | GC_spars: 48.19% | CF_err: 0.0075 | PK_w: 14.26 | Settle: 12.3133
-  Top Bigrams (min 5): 's ': 100% (17), 'k ': 95% (20), 'o ': 81% (27)
-Step 1360/20003 | Acc: 17.80% | Gate: 0.88 | GC_spars: 49.27% | CF_err: 0.0072 | PK_w: 14.25 | Settle: 11.9722
-  Top Bigrams (min 5): 's ': 100% (17), 'k ': 95% (20), 'o ': 81% (27)
-Step 1370/20003 | Acc: 17.40% | Gate: 0.88 | GC_spars: 48.10% | CF_err: 0.0072 | PK_w: 14.24 | Settle: 12.3468
-  Top Bigrams (min 5): 's ': 100% (17), 'k ': 95% (20), 'o ': 81% (27)
-Step 1380/20003 | Acc: 17.20% | Gate: 0.87 | GC_spars: 47.41% | CF_err: 0.0065 | PK_w: 14.23 | Settle: 12.2822
-  Top Bigrams (min 5): 's ': 100% (17), 'k ': 95% (20), 'o ': 81% (27)
-Step 1390/20003 | Acc: 17.60% | Gate: 0.87 | GC_spars: 48.88% | CF_err: 0.0077 | PK_w: 14.21 | Settle: 12.3141
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (20), 'o ': 81% (27)
-Step 1400/20003 | Acc: 17.60% | Gate: 0.86 | GC_spars: 49.32% | CF_err: 0.0065 | PK_w: 14.20 | Settle: 12.3620
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (20), 'o ': 81% (27)
-Step 1410/20003 | Acc: 17.20% | Gate: 0.86 | GC_spars: 49.12% | CF_err: 0.0077 | PK_w: 14.18 | Settle: 12.5079
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (20), 'o ': 81% (27)
-Step 1420/20003 | Acc: 16.80% | Gate: 0.87 | GC_spars: 50.44% | CF_err: 0.0075 | PK_w: 14.17 | Settle: 12.4511
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (20), 'o ': 81% (27)
-Step 1430/20003 | Acc: 16.80% | Gate: 0.86 | GC_spars: 49.71% | CF_err: 0.0078 | PK_w: 14.15 | Settle: 12.4959
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (20), 'o ': 82% (28)
-Step 1440/20003 | Acc: 16.60% | Gate: 0.88 | GC_spars: 49.85% | CF_err: 0.0068 | PK_w: 14.14 | Settle: 12.1603
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (20), 'o ': 82% (28)
-Step 1450/20003 | Acc: 16.40% | Gate: 0.88 | GC_spars: 51.17% | CF_err: 0.0075 | PK_w: 14.13 | Settle: 12.0267
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (20), 'o ': 82% (28)
-Step 1460/20003 | Acc: 17.00% | Gate: 0.88 | GC_spars: 49.76% | CF_err: 0.0067 | PK_w: 14.12 | Settle: 12.3421
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (20), 'o ': 82% (28)
-Step 1470/20003 | Acc: 17.00% | Gate: 0.88 | GC_spars: 50.68% | CF_err: 0.0065 | PK_w: 14.10 | Settle: 12.1267
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (20), 'o ': 82% (28)
-Step 1480/20003 | Acc: 17.00% | Gate: 0.88 | GC_spars: 49.27% | CF_err: 0.0078 | PK_w: 14.09 | Settle: 12.1488
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (20), 'o ': 83% (29)
-Step 1490/20003 | Acc: 17.00% | Gate: 0.88 | GC_spars: 49.32% | CF_err: 0.0077 | PK_w: 14.08 | Settle: 12.0346
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (20), 'o ': 83% (29)
-Step 1500/20003 | Acc: 16.60% | Gate: 0.88 | GC_spars: 49.71% | CF_err: 0.0078 | PK_w: 14.07 | Settle: 11.9548
-
-[DIAGNOSTIC] Running Linear Probe on 200 samples...
-  >>> LINEAR PROBE ACCURACY: 96.00% (Internal Representation Quality)
-  [!] ALERT: Representation (96.0%) >> Readout (16.6%). Readout is the bottleneck.
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (20), 'o ': 83% (29)
-Step 1510/20003 | Acc: 16.40% | Gate: 0.90 | GC_spars: 50.59% | CF_err: 0.0066 | PK_w: 14.06 | Settle: 9.9761
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (20), 'o ': 83% (29)
-Step 1520/20003 | Acc: 16.40% | Gate: 0.91 | GC_spars: 50.83% | CF_err: 0.0077 | PK_w: 14.05 | Settle: 10.0288
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (20), 'o ': 83% (29)
-Step 1530/20003 | Acc: 16.60% | Gate: 0.91 | GC_spars: 50.20% | CF_err: 0.0064 | PK_w: 14.04 | Settle: 11.1863
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (20), 'o ': 83% (29)
-Step 1540/20003 | Acc: 16.60% | Gate: 0.90 | GC_spars: 50.10% | CF_err: 0.0077 | PK_w: 14.03 | Settle: 11.5212
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (20), 'o ': 83% (30)
-Step 1550/20003 | Acc: 16.40% | Gate: 0.90 | GC_spars: 50.98% | CF_err: 0.0076 | PK_w: 14.02 | Settle: 11.4482
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (20), 'o ': 83% (30)
-Step 1560/20003 | Acc: 16.60% | Gate: 0.89 | GC_spars: 49.22% | CF_err: 0.0062 | PK_w: 14.00 | Settle: 11.7856
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (21), 'o ': 83% (30)
-Step 1570/20003 | Acc: 16.60% | Gate: 0.89 | GC_spars: 49.46% | CF_err: 0.0074 | PK_w: 13.99 | Settle: 11.9841
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (22), 'o ': 83% (30)
-Step 1580/20003 | Acc: 17.20% | Gate: 0.88 | GC_spars: 49.22% | CF_err: 0.0077 | PK_w: 13.98 | Settle: 12.1469
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (22), 'o ': 83% (30)
-Step 1590/20003 | Acc: 17.20% | Gate: 0.89 | GC_spars: 49.85% | CF_err: 0.0077 | PK_w: 13.97 | Settle: 11.9340
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 95% (22), 'o ': 83% (30)
-Step 1600/20003 | Acc: 17.20% | Gate: 0.88 | GC_spars: 49.85% | CF_err: 0.0065 | PK_w: 13.95 | Settle: 12.2262
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 96% (23), 'o ': 83% (30)
-Step 1610/20003 | Acc: 17.40% | Gate: 0.88 | GC_spars: 48.63% | CF_err: 0.0063 | PK_w: 13.94 | Settle: 11.9809
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 96% (23), 'o ': 84% (31)
-Step 1620/20003 | Acc: 17.40% | Gate: 0.89 | GC_spars: 49.17% | CF_err: 0.0071 | PK_w: 13.93 | Settle: 12.0870
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 96% (23), 'o ': 84% (31)
-Step 1630/20003 | Acc: 17.60% | Gate: 0.87 | GC_spars: 50.00% | CF_err: 0.0075 | PK_w: 13.92 | Settle: 12.0445
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 96% (23), 'o ': 84% (31)
-Step 1640/20003 | Acc: 17.60% | Gate: 0.88 | GC_spars: 50.39% | CF_err: 0.0074 | PK_w: 13.91 | Settle: 12.3836
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 96% (23), 'o ': 84% (31)
-Step 1650/20003 | Acc: 17.80% | Gate: 0.88 | GC_spars: 49.37% | CF_err: 0.0064 | PK_w: 13.90 | Settle: 12.2142
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 96% (24), 'o ': 84% (31)
-Step 1660/20003 | Acc: 17.80% | Gate: 0.88 | GC_spars: 50.15% | CF_err: 0.0077 | PK_w: 13.88 | Settle: 12.4410
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 96% (24), 'o ': 84% (31)
-Step 1670/20003 | Acc: 18.00% | Gate: 0.88 | GC_spars: 50.10% | CF_err: 0.0071 | PK_w: 13.87 | Settle: 12.0574
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 96% (24), 'o ': 84% (31)
-Step 1680/20003 | Acc: 18.20% | Gate: 0.87 | GC_spars: 49.66% | CF_err: 0.0071 | PK_w: 13.85 | Settle: 12.3766
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 96% (24), 'o ': 84% (32)
-Step 1690/20003 | Acc: 18.40% | Gate: 0.87 | GC_spars: 49.51% | CF_err: 0.0075 | PK_w: 13.84 | Settle: 12.1970
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 96% (25), 'o ': 84% (32)
-Step 1700/20003 | Acc: 18.60% | Gate: 0.86 | GC_spars: 49.07% | CF_err: 0.0077 | PK_w: 13.83 | Settle: 12.3752
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 96% (25), 'o ': 85% (33)
-Step 1710/20003 | Acc: 18.80% | Gate: 0.87 | GC_spars: 49.12% | CF_err: 0.0071 | PK_w: 13.82 | Settle: 12.3522
-  Top Bigrams (min 5): 's ': 100% (18), 'k ': 96% (25), 'o ': 85% (33)
-Step 1720/20003 | Acc: 19.00% | Gate: 0.88 | GC_spars: 49.02% | CF_err: 0.0074 | PK_w: 13.81 | Settle: 12.1957
-  Top Bigrams (min 5): 's ': 100% (19), 'k ': 96% (25), 'o ': 85% (33)
-Step 1730/20003 | Acc: 18.80% | Gate: 0.87 | GC_spars: 46.97% | CF_err: 0.0068 | PK_w: 13.79 | Settle: 12.1830
-  Top Bigrams (min 5): 's ': 100% (19), 'k ': 96% (25), 'o ': 85% (33)
-Step 1740/20003 | Acc: 18.20% | Gate: 0.88 | GC_spars: 48.05% | CF_err: 0.0073 | PK_w: 13.78 | Settle: 12.2354
-  Top Bigrams (min 5): 's ': 100% (19), 'k ': 96% (25), 'o ': 85% (33)
-Step 1750/20003 | Acc: 17.80% | Gate: 0.88 | GC_spars: 49.37% | CF_err: 0.0078 | PK_w: 13.77 | Settle: 12.5511
-  Top Bigrams (min 5): 's ': 100% (19), 'k ': 96% (25), 'o ': 85% (33)
-Step 1760/20003 | Acc: 17.60% | Gate: 0.87 | GC_spars: 48.24% | CF_err: 0.0076 | PK_w: 13.76 | Settle: 12.6041
-  Top Bigrams (min 5): 's ': 100% (20), 'k ': 96% (25), 'o ': 85% (33)
-Step 1770/20003 | Acc: 17.20% | Gate: 0.88 | GC_spars: 49.37% | CF_err: 0.0073 | PK_w: 13.75 | Settle: 12.1446
-  Top Bigrams (min 5): 's ': 100% (20), 'k ': 96% (25), 'o ': 85% (33)
-Step 1780/20003 | Acc: 17.20% | Gate: 0.89 | GC_spars: 47.61% | CF_err: 0.0075 | PK_w: 13.73 | Settle: 12.1571
-  Top Bigrams (min 5): 's ': 100% (20), 'k ': 96% (25), 'o ': 85% (33)
-Step 1790/20003 | Acc: 17.20% | Gate: 0.88 | GC_spars: 49.90% | CF_err: 0.0077 | PK_w: 13.72 | Settle: 11.9809
-  Top Bigrams (min 5): 's ': 100% (20), 'k ': 96% (25), 'o ': 85% (33)
-Step 1800/20003 | Acc: 17.00% | Gate: 0.87 | GC_spars: 47.17% | CF_err: 0.0073 | PK_w: 13.71 | Settle: 12.3502
-  Top Bigrams (min 5): 's ': 100% (20), 'k ': 96% (25), 'o ': 85% (33)
-Step 1810/20003 | Acc: 17.40% | Gate: 0.87 | GC_spars: 49.17% | CF_err: 0.0076 | PK_w: 13.70 | Settle: 12.3714
-  Top Bigrams (min 5): 's ': 100% (20), 'k ': 96% (26), 'o ': 85% (33)
-Step 1820/20003 | Acc: 17.20% | Gate: 0.87 | GC_spars: 49.37% | CF_err: 0.0070 | PK_w: 13.69 | Settle: 12.2756
-  Top Bigrams (min 5): 's ': 100% (20), 'k ': 96% (26), 'o ': 85% (33)
-Step 1830/20003 | Acc: 17.20% | Gate: 0.87 | GC_spars: 48.83% | CF_err: 0.0073 | PK_w: 13.68 | Settle: 12.4944
-  Top Bigrams (min 5): 's ': 100% (20), 'k ': 96% (26), 'o ': 85% (33)
-Step 1840/20003 | Acc: 17.00% | Gate: 0.87 | GC_spars: 48.88% | CF_err: 0.0074 | PK_w: 13.67 | Settle: 12.4988
-  Top Bigrams (min 5): 's ': 100% (20), 'k ': 96% (26), 'o ': 85% (33)
-Step 1850/20003 | Acc: 16.80% | Gate: 0.88 | GC_spars: 48.39% | CF_err: 0.0074 | PK_w: 13.65 | Settle: 12.0576
-  Top Bigrams (min 5): 's ': 100% (20), 'k ': 96% (26), 'o ': 85% (33)
-Step 1860/20003 | Acc: 17.00% | Gate: 0.86 | GC_spars: 48.83% | CF_err: 0.0078 | PK_w: 13.64 | Settle: 12.4406
-  Top Bigrams (min 5): 's ': 100% (21), 'k ': 96% (26), 'o ': 85% (33)
-Step 1870/20003 | Acc: 17.20% | Gate: 0.88 | GC_spars: 48.97% | CF_err: 0.0075 | PK_w: 13.62 | Settle: 12.2160
-  Top Bigrams (min 5): 's ': 100% (21), 'k ': 96% (26), 'o ': 85% (33)
-Step 1880/20003 | Acc: 17.40% | Gate: 0.88 | GC_spars: 49.85% | CF_err: 0.0065 | PK_w: 13.62 | Settle: 12.2069
-  Top Bigrams (min 5): 's ': 100% (22), 'k ': 96% (26), 'o ': 85% (33)
-Step 1890/20003 | Acc: 17.20% | Gate: 0.88 | GC_spars: 49.22% | CF_err: 0.0076 | PK_w: 13.60 | Settle: 12.3782
-  Top Bigrams (min 5): 's ': 100% (22), 'k ': 96% (26), 'o ': 85% (34)
-Step 1900/20003 | Acc: 17.40% | Gate: 0.88 | GC_spars: 50.49% | CF_err: 0.0071 | PK_w: 13.59 | Settle: 12.0477
-  Top Bigrams (min 5): 's ': 100% (23), 'k ': 96% (26), 'o ': 85% (34)
-Step 1910/20003 | Acc: 17.60% | Gate: 0.87 | GC_spars: 49.71% | CF_err: 0.0077 | PK_w: 13.58 | Settle: 12.3641
-  Top Bigrams (min 5): 's ': 100% (23), 'k ': 96% (26), 'o ': 86% (35)
-Step 1920/20003 | Acc: 17.80% | Gate: 0.88 | GC_spars: 49.85% | CF_err: 0.0076 | PK_w: 13.57 | Settle: 12.0302
-  Top Bigrams (min 5): 's ': 100% (23), 'k ': 96% (26), 'o ': 86% (35)
-Step 1930/20003 | Acc: 17.80% | Gate: 0.87 | GC_spars: 49.32% | CF_err: 0.0077 | PK_w: 13.56 | Settle: 12.2956
-  Top Bigrams (min 5): 's ': 100% (24), 'k ': 96% (26), 'o ': 86% (35)
-Step 1940/20003 | Acc: 17.40% | Gate: 0.89 | GC_spars: 48.93% | CF_err: 0.0076 | PK_w: 13.55 | Settle: 12.0764
-  Top Bigrams (min 5): 's ': 100% (24), 'k ': 96% (26), 'o ': 86% (35)
-Step 1950/20003 | Acc: 17.80% | Gate: 0.88 | GC_spars: 49.80% | CF_err: 0.0075 | PK_w: 13.53 | Settle: 12.0836
-  Top Bigrams (min 5): 's ': 100% (24), 'k ': 96% (26), 'o ': 86% (35)
-Step 1960/20003 | Acc: 17.80% | Gate: 0.89 | GC_spars: 48.88% | CF_err: 0.0077 | PK_w: 13.52 | Settle: 11.8533
-  Top Bigrams (min 5): 's ': 100% (24), 'k ': 96% (26), 'o ': 86% (35)
-Step 1970/20003 | Acc: 17.80% | Gate: 0.89 | GC_spars: 48.00% | CF_err: 0.0076 | PK_w: 13.51 | Settle: 11.8242
-  Top Bigrams (min 5): 's ': 100% (24), 'k ': 96% (26), 'o ': 86% (35)
-Step 1980/20003 | Acc: 17.80% | Gate: 0.88 | GC_spars: 47.85% | CF_err: 0.0077 | PK_w: 13.50 | Settle: 12.2150
-  Top Bigrams (min 5): 's ': 100% (24), 'k ': 96% (26), 'o ': 86% (35)
-Step 1990/20003 | Acc: 18.00% | Gate: 0.87 | GC_spars: 49.51% | CF_err: 0.0072 | PK_w: 13.49 | Settle: 12.3137
-  Top Bigrams (min 5): 's ': 100% (24), 'k ': 96% (26), 'o ': 86% (35)
-Step 2000/20003 | Acc: 18.40% | Gate: 0.89 | GC_spars: 49.37% | CF_err: 0.0065 | PK_w: 13.48 | Settle: 12.1612
-
-[DIAGNOSTIC] Running Linear Probe on 200 samples...
-  >>> LINEAR PROBE ACCURACY: 95.00% (Internal Representation Quality)
-  [!] ALERT: Representation (95.0%) >> Readout (18.4%). Readout is the bottleneck.
-  Top Bigrams (min 5): 's ': 100% (24), 'k ': 96% (26), 'o ': 86% (37)
-Step 2010/20003 | Acc: 18.60% | Gate: 0.91 | GC_spars: 48.05% | CF_err: 0.0077 | PK_w: 13.47 | Settle: 10.0298
-  Top Bigrams (min 5): 's ': 100% (24), 'k ': 96% (26), 'o ': 87% (38)
-Step 2020/20003 | Acc: 18.60% | Gate: 0.92 | GC_spars: 49.37% | CF_err: 0.0077 | PK_w: 13.46 | Settle: 10.0554
-  Top Bigrams (min 5): 's ': 100% (24), 'k ': 96% (26), 'o ': 87% (38)
-Step 2030/20003 | Acc: 18.40% | Gate: 0.91 | GC_spars: 48.34% | CF_err: 0.0064 | PK_w: 13.45 | Settle: 11.1770
-  Top Bigrams (min 5): 's ': 100% (24), 'k ': 96% (27), 'o ': 87% (38)
-Step 2040/20003 | Acc: 18.40% | Gate: 0.91 | GC_spars: 48.83% | CF_err: 0.0077 | PK_w: 13.44 | Settle: 11.1125
-  Top Bigrams (min 5): 's ': 100% (24), 'k ': 96% (27), 'o ': 87% (38)
-Step 2050/20003 | Acc: 18.40% | Gate: 0.90 | GC_spars: 50.05% | CF_err: 0.0074 | PK_w: 13.42 | Settle: 11.4835
-  Top Bigrams (min 5): 's ': 100% (24), 'k ': 96% (27), 'o ': 87% (38)
-Step 2060/20003 | Acc: 18.00% | Gate: 0.89 | GC_spars: 49.07% | CF_err: 0.0066 | PK_w: 13.41 | Settle: 11.5876
-  Top Bigrams (min 5): 's ': 100% (24), 'k ': 96% (27), 'o ': 82% (40)
-Step 2070/20003 | Acc: 17.80% | Gate: 0.90 | GC_spars: 48.63% | CF_err: 0.0074 | PK_w: 13.40 | Settle: 11.6404
-  Top Bigrams (min 5): 's ': 100% (24), 'k ': 96% (27), 'o ': 82% (40)
-Step 2080/20003 | Acc: 17.80% | Gate: 0.89 | GC_spars: 48.68% | CF_err: 0.0063 | PK_w: 13.39 | Settle: 11.6832
-  Top Bigrams (min 5): 's ': 100% (25), 'k ': 96% (27), 'o ': 82% (40)
-Step 2090/20003 | Acc: 17.80% | Gate: 0.89 | GC_spars: 48.73% | CF_err: 0.0075 | PK_w: 13.38 | Settle: 11.6833
-  Top Bigrams (min 5): 's ': 100% (25), 'k ': 96% (27), 'o ': 82% (40)
-Step 2100/20003 | Acc: 17.80% | Gate: 0.89 | GC_spars: 48.44% | CF_err: 0.0075 | PK_w: 13.37 | Settle: 11.7334
-  Top Bigrams (min 5): 's ': 100% (25), 'k ': 96% (27), 'o ': 82% (40)
-Step 2110/20003 | Acc: 17.60% | Gate: 0.89 | GC_spars: 50.20% | CF_err: 0.0072 | PK_w: 13.36 | Settle: 11.9529
-  Top Bigrams (min 5): 's ': 100% (25), 'k ': 96% (27), 'o ': 82% (40)
-Step 2120/20003 | Acc: 17.60% | Gate: 0.90 | GC_spars: 49.41% | CF_err: 0.0076 | PK_w: 13.35 | Settle: 11.6743
-  Top Bigrams (min 5): 's ': 100% (25), 'k ': 96% (27), 'o ': 82% (40)
-Step 2130/20003 | Acc: 17.60% | Gate: 0.90 | GC_spars: 49.12% | CF_err: 0.0077 | PK_w: 13.34 | Settle: 11.8299
-  Top Bigrams (min 5): 's ': 100% (25), 'k ': 96% (27), 'o ': 82% (40)
-Step 2140/20003 | Acc: 17.60% | Gate: 0.89 | GC_spars: 48.34% | CF_err: 0.0073 | PK_w: 13.33 | Settle: 11.9047
-  Top Bigrams (min 5): 's ': 100% (26), 'k ': 96% (27), 'o ': 82% (40)
-Step 2150/20003 | Acc: 17.60% | Gate: 0.89 | GC_spars: 48.24% | CF_err: 0.0077 | PK_w: 13.32 | Settle: 12.7099
-  Top Bigrams (min 5): 's ': 100% (26), 'k ': 96% (27), 'o ': 83% (41)
-Step 2160/20003 | Acc: 17.40% | Gate: 0.89 | GC_spars: 48.00% | CF_err: 0.0066 | PK_w: 13.30 | Settle: 11.7224
-  Top Bigrams (min 5): 's ': 100% (26), 'k ': 96% (27), 'o ': 83% (41)
-Step 2170/20003 | Acc: 17.20% | Gate: 0.90 | GC_spars: 47.71% | CF_err: 0.0075 | PK_w: 13.29 | Settle: 11.6303
-  Top Bigrams (min 5): 's ': 100% (26), 'k ': 96% (27), 'o ': 83% (41)
-Step 2180/20003 | Acc: 17.20% | Gate: 0.88 | GC_spars: 47.95% | CF_err: 0.0063 | PK_w: 13.28 | Settle: 12.1539
-  Top Bigrams (min 5): 's ': 100% (27), 'k ': 96% (27), 'o ': 83% (41)
-Step 2190/20003 | Acc: 16.60% | Gate: 0.88 | GC_spars: 48.58% | CF_err: 0.0078 | PK_w: 13.27 | Settle: 11.8212
-  Top Bigrams (min 5): 's ': 100% (27), 'k ': 96% (27), 'o ': 83% (41)
-Step 2200/20003 | Acc: 16.80% | Gate: 0.87 | GC_spars: 48.54% | CF_err: 0.0063 | PK_w: 13.26 | Settle: 12.2211
-  Top Bigrams (min 5): 's ': 100% (27), 'k ': 96% (27), 'o ': 83% (41)
-Step 2210/20003 | Acc: 16.80% | Gate: 0.88 | GC_spars: 48.73% | CF_err: 0.0074 | PK_w: 13.25 | Settle: 12.2105
-  Top Bigrams (min 5): 's ': 100% (27), 'k ': 96% (27), 'o ': 83% (42)
-Step 2220/20003 | Acc: 16.60% | Gate: 0.88 | GC_spars: 49.56% | CF_err: 0.0062 | PK_w: 13.23 | Settle: 11.9960
-  Top Bigrams (min 5): 's ': 100% (27), 'k ': 96% (27), 'o ': 83% (42)
-Step 2230/20003 | Acc: 16.80% | Gate: 0.89 | GC_spars: 49.85% | CF_err: 0.0063 | PK_w: 13.22 | Settle: 11.9376
-  Top Bigrams (min 5): 's ': 100% (27), 'k ': 96% (27), 'o ': 83% (42)
-Step 2240/20003 | Acc: 17.20% | Gate: 0.89 | GC_spars: 49.46% | CF_err: 0.0077 | PK_w: 13.21 | Settle: 11.8567
-  Top Bigrams (min 5): 's ': 100% (27), 'k ': 96% (27), 'o ': 83% (42)
-Step 2250/20003 | Acc: 17.60% | Gate: 0.89 | GC_spars: 49.02% | CF_err: 0.0074 | PK_w: 13.20 | Settle: 11.9307
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 96% (27), 'o ': 83% (42)
-Step 2260/20003 | Acc: 17.60% | Gate: 0.89 | GC_spars: 49.46% | CF_err: 0.0072 | PK_w: 13.19 | Settle: 11.7708
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 96% (27), 'o ': 83% (42)
-Step 2270/20003 | Acc: 17.80% | Gate: 0.89 | GC_spars: 50.68% | CF_err: 0.0076 | PK_w: 13.18 | Settle: 11.7156
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 96% (27), 'o ': 83% (42)
-Step 2280/20003 | Acc: 17.80% | Gate: 0.90 | GC_spars: 49.12% | CF_err: 0.0066 | PK_w: 13.17 | Settle: 11.6871
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 96% (27), 'o ': 84% (43)
-Step 2290/20003 | Acc: 17.80% | Gate: 0.88 | GC_spars: 48.83% | CF_err: 0.0073 | PK_w: 13.16 | Settle: 12.1724
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 96% (27), 'o ': 84% (44)
-Step 2300/20003 | Acc: 17.80% | Gate: 0.87 | GC_spars: 48.93% | CF_err: 0.0060 | PK_w: 13.15 | Settle: 12.1528
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 96% (27), 'o ': 82% (45)
-Step 2310/20003 | Acc: 17.40% | Gate: 0.88 | GC_spars: 48.83% | CF_err: 0.0078 | PK_w: 13.13 | Settle: 12.5668
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 96% (27), 'o ': 80% (46)
-Step 2320/20003 | Acc: 17.40% | Gate: 0.87 | GC_spars: 47.61% | CF_err: 0.0071 | PK_w: 13.12 | Settle: 12.5086
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 96% (28), 'o ': 80% (46)
-Step 2330/20003 | Acc: 17.80% | Gate: 0.88 | GC_spars: 49.61% | CF_err: 0.0062 | PK_w: 13.11 | Settle: 11.9729
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 96% (28), 'o ': 81% (47)
-Step 2340/20003 | Acc: 18.00% | Gate: 0.89 | GC_spars: 48.44% | CF_err: 0.0075 | PK_w: 13.10 | Settle: 12.3756
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (29), 'o ': 81% (47)
-Step 2350/20003 | Acc: 18.20% | Gate: 0.87 | GC_spars: 49.07% | CF_err: 0.0071 | PK_w: 13.09 | Settle: 12.3263
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (29), 'o ': 81% (47)
-Step 2360/20003 | Acc: 18.60% | Gate: 0.86 | GC_spars: 49.85% | CF_err: 0.0059 | PK_w: 13.08 | Settle: 12.3211
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (29), 'o ': 81% (47)
-Step 2370/20003 | Acc: 18.80% | Gate: 0.88 | GC_spars: 47.85% | CF_err: 0.0078 | PK_w: 13.07 | Settle: 12.0764
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (29), 'o ': 81% (48)
-Step 2380/20003 | Acc: 19.00% | Gate: 0.88 | GC_spars: 49.80% | CF_err: 0.0056 | PK_w: 13.06 | Settle: 11.9368
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (29), 'o ': 81% (48)
-Step 2390/20003 | Acc: 19.20% | Gate: 0.88 | GC_spars: 48.97% | CF_err: 0.0076 | PK_w: 13.05 | Settle: 12.3536
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (30), 'o ': 81% (48)
-Step 2400/20003 | Acc: 19.20% | Gate: 0.87 | GC_spars: 49.32% | CF_err: 0.0071 | PK_w: 13.04 | Settle: 12.3798
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (30), 'o ': 81% (48)
-Step 2410/20003 | Acc: 19.40% | Gate: 0.87 | GC_spars: 49.71% | CF_err: 0.0076 | PK_w: 13.03 | Settle: 12.1213
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (31), 'o ': 81% (48)
-Step 2420/20003 | Acc: 19.80% | Gate: 0.88 | GC_spars: 48.58% | CF_err: 0.0059 | PK_w: 13.02 | Settle: 12.1171
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (31), 'o ': 81% (48)
-Step 2430/20003 | Acc: 19.60% | Gate: 0.84 | GC_spars: 49.46% | CF_err: 0.0076 | PK_w: 13.00 | Settle: 12.7063
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (31), 'o ': 81% (48)
-Step 2440/20003 | Acc: 20.20% | Gate: 0.86 | GC_spars: 49.95% | CF_err: 0.0069 | PK_w: 13.00 | Settle: 12.5909
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (32), 'o ': 81% (48)
-Step 2450/20003 | Acc: 20.40% | Gate: 0.87 | GC_spars: 49.61% | CF_err: 0.0056 | PK_w: 12.99 | Settle: 12.3323
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (33), 'o ': 81% (48)
-Step 2460/20003 | Acc: 20.20% | Gate: 0.87 | GC_spars: 48.49% | CF_err: 0.0077 | PK_w: 12.97 | Settle: 12.3612
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (33), 'o ': 81% (48)
-Step 2470/20003 | Acc: 20.40% | Gate: 0.87 | GC_spars: 49.66% | CF_err: 0.0062 | PK_w: 12.97 | Settle: 12.2615
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (33), 'o ': 81% (48)
-Step 2480/20003 | Acc: 20.40% | Gate: 0.88 | GC_spars: 49.12% | CF_err: 0.0078 | PK_w: 12.95 | Settle: 12.2147
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (33), 'o ': 82% (49)
-Step 2490/20003 | Acc: 20.40% | Gate: 0.87 | GC_spars: 50.24% | CF_err: 0.0075 | PK_w: 12.94 | Settle: 12.2655
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (33), 'o ': 82% (50)
-Step 2500/20003 | Acc: 20.20% | Gate: 0.88 | GC_spars: 49.32% | CF_err: 0.0077 | PK_w: 12.93 | Settle: 12.2126
-
-[DIAGNOSTIC] Running Linear Probe on 200 samples...
-  >>> LINEAR PROBE ACCURACY: 99.50% (Internal Representation Quality)
-  [!] ALERT: Representation (99.5%) >> Readout (20.2%). Readout is the bottleneck.
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (33), 'o ': 82% (50)
-Step 2510/20003 | Acc: 20.00% | Gate: 0.94 | GC_spars: 48.78% | CF_err: 0.0078 | PK_w: 12.93 | Settle: 9.9874
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (33), 'o ': 82% (50)
-Step 2520/20003 | Acc: 19.80% | Gate: 0.90 | GC_spars: 51.37% | CF_err: 0.0072 | PK_w: 12.92 | Settle: 10.0387
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (33), 'o ': 82% (50)
-Step 2530/20003 | Acc: 20.00% | Gate: 0.91 | GC_spars: 50.10% | CF_err: 0.0058 | PK_w: 12.91 | Settle: 10.6223
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (33), 'o ': 82% (50)
-Step 2540/20003 | Acc: 20.00% | Gate: 0.90 | GC_spars: 50.34% | CF_err: 0.0075 | PK_w: 12.90 | Settle: 11.3885
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (33), 'o ': 82% (50)
-Step 2550/20003 | Acc: 20.00% | Gate: 0.90 | GC_spars: 49.12% | CF_err: 0.0078 | PK_w: 12.89 | Settle: 11.6039
-  Top Bigrams (min 5): 's ': 100% (28), 'k ': 97% (33), 'o ': 82% (50)
-Step 2560/20003 | Acc: 20.20% | Gate: 0.89 | GC_spars: 48.88% | CF_err: 0.0077 | PK_w: 12.88 | Settle: 11.7820
-  Top Bigrams (min 5): 's ': 100% (29), 'k ': 97% (33), 'o ': 82% (50)
-Step 2570/20003 | Acc: 20.60% | Gate: 0.89 | GC_spars: 47.56% | CF_err: 0.0078 | PK_w: 12.87 | Settle: 12.0810
-  Top Bigrams (min 5): 's ': 100% (29), 'k ': 97% (34), 'o ': 82% (50)
-Step 2580/20003 | Acc: 20.40% | Gate: 0.89 | GC_spars: 50.10% | CF_err: 0.0078 | PK_w: 12.85 | Settle: 11.9760
-  Top Bigrams (min 5): 's ': 100% (29), 'k ': 97% (34), 'o ': 82% (50)
-Step 2590/20003 | Acc: 20.40% | Gate: 0.89 | GC_spars: 50.00% | CF_err: 0.0068 | PK_w: 12.84 | Settle: 11.7069
-  Top Bigrams (min 5): 's ': 100% (29), 'k ': 97% (34), 'o ': 82% (51)
-Step 2600/20003 | Acc: 20.60% | Gate: 0.89 | GC_spars: 49.02% | CF_err: 0.0054 | PK_w: 12.83 | Settle: 11.9828
-  Top Bigrams (min 5): 's ': 100% (29), 'k ': 97% (35), 'o ': 82% (51)
-Step 2610/20003 | Acc: 20.60% | Gate: 0.88 | GC_spars: 50.44% | CF_err: 0.0078 | PK_w: 12.82 | Settle: 12.2419
-  Top Bigrams (min 5): 's ': 100% (29), 'k ': 97% (35), 'o ': 82% (51)
-Step 2620/20003 | Acc: 20.80% | Gate: 0.89 | GC_spars: 48.49% | CF_err: 0.0075 | PK_w: 12.81 | Settle: 12.0208
-  Top Bigrams (min 5): 's ': 100% (30), 'k ': 97% (35), 'o ': 82% (51)
-Step 2630/20003 | Acc: 21.00% | Gate: 0.90 | GC_spars: 49.37% | CF_err: 0.0069 | PK_w: 12.80 | Settle: 11.6147
-  Top Bigrams (min 5): 's ': 100% (30), 'k ': 97% (35), 'o ': 82% (51)
-Step 2640/20003 | Acc: 21.20% | Gate: 0.89 | GC_spars: 49.95% | CF_err: 0.0075 | PK_w: 12.79 | Settle: 11.9383
-  Top Bigrams (min 5): 's ': 100% (30), 'k ': 97% (35), 'o ': 82% (51)
-Step 2650/20003 | Acc: 21.00% | Gate: 0.88 | GC_spars: 50.05% | CF_err: 0.0075 | PK_w: 12.78 | Settle: 12.2458
-  Top Bigrams (min 5): 's ': 100% (30), 'k ': 97% (35), 'o ': 83% (52)
-Step 2660/20003 | Acc: 21.40% | Gate: 0.87 | GC_spars: 50.00% | CF_err: 0.0074 | PK_w: 12.77 | Settle: 12.2180
-  Top Bigrams (min 5): 's ': 100% (30), 'k ': 97% (36), 'o ': 83% (52)
-Step 2670/20003 | Acc: 21.60% | Gate: 0.89 | GC_spars: 48.88% | CF_err: 0.0073 | PK_w: 12.76 | Settle: 11.6970
-  Top Bigrams (min 5): 's ': 100% (30), 'k ': 97% (36), 'o ': 83% (52)
-Step 2680/20003 | Acc: 21.80% | Gate: 0.88 | GC_spars: 48.44% | CF_err: 0.0065 | PK_w: 12.75 | Settle: 11.8462
-  Top Bigrams (min 5): 's ': 100% (31), 'k ': 97% (36), 'o ': 83% (52)
-Step 2690/20003 | Acc: 22.20% | Gate: 0.89 | GC_spars: 48.58% | CF_err: 0.0076 | PK_w: 12.74 | Settle: 11.8381
-  Top Bigrams (min 5): 's ': 100% (31), 'k ': 97% (37), 'o ': 83% (52)
-Step 2700/20003 | Acc: 22.00% | Gate: 0.88 | GC_spars: 49.51% | CF_err: 0.0074 | PK_w: 12.73 | Settle: 12.1441
-  Top Bigrams (min 5): 's ': 100% (31), 'k ': 97% (37), 'o ': 83% (53)
-Step 2710/20003 | Acc: 22.20% | Gate: 0.87 | GC_spars: 49.32% | CF_err: 0.0065 | PK_w: 12.72 | Settle: 11.9673
-  Top Bigrams (min 5): 's ': 100% (31), 'k ': 97% (37), 'o ': 83% (54)
-Step 2720/20003 | Acc: 22.20% | Gate: 0.88 | GC_spars: 49.46% | CF_err: 0.0075 | PK_w: 12.71 | Settle: 12.1465
-  Top Bigrams (min 5): 's ': 100% (32), 'k ': 97% (37), 'o ': 83% (54)
-Step 2730/20003 | Acc: 22.20% | Gate: 0.88 | GC_spars: 48.00% | CF_err: 0.0074 | PK_w: 12.70 | Settle: 12.1205
-  Top Bigrams (min 5): 's ': 100% (32), 'k ': 97% (37), 'o ': 83% (54)
-Step 2740/20003 | Acc: 22.20% | Gate: 0.88 | GC_spars: 49.61% | CF_err: 0.0062 | PK_w: 12.69 | Settle: 11.8965
-  Top Bigrams (min 5): 's ': 100% (32), 'k ': 97% (37), 'o ': 83% (54)
-Step 2750/20003 | Acc: 22.20% | Gate: 0.88 | GC_spars: 48.54% | CF_err: 0.0077 | PK_w: 12.68 | Settle: 11.8653
-  Top Bigrams (min 5): 's ': 100% (33), 'k ': 97% (37), 'o ': 83% (54)
-Step 2760/20003 | Acc: 22.00% | Gate: 0.88 | GC_spars: 49.90% | CF_err: 0.0072 | PK_w: 12.68 | Settle: 12.0706
-  Top Bigrams (min 5): 'k ': 97% (37), 's ': 97% (34), 'o ': 83% (54)
-Step 2770/20003 | Acc: 22.00% | Gate: 0.87 | GC_spars: 48.88% | CF_err: 0.0077 | PK_w: 12.66 | Settle: 12.3073
-  Top Bigrams (min 5): 'k ': 97% (37), 's ': 97% (34), 'o ': 82% (55)
-Step 2780/20003 | Acc: 21.80% | Gate: 0.88 | GC_spars: 47.75% | CF_err: 0.0074 | PK_w: 12.65 | Settle: 12.1163
-  Top Bigrams (min 5): 'k ': 97% (37), 's ': 97% (34), 'o ': 82% (56)
-Step 2790/20003 | Acc: 22.00% | Gate: 0.88 | GC_spars: 49.27% | CF_err: 0.0058 | PK_w: 12.64 | Settle: 12.1348
-  Top Bigrams (min 5): 'k ': 97% (37), 's ': 97% (34), 'o ': 82% (56)
-Step 2800/20003 | Acc: 22.00% | Gate: 0.89 | GC_spars: 48.24% | CF_err: 0.0078 | PK_w: 12.63 | Settle: 11.8926
-  Top Bigrams (min 5): 'k ': 97% (37), 's ': 97% (34), 'o ': 82% (56)
-Step 2810/20003 | Acc: 22.20% | Gate: 0.89 | GC_spars: 49.61% | CF_err: 0.0055 | PK_w: 12.62 | Settle: 11.7707
-  Top Bigrams (min 5): 'k ': 97% (37), 's ': 97% (34), 'o ': 82% (56)
-Step 2820/20003 | Acc: 22.00% | Gate: 0.89 | GC_spars: 48.68% | CF_err: 0.0077 | PK_w: 12.61 | Settle: 12.0169
-  Top Bigrams (min 5): 'k ': 97% (37), 's ': 97% (34), 'o ': 82% (56)
-Step 2830/20003 | Acc: 21.80% | Gate: 0.88 | GC_spars: 48.34% | CF_err: 0.0072 | PK_w: 12.60 | Settle: 11.8494
-  Top Bigrams (min 5): 'k ': 97% (37), 's ': 97% (34), 'o ': 82% (57)
-Step 2840/20003 | Acc: 21.80% | Gate: 0.88 | GC_spars: 49.27% | CF_err: 0.0075 | PK_w: 12.59 | Settle: 12.2592
-  Top Bigrams (min 5): 'k ': 97% (37), 's ': 97% (34), 'o ': 83% (58)
-Step 2850/20003 | Acc: 22.00% | Gate: 0.88 | GC_spars: 49.85% | CF_err: 0.0062 | PK_w: 12.58 | Settle: 12.1111
-  Top Bigrams (min 5): 'k ': 97% (37), 's ': 97% (34), 'o ': 83% (58)
-Step 2860/20003 | Acc: 21.80% | Gate: 0.89 | GC_spars: 48.00% | CF_err: 0.0076 | PK_w: 12.56 | Settle: 11.7186
-  Top Bigrams (min 5): 'k ': 97% (37), 's ': 97% (34), 'o ': 83% (59)
-Step 2870/20003 | Acc: 21.80% | Gate: 0.89 | GC_spars: 49.76% | CF_err: 0.0072 | PK_w: 12.56 | Settle: 11.6953
-  Top Bigrams (min 5): 'k ': 97% (37), 's ': 97% (34), 'o ': 83% (60)
-Step 2880/20003 | Acc: 21.80% | Gate: 0.89 | GC_spars: 49.22% | CF_err: 0.0078 | PK_w: 12.54 | Settle: 11.7515
-  Top Bigrams (min 5): 'k ': 97% (37), 's ': 97% (34), 'o ': 83% (60)
-Step 2890/20003 | Acc: 21.80% | Gate: 0.88 | GC_spars: 49.46% | CF_err: 0.0075 | PK_w: 12.53 | Settle: 11.9221
-  Top Bigrams (min 5): 'k ': 97% (37), 's ': 97% (34), 'o ': 83% (60)
-Step 2900/20003 | Acc: 22.00% | Gate: 0.89 | GC_spars: 49.51% | CF_err: 0.0061 | PK_w: 12.52 | Settle: 11.5975
-  Top Bigrams (min 5): 'k ': 97% (37), 's ': 97% (34), 'o ': 83% (60)
-Step 2910/20003 | Acc: 21.80% | Gate: 0.89 | GC_spars: 49.76% | CF_err: 0.0078 | PK_w: 12.51 | Settle: 11.5416
-  Top Bigrams (min 5): 'k ': 97% (37), 's ': 97% (35), 'o ': 83% (60)
-Step 2920/20003 | Acc: 21.60% | Gate: 0.88 | GC_spars: 47.85% | CF_err: 0.0072 | PK_w: 12.50 | Settle: 12.0395
-  Top Bigrams (min 5): 'k ': 97% (38), 's ': 97% (35), 'o ': 83% (60)
-Step 2930/20003 | Acc: 22.00% | Gate: 0.88 | GC_spars: 49.37% | CF_err: 0.0074 | PK_w: 12.49 | Settle: 12.1248
-  Top Bigrams (min 5): 'k ': 97% (38), 's ': 97% (35), 'o ': 83% (60)
-Step 2940/20003 | Acc: 21.80% | Gate: 0.88 | GC_spars: 47.90% | CF_err: 0.0077 | PK_w: 12.48 | Settle: 11.7556
-  Top Bigrams (min 5): 'k ': 97% (38), 's ': 97% (35), 'o ': 84% (61)
-Step 2950/20003 | Acc: 21.80% | Gate: 0.89 | GC_spars: 48.39% | CF_err: 0.0059 | PK_w: 12.47 | Settle: 11.6477
-  Top Bigrams (min 5): 'k ': 97% (38), 's ': 97% (35), 'o ': 84% (61)
-Step 2960/20003 | Acc: 21.60% | Gate: 0.90 | GC_spars: 49.17% | CF_err: 0.0064 | PK_w: 12.46 | Settle: 11.5685
-  Top Bigrams (min 5): 'k ': 97% (38), 's ': 97% (35), 'o ': 84% (61)
-Step 2970/20003 | Acc: 21.60% | Gate: 0.90 | GC_spars: 48.24% | CF_err: 0.0062 | PK_w: 12.45 | Settle: 11.5224
-  Top Bigrams (min 5): 'k ': 97% (38), 's ': 97% (36), 'o ': 84% (61)
-Step 2980/20003 | Acc: 21.80% | Gate: 0.89 | GC_spars: 48.93% | CF_err: 0.0073 | PK_w: 12.45 | Settle: 12.1894
-  Top Bigrams (min 5): 'k ': 97% (38), 's ': 97% (37), 'o ': 84% (61)
-Step 2990/20003 | Acc: 21.80% | Gate: 0.88 | GC_spars: 49.02% | CF_err: 0.0073 | PK_w: 12.44 | Settle: 12.1437
-  Top Bigrams (min 5): 'k ': 97% (39), 's ': 97% (37), 'o ': 84% (61)
-Step 3000/20003 | Acc: 21.80% | Gate: 0.88 | GC_spars: 47.90% | CF_err: 0.0068 | PK_w: 12.43 | Settle: 11.9737
-
-[DIAGNOSTIC] Running Linear Probe on 200 samples...
-  >>> LINEAR PROBE ACCURACY: 98.50% (Internal Representation Quality)
-  [!] ALERT: Representation (98.5%) >> Readout (21.8%). Readout is the bottleneck.
-  Top Bigrams (min 5): 'k ': 97% (39), 's ': 97% (37), 'o ': 84% (61)
-Step 3010/20003 | Acc: 22.00% | Gate: 0.87 | GC_spars: 48.97% | CF_err: 0.0037 | PK_w: 12.43 | Settle: 9.9798
-  Top Bigrams (min 5): 'k ': 97% (39), 's ': 95% (38), 'o ': 84% (61)
-Step 3020/20003 | Acc: 22.20% | Gate: 0.91 | GC_spars: 48.88% | CF_err: 0.0059 | PK_w: 12.42 | Settle: 11.1052
-  Top Bigrams (min 5): 'k ': 97% (39), 's ': 95% (38), 'o ': 84% (61)
-Step 3030/20003 | Acc: 22.00% | Gate: 0.91 | GC_spars: 48.88% | CF_err: 0.0076 | PK_w: 12.40 | Settle: 11.0857
-  Top Bigrams (min 5): 'k ': 98% (40), 's ': 95% (38), 'o ': 84% (61)
-Step 3040/20003 | Acc: 22.00% | Gate: 0.91 | GC_spars: 48.78% | CF_err: 0.0073 | PK_w: 12.39 | Settle: 11.3886
-  Top Bigrams (min 5): 'k ': 98% (40), 's ': 95% (38), 'o ': 84% (62)
-Step 3050/20003 | Acc: 21.80% | Gate: 0.90 | GC_spars: 50.68% | CF_err: 0.0076 | PK_w: 12.38 | Settle: 11.6872
-  Top Bigrams (min 5): 'k ': 98% (40), 's ': 95% (38), 'o ': 84% (62)
-Step 3060/20003 | Acc: 22.00% | Gate: 0.89 | GC_spars: 48.68% | CF_err: 0.0059 | PK_w: 12.37 | Settle: 11.7788
-  Top Bigrams (min 5): 'k ': 98% (41), 's ': 95% (38), 'o ': 84% (62)
-Step 3070/20003 | Acc: 21.80% | Gate: 0.90 | GC_spars: 48.58% | CF_err: 0.0071 | PK_w: 12.36 | Settle: 11.3573
-  Top Bigrams (min 5): 'k ': 98% (41), 's ': 95% (38), 'o ': 84% (62)
-Step 3080/20003 | Acc: 21.80% | Gate: 0.90 | GC_spars: 50.63% | CF_err: 0.0077 | PK_w: 12.35 | Settle: 11.3548
-  Top Bigrams (min 5): 'k ': 98% (41), 's ': 95% (38), 'o ': 84% (62)
-Step 3090/20003 | Acc: 21.80% | Gate: 0.89 | GC_spars: 49.76% | CF_err: 0.0075 | PK_w: 12.34 | Settle: 12.0020
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (38), 'o ': 84% (62)
-Step 3100/20003 | Acc: 21.80% | Gate: 0.88 | GC_spars: 50.10% | CF_err: 0.0066 | PK_w: 12.33 | Settle: 12.0103
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (38), 'o ': 84% (62)
-Step 3110/20003 | Acc: 22.00% | Gate: 0.88 | GC_spars: 49.90% | CF_err: 0.0075 | PK_w: 12.32 | Settle: 11.7684
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (38), 'o ': 84% (62)
-Step 3120/20003 | Acc: 22.00% | Gate: 0.89 | GC_spars: 51.17% | CF_err: 0.0065 | PK_w: 12.31 | Settle: 11.9950
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (38), 'o ': 84% (62)
-Step 3130/20003 | Acc: 21.80% | Gate: 0.89 | GC_spars: 50.73% | CF_err: 0.0076 | PK_w: 12.30 | Settle: 11.7497
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (38), 'o ': 84% (63)
-Step 3140/20003 | Acc: 21.40% | Gate: 0.88 | GC_spars: 49.46% | CF_err: 0.0067 | PK_w: 12.29 | Settle: 12.2208
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (38), 'o ': 83% (64)
-Step 3150/20003 | Acc: 21.20% | Gate: 0.89 | GC_spars: 49.51% | CF_err: 0.0067 | PK_w: 12.28 | Settle: 11.6914
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (38), 'o ': 83% (64)
-Step 3160/20003 | Acc: 21.20% | Gate: 0.89 | GC_spars: 51.03% | CF_err: 0.0078 | PK_w: 12.26 | Settle: 11.9472
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (38), 'o ': 83% (64)
-Step 3170/20003 | Acc: 21.20% | Gate: 0.88 | GC_spars: 49.95% | CF_err: 0.0070 | PK_w: 12.26 | Settle: 12.1917
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (38), 'o ': 83% (65)
-Step 3180/20003 | Acc: 21.00% | Gate: 0.89 | GC_spars: 48.73% | CF_err: 0.0074 | PK_w: 12.25 | Settle: 11.9920
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (38), 'o ': 83% (66)
-Step 3190/20003 | Acc: 21.20% | Gate: 0.89 | GC_spars: 49.41% | CF_err: 0.0062 | PK_w: 12.24 | Settle: 11.7725
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (38), 'o ': 83% (66)
-Step 3200/20003 | Acc: 21.00% | Gate: 0.89 | GC_spars: 48.10% | CF_err: 0.0075 | PK_w: 12.23 | Settle: 11.8329
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (38), 'o ': 82% (67)
-Step 3210/20003 | Acc: 20.80% | Gate: 0.88 | GC_spars: 50.10% | CF_err: 0.0062 | PK_w: 12.22 | Settle: 12.0301
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (38), 'o ': 82% (67)
-Step 3220/20003 | Acc: 20.60% | Gate: 0.88 | GC_spars: 50.34% | CF_err: 0.0072 | PK_w: 12.21 | Settle: 12.0216
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (38), 'o ': 82% (67)
-Step 3230/20003 | Acc: 20.80% | Gate: 0.88 | GC_spars: 48.05% | CF_err: 0.0065 | PK_w: 12.20 | Settle: 11.7834
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (39), 'o ': 82% (67)
-Step 3240/20003 | Acc: 20.60% | Gate: 0.89 | GC_spars: 48.73% | CF_err: 0.0077 | PK_w: 12.18 | Settle: 11.8895
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (39), 'o ': 81% (68)
-Step 3250/20003 | Acc: 20.60% | Gate: 0.89 | GC_spars: 48.73% | CF_err: 0.0070 | PK_w: 12.18 | Settle: 12.2051
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (40), 'o ': 81% (68)
-Step 3260/20003 | Acc: 20.80% | Gate: 0.89 | GC_spars: 48.58% | CF_err: 0.0070 | PK_w: 12.17 | Settle: 11.9477
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (40), 'o ': 81% (68)
-Step 3270/20003 | Acc: 20.80% | Gate: 0.89 | GC_spars: 49.32% | CF_err: 0.0071 | PK_w: 12.16 | Settle: 12.0967
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (40), 'o ': 81% (69)
-Step 3280/20003 | Acc: 20.80% | Gate: 0.89 | GC_spars: 49.27% | CF_err: 0.0071 | PK_w: 12.15 | Settle: 11.8659
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (40), 'o ': 81% (69)
-Step 3290/20003 | Acc: 20.60% | Gate: 0.88 | GC_spars: 50.44% | CF_err: 0.0075 | PK_w: 12.14 | Settle: 11.7788
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (40), 'o ': 81% (69)
-Step 3300/20003 | Acc: 20.80% | Gate: 0.89 | GC_spars: 49.07% | CF_err: 0.0074 | PK_w: 12.13 | Settle: 11.8361
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (40), 'o ': 81% (69)
-Step 3310/20003 | Acc: 21.00% | Gate: 0.89 | GC_spars: 49.90% | CF_err: 0.0067 | PK_w: 12.12 | Settle: 11.9404
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (40), 'o ': 81% (69)
-Step 3320/20003 | Acc: 21.20% | Gate: 0.89 | GC_spars: 50.44% | CF_err: 0.0065 | PK_w: 12.11 | Settle: 11.8022
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (41), 'o ': 81% (69)
-Step 3330/20003 | Acc: 21.00% | Gate: 0.89 | GC_spars: 49.85% | CF_err: 0.0077 | PK_w: 12.10 | Settle: 11.8008
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (41), 'o ': 81% (69)
-Step 3340/20003 | Acc: 21.00% | Gate: 0.88 | GC_spars: 51.07% | CF_err: 0.0077 | PK_w: 12.09 | Settle: 12.0761
-  Top Bigrams (min 5): 'k ': 98% (42), 's ': 95% (41), 'o ': 81% (69)
-Step 3350/20003 | Acc: 20.80% | Gate: 0.88 | GC_spars: 49.07% | CF_err: 0.0063 | PK_w: 12.08 | Settle: 11.8953
-  Top Bigrams (min 5): 'k ': 98% (43), 's ': 95% (41), 'o ': 81% (69)
-Step 3360/20003 | Acc: 20.80% | Gate: 0.89 | GC_spars: 49.17% | CF_err: 0.0074 | PK_w: 12.07 | Settle: 11.8039
-  Top Bigrams (min 5): 'k ': 98% (43), 's ': 95% (41), 'o ': 81% (69)
-Step 3370/20003 | Acc: 20.80% | Gate: 0.89 | GC_spars: 48.34% | CF_err: 0.0074 | PK_w: 12.06 | Settle: 12.0546
-  Top Bigrams (min 5): 'k ': 98% (43), 's ': 95% (41), 'o ': 81% (69)
-Step 3380/20003 | Acc: 21.00% | Gate: 0.89 | GC_spars: 48.39% | CF_err: 0.0077 | PK_w: 12.05 | Settle: 11.9874
-  Top Bigrams (min 5): 'k ': 98% (43), 's ': 95% (41), 'o ': 81% (70)
-Step 3390/20003 | Acc: 21.00% | Gate: 0.89 | GC_spars: 48.24% | CF_err: 0.0074 | PK_w: 12.04 | Settle: 11.9113
-  Top Bigrams (min 5): 'k ': 98% (43), 's ': 95% (41), 'o ': 81% (70)
-Step 3400/20003 | Acc: 20.80% | Gate: 0.88 | GC_spars: 49.27% | CF_err: 0.0069 | PK_w: 12.04 | Settle: 12.2293
-  Top Bigrams (min 5): 'k ': 98% (43), 's ': 95% (41), 'o ': 81% (70)
-Step 3410/20003 | Acc: 20.80% | Gate: 0.88 | GC_spars: 48.88% | CF_err: 0.0067 | PK_w: 12.02 | Settle: 12.1710
-  Top Bigrams (min 5): 'k ': 98% (43), 's ': 93% (42), 'o ': 81% (70)
-Step 3420/20003 | Acc: 20.80% | Gate: 0.87 | GC_spars: 47.95% | CF_err: 0.0071 | PK_w: 12.02 | Settle: 12.4938
-  Top Bigrams (min 5): 'k ': 98% (43), 's ': 93% (42), 'o ': 82% (71)
-Step 3430/20003 | Acc: 20.60% | Gate: 0.88 | GC_spars: 47.80% | CF_err: 0.0074 | PK_w: 12.01 | Settle: 12.0652
-  Top Bigrams (min 5): 'k ': 98% (43), 's ': 93% (42), 'o ': 82% (72)
-Step 3440/20003 | Acc: 20.60% | Gate: 0.88 | GC_spars: 48.29% | CF_err: 0.0073 | PK_w: 11.99 | Settle: 12.3920
-  Top Bigrams (min 5): 'k ': 98% (44), 's ': 93% (42), 'o ': 82% (72)
-Step 3450/20003 | Acc: 20.60% | Gate: 0.89 | GC_spars: 49.22% | CF_err: 0.0060 | PK_w: 11.98 | Settle: 11.7346
-  Top Bigrams (min 5): 'k ': 98% (44), 's ': 93% (42), 'o ': 82% (72)
-Step 3460/20003 | Acc: 20.80% | Gate: 0.88 | GC_spars: 49.12% | CF_err: 0.0077 | PK_w: 11.97 | Settle: 12.0956
-  Top Bigrams (min 5): 'k ': 98% (44), 's ': 93% (42), 'o ': 82% (72)
-Step 3470/20003 | Acc: 20.60% | Gate: 0.87 | GC_spars: 48.73% | CF_err: 0.0073 | PK_w: 11.96 | Settle: 12.2873
-  Top Bigrams (min 5): 'k ': 98% (45), 's ': 93% (42), 'o ': 82% (72)
-Step 3480/20003 | Acc: 20.60% | Gate: 0.88 | GC_spars: 48.00% | CF_err: 0.0074 | PK_w: 11.96 | Settle: 11.9990
-  Top Bigrams (min 5): 'k ': 98% (46), 's ': 93% (42), 'o ': 82% (72)
-Step 3490/20003 | Acc: 20.60% | Gate: 0.87 | GC_spars: 48.14% | CF_err: 0.0077 | PK_w: 11.94 | Settle: 12.3932
-  Top Bigrams (min 5): 'k ': 98% (46), 's ': 93% (42), 'o ': 82% (72)
-Step 3500/20003 | Acc: 20.60% | Gate: 0.87 | GC_spars: 48.44% | CF_err: 0.0070 | PK_w: 11.93 | Settle: 12.2722
-
-[DIAGNOSTIC] Running Linear Probe on 200 samples...
-  >>> LINEAR PROBE ACCURACY: 95.00% (Internal Representation Quality)
-  [!] ALERT: Representation (95.0%) >> Readout (20.6%). Readout is the bottleneck.
-  Top Bigrams (min 5): 'k ': 98% (46), 's ': 93% (42), 'o ': 82% (73)
-Step 3510/20003 | Acc: 20.80% | Gate: 0.94 | GC_spars: 49.90% | CF_err: 0.0078 | PK_w: 11.94 | Settle: 9.9797
-  Top Bigrams (min 5): 'k ': 98% (46), 's ': 93% (43), 'o ': 82% (73)
-Step 3520/20003 | Acc: 20.80% | Gate: 0.91 | GC_spars: 48.58% | CF_err: 0.0063 | PK_w: 11.92 | Settle: 11.0486
-  Top Bigrams (min 5): 'k ': 98% (47), 's ': 93% (43), 'o ': 82% (73)
-Step 3530/20003 | Acc: 20.80% | Gate: 0.91 | GC_spars: 48.29% | CF_err: 0.0076 | PK_w: 11.91 | Settle: 11.2339
-  Top Bigrams (min 5): 'k ': 98% (47), 's ': 93% (43), 'o ': 82% (73)
-Step 3540/20003 | Acc: 20.80% | Gate: 0.90 | GC_spars: 48.83% | CF_err: 0.0076 | PK_w: 11.90 | Settle: 11.4749
-  Top Bigrams (min 5): 'k ': 98% (47), 's ': 93% (44), 'o ': 82% (73)
-Step 3550/20003 | Acc: 21.20% | Gate: 0.90 | GC_spars: 48.14% | CF_err: 0.0076 | PK_w: 11.90 | Settle: 11.4327
-  Top Bigrams (min 5): 'k ': 98% (48), 's ': 93% (44), 'o ': 82% (73)
-Step 3560/20003 | Acc: 21.20% | Gate: 0.90 | GC_spars: 49.02% | CF_err: 0.0059 | PK_w: 11.89 | Settle: 11.4053
-  Top Bigrams (min 5): 'k ': 98% (48), 's ': 93% (44), 'o ': 82% (73)
-Step 3570/20003 | Acc: 21.20% | Gate: 0.89 | GC_spars: 47.85% | CF_err: 0.0077 | PK_w: 11.88 | Settle: 11.6491
-  Top Bigrams (min 5): 'k ': 98% (48), 's ': 93% (44), 'o ': 82% (74)
-Step 3580/20003 | Acc: 21.20% | Gate: 0.89 | GC_spars: 48.05% | CF_err: 0.0074 | PK_w: 11.87 | Settle: 11.8630
-  Top Bigrams (min 5): 'k ': 98% (48), 's ': 93% (44), 'o ': 82% (74)
-Step 3590/20003 | Acc: 21.20% | Gate: 0.89 | GC_spars: 49.22% | CF_err: 0.0076 | PK_w: 11.86 | Settle: 11.6547
-  Top Bigrams (min 5): 'k ': 98% (48), 's ': 93% (44), 'o ': 82% (74)
-Step 3600/20003 | Acc: 21.00% | Gate: 0.89 | GC_spars: 50.10% | CF_err: 0.0065 | PK_w: 11.85 | Settle: 11.8825
-  Top Bigrams (min 5): 'k ': 98% (48), 's ': 93% (45), 'o ': 82% (74)
-Step 3610/20003 | Acc: 20.80% | Gate: 0.89 | GC_spars: 50.39% | CF_err: 0.0062 | PK_w: 11.84 | Settle: 11.8535
-  Top Bigrams (min 5): 'k ': 98% (48), 's ': 93% (46), 'o ': 82% (74)
-Step 3620/20003 | Acc: 20.60% | Gate: 0.87 | GC_spars: 48.34% | CF_err: 0.0077 | PK_w: 11.83 | Settle: 12.2637
-  Top Bigrams (min 5): 'k ': 98% (48), 's ': 93% (46), 'o ': 82% (74)
-Step 3630/20003 | Acc: 20.60% | Gate: 0.88 | GC_spars: 49.22% | CF_err: 0.0074 | PK_w: 11.83 | Settle: 11.9978
-  Top Bigrams (min 5): 'k ': 96% (49), 's ': 93% (46), 'o ': 82% (74)
-Step 3640/20003 | Acc: 20.80% | Gate: 0.88 | GC_spars: 48.93% | CF_err: 0.0074 | PK_w: 11.82 | Settle: 12.1892
-  Top Bigrams (min 5): 'k ': 96% (49), 's ': 93% (46), 'o ': 82% (74)
-Step 3650/20003 | Acc: 21.00% | Gate: 0.88 | GC_spars: 49.41% | CF_err: 0.0072 | PK_w: 11.80 | Settle: 12.1258
-  Top Bigrams (min 5): 'k ': 96% (49), 's ': 93% (46), 'o ': 82% (74)
-Step 3660/20003 | Acc: 21.00% | Gate: 0.89 | GC_spars: 48.88% | CF_err: 0.0072 | PK_w: 11.80 | Settle: 11.9150
-  Top Bigrams (min 5): 'k ': 96% (49), 's ': 94% (47), 'o ': 82% (74)
-Step 3670/20003 | Acc: 21.00% | Gate: 0.88 | GC_spars: 48.10% | CF_err: 0.0065 | PK_w: 11.79 | Settle: 11.5688
-  Top Bigrams (min 5): 'k ': 96% (50), 's ': 94% (47), 'o ': 82% (74)
-Step 3680/20003 | Acc: 21.20% | Gate: 0.89 | GC_spars: 49.37% | CF_err: 0.0065 | PK_w: 11.78 | Settle: 12.0388
-  Top Bigrams (min 5): 'k ': 96% (50), 's ': 94% (47), 'o ': 83% (75)
-Step 3690/20003 | Acc: 20.80% | Gate: 0.89 | GC_spars: 49.71% | CF_err: 0.0068 | PK_w: 11.77 | Settle: 11.9182
-  Top Bigrams (min 5): 'k ': 96% (50), 's ': 94% (47), 'o ': 83% (75)
-Step 3700/20003 | Acc: 21.20% | Gate: 0.88 | GC_spars: 49.90% | CF_err: 0.0060 | PK_w: 11.76 | Settle: 11.8814
-  Top Bigrams (min 5): 'k ': 96% (50), 's ': 94% (48), 'o ': 83% (75)
-Step 3710/20003 | Acc: 21.20% | Gate: 0.89 | GC_spars: 49.02% | CF_err: 0.0075 | PK_w: 11.75 | Settle: 11.8940
-  Top Bigrams (min 5): 'k ': 96% (50), 's ': 94% (48), 'o ': 83% (75)
-Step 3720/20003 | Acc: 21.40% | Gate: 0.89 | GC_spars: 47.80% | CF_err: 0.0070 | PK_w: 11.74 | Settle: 11.9144
-  Top Bigrams (min 5): 'k ': 96% (50), 's ': 94% (48), 'o ': 83% (75)
-Step 3730/20003 | Acc: 21.40% | Gate: 0.88 | GC_spars: 47.85% | CF_err: 0.0060 | PK_w: 11.73 | Settle: 12.0574
-  Top Bigrams (min 5): 'k ': 96% (51), 's ': 94% (48), 'o ': 83% (75)
-Step 3740/20003 | Acc: 21.40% | Gate: 0.89 | GC_spars: 48.63% | CF_err: 0.0072 | PK_w: 11.72 | Settle: 12.0071
-  Top Bigrams (min 5): 'k ': 96% (51), 's ': 94% (48), 'o ': 83% (75)
-Step 3750/20003 | Acc: 21.40% | Gate: 0.88 | GC_spars: 48.19% | CF_err: 0.0069 | PK_w: 11.71 | Settle: 12.1412
-  Top Bigrams (min 5): 'k ': 96% (51), 's ': 94% (49), 'o ': 83% (75)
-Step 3760/20003 | Acc: 21.60% | Gate: 0.88 | GC_spars: 48.10% | CF_err: 0.0054 | PK_w: 11.71 | Settle: 12.0364
-  Top Bigrams (min 5): 'k ': 96% (52), 's ': 94% (49), 'o ': 83% (75)
-Step 3770/20003 | Acc: 21.80% | Gate: 0.88 | GC_spars: 47.27% | CF_err: 0.0078 | PK_w: 11.69 | Settle: 12.0110
-  Top Bigrams (min 5): 'k ': 96% (52), 's ': 94% (49), 'o ': 83% (76)
-Step 3780/20003 | Acc: 21.80% | Gate: 0.86 | GC_spars: 49.37% | CF_err: 0.0075 | PK_w: 11.68 | Settle: 12.6729
-  Top Bigrams (min 5): 'k ': 96% (52), 's ': 94% (49), 'o ': 83% (76)
-Step 3790/20003 | Acc: 21.80% | Gate: 0.87 | GC_spars: 50.54% | CF_err: 0.0075 | PK_w: 11.66 | Settle: 12.3893
-  Top Bigrams (min 5): 'k ': 96% (52), 's ': 94% (49), 'o ': 83% (76)
-Step 3800/20003 | Acc: 21.60% | Gate: 0.88 | GC_spars: 51.37% | CF_err: 0.0074 | PK_w: 11.65 | Settle: 12.0675
-  Top Bigrams (min 5): 'k ': 96% (52), 's ': 94% (49), 'o ': 83% (76)
-Step 3810/20003 | Acc: 21.60% | Gate: 0.89 | GC_spars: 49.71% | CF_err: 0.0064 | PK_w: 11.65 | Settle: 12.1832
-  Top Bigrams (min 5): 'k ': 96% (52), 's ': 94% (49), 'o ': 83% (76)
+  [!] ALERT: Representation (99.0%) >> Readout (21.4%). Readout is the bottleneck.
+  Top Bigrams (min 5): 'o ': 100% (11), 't ': 100% (20), 's ': 100% (5)
+Step 510/20003 | Acc: 21.60% | Gate: 1.00 | GC_spars: 9.33% | CF_err: 0.1957 | PK_w: 29.31 | Settle: 10.0000
+  Top Bigrams (min 5): 'o ': 100% (11), 't ': 100% (21), 's ': 100% (5)
+Step 520/20003 | Acc: 22.00% | Gate: 1.00 | GC_spars: 10.21% | CF_err: 0.1715 | PK_w: 29.51 | Settle: 9.9884
+  Top Bigrams (min 5): 'o ': 100% (12), 't ': 100% (21), 's ': 100% (5)
+Step 530/20003 | Acc: 22.00% | Gate: 1.00 | GC_spars: 9.67% | CF_err: 0.2058 | PK_w: 29.73 | Settle: 9.9730
+  Top Bigrams (min 5): 'o ': 100% (13), 't ': 100% (21), 's ': 100% (5)
+Step 540/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 10.60% | CF_err: 0.1564 | PK_w: 29.93 | Settle: 9.9734
+  Top Bigrams (min 5): 'o ': 100% (13), 't ': 100% (21), 's ': 100% (5)
+Step 550/20003 | Acc: 22.00% | Gate: 1.00 | GC_spars: 12.16% | CF_err: 0.1275 | PK_w: 30.12 | Settle: 9.9604
+  Top Bigrams (min 5): 'o ': 100% (13), 't ': 100% (21), 's ': 100% (5)
+Step 560/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 11.67% | CF_err: 0.1492 | PK_w: 30.32 | Settle: 9.9599
+  Top Bigrams (min 5): 'o ': 100% (13), 't ': 100% (21), 's ': 100% (5)
+Step 570/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 10.64% | CF_err: 0.1580 | PK_w: 30.51 | Settle: 9.9547
+  Top Bigrams (min 5): 'o ': 100% (13), 't ': 100% (22), 's ': 100% (5)
+Step 580/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 10.40% | CF_err: 0.1886 | PK_w: 30.70 | Settle: 9.9672
+  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (22), 's ': 100% (5)
+Step 590/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 9.96% | CF_err: 0.2073 | PK_w: 30.91 | Settle: 9.9511
+  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (24), 's ': 100% (5)
+Step 600/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 11.18% | CF_err: 0.1525 | PK_w: 31.10 | Settle: 9.9517
+  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (24), 's ': 100% (5)
+Step 610/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 9.72% | CF_err: 0.1998 | PK_w: 31.29 | Settle: 9.9584
+  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (25), 's ': 100% (5)
+Step 620/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 6.74% | CF_err: 0.3006 | PK_w: 31.48 | Settle: 9.9642
+  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (25), 's ': 100% (5)
+Step 630/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 10.35% | CF_err: 0.1421 | PK_w: 31.67 | Settle: 9.9700
+  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (26), 's ': 100% (5)
+Step 640/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 9.77% | CF_err: 0.1791 | PK_w: 31.86 | Settle: 9.9536
+  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (26), 's ': 100% (5)
+Step 650/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 10.94% | CF_err: 0.1273 | PK_w: 32.03 | Settle: 9.9764
+  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (26), 's ': 100% (5)
+Step 660/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 9.72% | CF_err: 0.2052 | PK_w: 32.22 | Settle: 9.9794
+  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (27), 's ': 100% (5)
+Step 670/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 10.89% | CF_err: 0.1374 | PK_w: 32.38 | Settle: 9.9746
+  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (27), 's ': 100% (6)
+Step 680/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 10.40% | CF_err: 0.1466 | PK_w: 32.54 | Settle: 9.9637
+  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (27), 's ': 100% (6)
+Step 690/20003 | Acc: 22.80% | Gate: 1.00 | GC_spars: 11.91% | CF_err: 0.1281 | PK_w: 32.72 | Settle: 9.9654
+  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (28), 's ': 100% (7)
+Step 700/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 12.45% | CF_err: 0.0962 | PK_w: 32.88 | Settle: 9.9532
+  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (28), 's ': 100% (7)
+Step 710/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 8.94% | CF_err: 0.1732 | PK_w: 33.07 | Settle: 9.9700
+  Top Bigrams (min 5): 'o ': 100% (15), 't ': 100% (28), 's ': 100% (7)
+Step 720/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 9.96% | CF_err: 0.1783 | PK_w: 33.24 | Settle: 9.9453
+  Top Bigrams (min 5): 'o ': 100% (15), 't ': 100% (28), 's ': 100% (7)
+Step 730/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 9.52% | CF_err: 0.1677 | PK_w: 33.40 | Settle: 9.9778
+  Top Bigrams (min 5): 'o ': 100% (15), 't ': 100% (28), 's ': 100% (7)
+Step 740/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 8.64% | CF_err: 0.2027 | PK_w: 33.56 | Settle: 9.9541
+  Top Bigrams (min 5): 'o ': 100% (16), 't ': 100% (28), 's ': 100% (7)
+Step 750/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 9.28% | CF_err: 0.1396 | PK_w: 33.73 | Settle: 9.9613
+  Top Bigrams (min 5): 'o ': 100% (16), 't ': 100% (29), 's ': 100% (8)
+Step 760/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 9.77% | CF_err: 0.1584 | PK_w: 33.88 | Settle: 9.9726
+  Top Bigrams (min 5): 'o ': 100% (17), 't ': 100% (29), 's ': 100% (8)
+Step 770/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 10.40% | CF_err: 0.1375 | PK_w: 34.05 | Settle: 9.9642
+  Top Bigrams (min 5): 'o ': 100% (17), 't ': 100% (30), 's ': 100% (9)
+Step 780/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 10.01% | CF_err: 0.1292 | PK_w: 34.22 | Settle: 9.9591
+  Top Bigrams (min 5): 'o ': 100% (17), 't ': 100% (31), 's ': 100% (9)
+Step 790/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 7.57% | CF_err: 0.2013 | PK_w: 34.39 | Settle: 9.9680
+  Top Bigrams (min 5): 'o ': 100% (17), 't ': 100% (31), 's ': 100% (10)
+Step 800/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 12.50% | CF_err: 0.0917 | PK_w: 34.52 | Settle: 9.9666
+  Top Bigrams (min 5): 'o ': 100% (17), 't ': 100% (32), 's ': 100% (10)
+Step 810/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 12.60% | CF_err: 0.0842 | PK_w: 34.66 | Settle: 9.9647
+  Top Bigrams (min 5): 'o ': 100% (17), 't ': 100% (32), 's ': 100% (10)
+Step 820/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 10.60% | CF_err: 0.1296 | PK_w: 34.81 | Settle: 9.9817
+  Top Bigrams (min 5): 'o ': 100% (18), 't ': 100% (32), 's ': 100% (10)
+Step 830/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 10.50% | CF_err: 0.1430 | PK_w: 34.97 | Settle: 9.9647
+  Top Bigrams (min 5): 'o ': 100% (18), 't ': 100% (32), 's ': 100% (10)
+Step 840/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 9.28% | CF_err: 0.1428 | PK_w: 35.11 | Settle: 9.9589
+  Top Bigrams (min 5): 'o ': 100% (18), 't ': 100% (32), 's ': 100% (10)
+Step 850/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 10.69% | CF_err: 0.0968 | PK_w: 35.26 | Settle: 9.9484
+  Top Bigrams (min 5): 'o ': 100% (19), 't ': 100% (32), 's ': 100% (10)
+Step 860/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 12.74% | CF_err: 0.0819 | PK_w: 35.40 | Settle: 9.9773
+  Top Bigrams (min 5): 'o ': 100% (19), 't ': 100% (32), 's ': 100% (10)
+Step 870/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 8.35% | CF_err: 0.2350 | PK_w: 35.56 | Settle: 9.9664
+  Top Bigrams (min 5): 'o ': 100% (19), 't ': 100% (33), 's ': 100% (11)
+Step 880/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 9.33% | CF_err: 0.1686 | PK_w: 35.70 | Settle: 9.9627
+  Top Bigrams (min 5): 'o ': 100% (19), 't ': 100% (34), 's ': 100% (12)
+Step 890/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 11.33% | CF_err: 0.0959 | PK_w: 35.84 | Settle: 9.9621
+  Top Bigrams (min 5): 'o ': 100% (19), 't ': 100% (34), 's ': 100% (12)
+Step 900/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 9.33% | CF_err: 0.1370 | PK_w: 35.97 | Settle: 9.9612
+  Top Bigrams (min 5): 'o ': 100% (19), 't ': 100% (34), 's ': 100% (12)
+Step 910/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 7.28% | CF_err: 0.1867 | PK_w: 36.10 | Settle: 9.9616
+  Top Bigrams (min 5): 'o ': 100% (19), 't ': 100% (36), 's ': 100% (12)
+Step 920/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 9.86% | CF_err: 0.1321 | PK_w: 36.22 | Settle: 9.9598
+  Top Bigrams (min 5): 'o ': 100% (20), 't ': 100% (36), 's ': 100% (12)
+Step 930/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 9.18% | CF_err: 0.1914 | PK_w: 36.38 | Settle: 9.9725
+  Top Bigrams (min 5): 'o ': 100% (20), 't ': 100% (36), 's ': 100% (12)
+Step 940/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 9.52% | CF_err: 0.1635 | PK_w: 36.52 | Settle: 9.9653
+  Top Bigrams (min 5): 'o ': 100% (21), 't ': 100% (37), 's ': 100% (12)
+Step 950/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 8.50% | CF_err: 0.1749 | PK_w: 36.66 | Settle: 9.9709
+  Top Bigrams (min 5): 'o ': 100% (21), 't ': 100% (37), 's ': 100% (12)
+Step 960/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 11.38% | CF_err: 0.0946 | PK_w: 36.81 | Settle: 9.9689
+  Top Bigrams (min 5): 'o ': 100% (22), 't ': 100% (37), 's ': 100% (12)
+Step 970/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 9.96% | CF_err: 0.1313 | PK_w: 36.94 | Settle: 9.9586
+  Top Bigrams (min 5): 'o ': 100% (22), 't ': 100% (37), 's ': 100% (12)
+Step 980/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 10.94% | CF_err: 0.0949 | PK_w: 37.08 | Settle: 9.9462
+  Top Bigrams (min 5): 'o ': 100% (22), 't ': 100% (38), 's ': 100% (12)
