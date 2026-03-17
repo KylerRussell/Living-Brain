@@ -2298,6 +2298,19 @@ class PredictiveCodingEngine:
             burst[l56_mask] = torch.sigmoid(8.0 * (coincidence - 0.15))
             return burst
 
+    def get_bg_gate_confidence(self, threshold=0.3, sharpness=20.0):
+        """
+        Basal ganglia gate with scale-invariant convergence metric.
+
+        settle_diff is an L2 norm across all N nodes. Dividing by sqrt(N)
+        gives a per-node RMS diff that is comparable across different
+        network sizes. Typical values: 0.15-0.25 for a settled state.
+        """
+        normalized_diff = self.last_settle_diff / (self.num_nodes ** 0.5)
+        return torch.sigmoid(
+            torch.tensor(sharpness * (threshold - normalized_diff))
+        ).item()
+
 # --- BPTT Architecture Additions ---
 
 import torch.nn as nn

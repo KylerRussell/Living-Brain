@@ -103,31 +103,28 @@ def boost_output_connectivity(graph, edge_index, edge_weight, num_nodes):
     return edge_index, edge_weight
 
 
-def add_thalamic_relay(graph, edge_index, edge_weight, biases, taus, num_nodes,
-                       n_thalamic=64, device='cpu'):
+def add_thalamocortical_loop(graph, edge_index, edge_weight, biases, taus, num_nodes,
+                              n_thalamic=128, device='cpu'):
     """
-    Add a thalamic relay bottleneck between association L5/6 and motor nodes.
+    Thalamocortical stabilization loop (NOT an output pathway).
 
-    The thalamus in the brain acts as a low-rank hub that:
-    - Lacks local excitatory recurrence (prevents runaway)
-    - Compresses high-dimensional cortical manifolds into readable format
-    - Has fast time constants (~5ms relay cells)
-    - Projects densely to motor cortex
+    L5/6 → Thalamic → L4 (same modules) → re-excites L5/6.
+    Creates reverberating attractor dynamics that temporally smooth
+    the L5/6 representation, solving the non-stationarity problem.
 
-    This forces the network to route information through a narrow bottleneck,
-    making the motor readout far more effective.
-
-    Args:
-        n_thalamic: Number of thalamic relay neurons (default 64)
-    Returns:
-        Updated edge_index, edge_weight, biases, taus, new_num_nodes
+    Thalamic relay neurons:
+    - Fast tau (5ms) for rapid relay
+    - No recurrent connections (biological constraint)
+    - Tonically inhibited (basal ganglia default state)
+    - Reciprocal projections BACK to L5/6 (not to motor)
     """
     thal_start = num_nodes
     new_num_nodes = num_nodes + n_thalamic
 
-    # Extend biases and taus
-    thal_biases = torch.zeros(n_thalamic, dtype=torch.float32)
-    thal_taus = torch.ones(n_thalamic, dtype=torch.float32) * 5.0  # Fast relay
+    # Extend biases: TONIC INHIBITION (basal ganglia default state)
+    # Relay neurons are silent by default, only fire when gate opens
+    thal_biases = torch.ones(n_thalamic, dtype=torch.float32) * -0.5  # Reduced tonic inhibition
+    thal_taus = torch.ones(n_thalamic, dtype=torch.float32) * 5.0     # Fast relay
 
     biases = torch.cat([biases, thal_biases])
     taus = torch.cat([taus, thal_taus])
@@ -136,13 +133,17 @@ def add_thalamic_relay(graph, edge_index, edge_weight, biases, taus, num_nodes,
     new_cols = []
     new_weights = []
 
-    # 1. L5/6 → Thalamic (sparse, ~5% connectivity per thalamic neuron)
+    # Gather all L5/6 and L4 indices
     all_l56 = []
+    all_l4 = []
     for mod in graph.modules:
         all_l56.extend(mod['l56_indices'].tolist())
+        all_l4.extend(mod['l4_indices'].tolist())
     all_l56 = np.array(all_l56, dtype=np.int64)
+    all_l4 = np.array(all_l4, dtype=np.int64)
 
-    n_proj_per_thal = max(1, len(all_l56) // 20)  # ~5% of all L5/6
+    # 1. L5/6 → Thalamic (sparse, ~5% connectivity)
+    n_proj_per_thal = max(1, len(all_l56) // 20)
     for t in range(n_thalamic):
         sources = np.random.choice(all_l56, n_proj_per_thal, replace=False)
         thal_node = thal_start + t
@@ -151,30 +152,31 @@ def add_thalamic_relay(graph, edge_index, edge_weight, biases, taus, num_nodes,
             new_cols.append(thal_node)
             new_weights.append(np.random.normal(0.1, 0.05))
 
-    # 2. Thalamic → Motor (dense, full connectivity)
+    # 2. Thalamic → L4 (reciprocal feedback, sparse)
+    #    This is the cortico-thalamo-cortical loop that stabilizes representations.
+    n_proj_per_thal_back = max(1, len(all_l4) // 20)
     for t in range(n_thalamic):
         thal_node = thal_start + t
-        for m in range(256):
-            motor_node = 256 + m
+        targets = np.random.choice(all_l4, n_proj_per_thal_back, replace=False)
+        for tgt in targets:
             new_rows.append(thal_node)
-            new_cols.append(motor_node)
+            new_cols.append(tgt)
             new_weights.append(np.random.normal(0.05, 0.02))
 
-    # NO thalamic ↔ thalamic recurrent connections (biological constraint)
+    # NO thalamic → motor projections (that's the cerebellum's job now)
+    # NO thalamic ↔ thalamic recurrence (biological constraint)
 
     new_rows = np.array(new_rows, dtype=np.int64)
     new_cols = np.array(new_cols, dtype=np.int64)
     new_weights = np.array(new_weights, dtype=np.float32)
 
-    # Merge
+    # Merge with existing edges
     old_indices = edge_index.numpy()
     old_weights = edge_weight.numpy()
-
     merged_rows = np.concatenate([old_indices[0], new_rows])
     merged_cols = np.concatenate([old_indices[1], new_cols])
     merged_weights = np.concatenate([old_weights, new_weights])
 
-    # Deduplicate
     pairs = np.stack([merged_rows, merged_cols], axis=1)
     _, unique_idx = np.unique(pairs, axis=0, return_index=True)
     merged_rows = merged_rows[unique_idx]
@@ -184,13 +186,177 @@ def add_thalamic_relay(graph, edge_index, edge_weight, biases, taus, num_nodes,
     edge_index = torch.tensor(np.stack([merged_rows, merged_cols]), dtype=torch.long)
     edge_weight = torch.tensor(merged_weights, dtype=torch.float32)
 
-    n_l56_to_thal = n_thalamic * n_proj_per_thal
-    n_thal_to_motor = n_thalamic * 256
-    print(f"Thalamic relay: {n_thalamic} neurons, "
-          f"{n_l56_to_thal} L5/6→thal edges, "
-          f"{n_thal_to_motor} thal→motor edges")
-
+    print(f"Thalamocortical loop: {n_thalamic} relay neurons (stabilization only, no motor output)")
     return edge_index, edge_weight, biases, taus, new_num_nodes
+
+
+def add_cerebellar_module(graph, num_nodes, n_granule=2048, sparsity=0.05, device='cpu'):
+    """
+    Cerebellar output module: Granule Cell expansion + Purkinje readout.
+
+    Architecture:
+      L5/6 ──[fixed random sparse]──→ Granule Cells (2048)
+      Granule Cells ──[plastic, climbing fiber LTD]──→ Motor/Purkinje (256)
+
+    The granule cell expansion acts as a random kernel that makes the
+    L5/6 representation linearly separable (Cover's theorem). The Purkinje
+    readout is a single plastic layer trained by the inferior olive error.
+
+    Key biological constraints:
+    - Mossy fiber → Granule projections are FIXED (non-plastic)
+    - Granule cells have NO recurrent connections
+    - Each granule cell receives from ~4 mossy fibers (extreme convergence)
+    - Granule → Purkinje weights are the ONLY plastic pathway
+    - Climbing fiber (inferior olive) carries target - output error
+
+    Args:
+        n_granule: Number of granule cells (2048 recommended, ~8x output dim)
+        sparsity: Fraction of L5/6 nodes each granule cell samples from
+    Returns:
+        cerebellum: dict with all cerebellar state
+    """
+    # Gather all L5/6 indices
+    all_l56 = []
+    for mod in graph.modules:
+        all_l56.extend(mod['l56_indices'].tolist())
+    all_l56 = np.array(all_l56, dtype=np.int64)
+    n_l56 = len(all_l56)
+
+    # --- Mossy Fiber Projection Matrix (FIXED, non-plastic) ---
+    # Each granule cell samples from ~4-5% of L5/6 nodes (biological: ~4 mossy fibers)
+    # Stored as a dense [n_granule, n_l56] matrix for simplicity.
+    n_inputs_per_granule = max(4, int(n_l56 * sparsity))
+
+    # Build sparse binary connectivity mask
+    mossy_mask = torch.zeros(n_granule, n_l56, dtype=torch.bool)
+    for g in range(n_granule):
+        selected = np.random.choice(n_l56, n_inputs_per_granule, replace=False)
+        mossy_mask[g, selected] = True
+
+    # Random weights, masked and normalized
+    mossy_weights = torch.randn(n_granule, n_l56) * mossy_mask.float()
+    # Normalize each granule cell's input weights to unit variance
+    row_norms = mossy_weights.norm(dim=1, keepdim=True).clamp(min=1e-6)
+    mossy_weights = mossy_weights / row_norms
+
+    # --- Parallel Fiber → Purkinje Weights (PLASTIC via climbing fiber LTD) ---
+    # [256, n_granule] — each Purkinje cell (motor node) reads all granule cells
+    purkinje_weights = torch.randn(256, n_granule) / np.sqrt(n_granule)
+
+    # --- Granule Cell State ---
+    granule_state = torch.zeros(n_granule)
+
+    # --- Basal Ganglia Gate State ---
+    bg_gate_open = False
+    bg_confidence_threshold = 0.3   # settle_diff/sqrt(N) must be below this to open gate
+    bg_gate_sharpness = 20.0        # sigmoid sharpness for soft gating
+
+    cerebellum = {
+        'n_granule': n_granule,
+        'l56_indices': torch.tensor(all_l56, dtype=torch.long),
+        'mossy_weights': mossy_weights.to(device),     # [n_granule, n_l56] FIXED
+        'purkinje_weights': purkinje_weights.to(device), # [256, n_granule] PLASTIC
+        'granule_state': granule_state.to(device),       # [n_granule]
+        'bg_confidence_threshold': bg_confidence_threshold,
+        'bg_gate_sharpness': bg_gate_sharpness,
+        'climbing_fiber_lr': 0.01,                        # Climbing fiber learning rate
+        'purkinje_eligibility': torch.zeros(256, n_granule, device=device),  # Eligibility trace
+        'tau_eligibility': 5.0,                           # Eligibility trace time constant
+    }
+
+    print(f"Cerebellum: {n_granule} granule cells, {n_inputs_per_granule} mossy fibers each, "
+          f"256 Purkinje outputs")
+    return cerebellum
+
+
+def cerebellar_forward(engine, cerebellum):
+    """
+    Cerebellar forward pass: compute output logits from L5/6 state.
+
+    1. Basal ganglia gate: check if settle has converged
+    2. Extract L5/6 activations
+    3. Mossy fiber → Granule cell activation (fixed weights, ReLU)
+    4. Parallel fiber → Purkinje cell activation (plastic weights)
+    5. Return raw logits (256-dim)
+
+    Returns:
+        logits: [256] tensor of output predictions
+        granule_acts: [n_granule] tensor (needed for learning rule)
+        gate_value: scalar (0-1) indicating gate openness
+    """
+    with torch.no_grad():
+        # 1. Basal ganglia gate based on settle convergence
+        gate_value = engine.get_bg_gate_confidence(
+            threshold=cerebellum['bg_confidence_threshold'],
+            sharpness=cerebellum['bg_gate_sharpness']
+        )
+
+        # 2. Extract L5/6 activations
+        l56_idx = cerebellum['l56_indices']
+        l56_acts = torch.tanh(engine.state[l56_idx])  # [n_l56]
+
+        # 3. Mossy fiber → Granule cells (fixed projection + ReLU)
+        granule_pre = cerebellum['mossy_weights'] @ l56_acts  # [n_granule]
+        granule_acts = torch.relu(granule_pre)  # Sparse ReLU activation
+
+        # Apply gate: scale granule activity by basal ganglia confidence
+        granule_acts = granule_acts * gate_value
+
+        # Store for diagnostics
+        cerebellum['granule_state'] = granule_acts
+
+        # 4. Parallel fiber → Purkinje (plastic weights, linear readout)
+        logits = cerebellum['purkinje_weights'] @ granule_acts  # [256]
+
+        return logits, granule_acts, gate_value
+
+
+def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value):
+    """
+    Climbing fiber learning rule (inferior olive → Purkinje LTD/LTP).
+
+    The inferior olive computes: error = target - purkinje_output
+    The climbing fiber delivers this error to each Purkinje cell.
+    Parallel fiber → Purkinje synapses undergo:
+      - LTD when climbing fiber fires AND parallel fiber is active
+        (wrong prediction while granule cell was active → weaken)
+      - LTP when climbing fiber is silent AND parallel fiber is active
+        (correct prediction while granule cell was active → strengthen)
+
+    Learning rule:
+      Δw_ij = -η * error_j * granule_i * gate
+
+    The eligibility trace adds a temporal buffer so that the error signal
+    from the next timestep can update weights based on the current
+    granule cell activity.
+    """
+    with torch.no_grad():
+        lr = cerebellum['climbing_fiber_lr']
+        tau_e = cerebellum['tau_eligibility']
+
+        # Target one-hot
+        target = torch.zeros(256, device=logits.device)
+        target[target_byte] = 1.0
+
+        # Inferior olive error signal (climbing fiber)
+        purkinje_output = torch.softmax(logits, dim=0)
+        climbing_fiber_error = target - purkinje_output  # [256]
+
+        # Update eligibility trace (low-pass filter of granule activity)
+        cerebellum['purkinje_eligibility'] *= (1.0 - 1.0 / tau_e)
+        cerebellum['purkinje_eligibility'] += (1.0 / tau_e) * granule_acts.unsqueeze(0)
+
+        # Climbing fiber modulated update:
+        # Δw_ij = η * error_i * eligibility_ij * gate
+        delta_w = lr * climbing_fiber_error.unsqueeze(1) * cerebellum['purkinje_eligibility'] * gate_value
+
+        # Apply update
+        cerebellum['purkinje_weights'] += delta_w
+
+        # Gentle weight decay
+        cerebellum['purkinje_weights'] *= 0.9999
+
+        return climbing_fiber_error.abs().mean().item()
 
 
 def create_dfa_matrices(engine, n_output=256, device='cpu'):
@@ -330,31 +496,12 @@ def main():
         graph, edge_index, edge_weight, num_nodes
     )
 
-    # =====================================================================
-    # ARCHITECTURAL ENHANCEMENT 2: Thalamic relay bottleneck
-    # =====================================================================
+    # Thalamocortical stabilization loop (no motor output)
     N_THALAMIC = 128
-    edge_index, edge_weight, biases, taus, num_nodes = add_thalamic_relay(
+    edge_index, edge_weight, biases, taus, num_nodes = add_thalamocortical_loop(
         graph, edge_index, edge_weight, biases, taus, num_nodes,
         n_thalamic=N_THALAMIC, device=device
     )
-
-    mod_starts = torch.tensor([m["start"] for m in graph.modules], dtype=torch.long)
-    mod_ends = torch.tensor([m["end"] for m in graph.modules], dtype=torch.long)
-    mod_levels = torch.tensor([m["level"] for m in graph.modules], dtype=torch.long)
-
-    # --- Learnable FRNL (Firing Rate Nonlinearity) for output untangling ---
-    # Threshold-power-law: r = k * [u - theta]^kappa_+
-    # Sparsifies output manifold, filtering sub-threshold noise
-    frnl_theta = torch.zeros(256, device=device)      # Learnable threshold per output neuron
-    frnl_kappa = 1.2                                    # Softened power-law exponent
-    frnl_k = 1.0                                        # Gain factor
-    frnl_lr = 0.001                                     # Learning rate for threshold adaptation
-
-    # --- Lateral Inhibitory Sharpening (L4→L5 translaminar circuit) ---
-    # Simulates FS interneuron-mediated suppression of non-preferred outputs
-    lateral_inh_strength = 0.5                          # Strength of mean-subtraction inhibition
-    lateral_inh_gain = 2.0                              # Post-inhibition gain boost
 
     # Pad cell-type arrays for thalamic relay neurons (excitatory, non-interneuron)
     thal_pad = np.zeros(N_THALAMIC, dtype=bool)
@@ -367,6 +514,10 @@ def main():
         is_lts = np.concatenate([is_lts_base, thal_pad])
     else:
         is_lts = None
+
+    mod_starts = torch.tensor([m["start"] for m in graph.modules], dtype=torch.long)
+    mod_ends = torch.tensor([m["end"] for m in graph.modules], dtype=torch.long)
+    mod_levels = torch.tensor([m["level"] for m in graph.modules], dtype=torch.long)
 
     print("Initializing PredictiveCodingEngine...")
     engine = PredictiveCodingEngine(
@@ -390,23 +541,13 @@ def main():
         temporal_alpha=0.05,
     )
 
+    # Cerebellar output module (replaces FRNL + lateral inhibition + terminal Adam optimizer)
+    cerebellum = add_cerebellar_module(graph, num_nodes, n_granule=2048, device=device)
+
     # =====================================================================
     # ARCHITECTURAL ENHANCEMENT 3: Direct Feedback Alignment matrices
     # =====================================================================
     dfa_matrices = create_dfa_matrices(engine, n_output=256, device=device)
-
-    # =====================================================================
-    # HYBRID OPTIMIZATION: Adam for terminal (thalamic -> motor) layer
-    # =====================================================================
-    # Find indices of thalamic -> motor edges in W_surf
-    dst = engine.indices[1]
-    src = engine.indices[0]
-    thal_start = num_nodes - N_THALAMIC
-    terminal_mask = (src >= thal_start) & (dst >= 256) & (dst < 512)
-    # We'll use a local optimizer on just these weights
-    terminal_edge_vals = engine.w_surface[terminal_mask].detach().clone()
-    terminal_edge_vals.requires_grad = True
-    terminal_optimizer = torch.optim.Adam([terminal_edge_vals], lr=0.001)
 
     # Curriculum setup
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -435,10 +576,8 @@ def main():
     sigma_noise_free = 0.01
     sigma_noise_nudge = 0.01
     LEAK_FACTOR = 0.95
-    ALPHA_DFA = 0.15         # DFA feedback strength (reduced: 0.5 caused error saturation)
+    ALPHA_DFA = 0.15         # DFA feedback strength
     BURST_APICAL_GAIN = 1.5  # Apical injection strength for burst coincidence
-    FRNL_ADAPT_RATE = 0.001  # Rate at which FRNL thresholds adapt to maintain target sparsity
-    TARGET_SPARSITY = 0.1    # Target fraction of active output neurons (90% should be zero)
 
     for phase_info in phases:
         phase_name = phase_info["name"]
@@ -448,9 +587,8 @@ def main():
         print(f"  Steps: Free={FREE_STEPS}, Nudge={NUDGE_STEPS}")
         print(f"  Learning rate: {lr}, Nudge strength: {nudge_strength}")
         print(f"  DFA alpha: {ALPHA_DFA}, Burst apical gain: {BURST_APICAL_GAIN}")
-        print(f"  Thalamic relay: {N_THALAMIC} neurons")
-        print(f"  FRNL: kappa={frnl_kappa}, adaptive_sparsity=True")
-        print(f"  Terminal Optimizer: Adam(lr=0.001)")
+        print(f"  Thalamocortical loop: {N_THALAMIC} neurons")
+        print(f"  Cerebellum: {cerebellum['n_granule']} granule cells")
 
         if not os.path.exists(file_path):
             print(f"File not found: {file_path}")
@@ -495,37 +633,20 @@ def main():
             free_basal = engine.state_basal.clone()
             free_apical = engine.state_apical.clone()
 
-            # Read output prediction with FRNL
-            raw_motor = free_state[256:512]
-
-            # FRNL: r = k * [u - theta]^kappa_+ (manifold untangling)
-            above_thresh = torch.relu(raw_motor - frnl_theta)
-            frnl_output = frnl_k * above_thresh.pow(frnl_kappa)
-
-            # Population Vector Readout (instead of WTA/Lateral Inh)
-            # Softmax allows the network to weight distributed information properly
-            logits = 5.0 * frnl_output  # Scaling for softmax temperature
-            probs = torch.softmax(logits, dim=0)
-            pred_byte = torch.argmax(probs).item()
+            # === CEREBELLAR READOUT (replaces FRNL + lateral inhibition) ===
+            logits, granule_acts, gate_value = cerebellar_forward(engine, cerebellum)
+            pred_byte = torch.argmax(logits).item()
             is_correct = pred_byte == next_byte
             accuracies.append(1.0 if is_correct else 0.0)
 
-            # Adapt FRNL thresholds toward target sparsity (homeostatic)
-            with torch.no_grad():
-                fraction_active = (above_thresh > 0).float().mean().item()
-                # Adaptive TARGET_SPARSITY based on accuracy
-                # If accurately predicting, tighten (sparsify). If failing, loosen (explore).
-                window_acc = np.mean(accuracies[-50:]) if len(accuracies) > 50 else 0.05
-                current_target = 0.30 * (1 - window_acc) + 0.05 * window_acc
-                current_target = np.clip(current_target, 0.05, 0.30)
-                
-                # If too many active: raise threshold. Too few: lower it.
-                frnl_theta += FRNL_ADAPT_RATE * (fraction_active - current_target)
-
+            # Update bigram stats
             key = (current_byte, next_byte)
             bigram_total[key] = bigram_total.get(key, 0) + 1
             if is_correct:
                 bigram_correct[key] = bigram_correct.get(key, 0) + 1
+
+            # === CEREBELLAR LEARNING (replaces terminal Adam optimizer) ===
+            cf_error = cerebellar_learn(cerebellum, logits, granule_acts, next_byte, gate_value)
 
             # Prediction errors
             spatial_err = engine.compute_prediction_errors()
@@ -535,9 +656,8 @@ def main():
             target_one_hot = torch.zeros(256, device=device)
             target_one_hot[next_byte] = 1.0
 
-            # Compute output error for DFA
-            output_activations = torch.tanh(free_state[256:512])
-            output_error = target_one_hot - output_activations  # [256]
+            # Compute output error for DFA (injecting cerebellar precision error)
+            output_error = target_one_hot - torch.softmax(logits, dim=0)
 
             # Restore to free state before nudge
             engine.state = free_state.clone()
@@ -547,7 +667,7 @@ def main():
             # Build nudge vector with DFA feedback
             nudge_vec = torch.zeros(num_nodes, device=device)
             nudge_vec[current_byte] = 10.0
-            nudge_vec[256:512] = nudge_strength * target_one_hot
+            # NOTE: No direct motor node clamping — the cerebellum handles output
 
             # ENHANCEMENT 3a: DFA — inject output error into all hidden levels
             for level, (B, level_mask) in dfa_matrices.items():
@@ -573,34 +693,12 @@ def main():
             avg_burst = burst[engine.is_l56].mean().item()
             burst_strengths.append(avg_burst)
 
-            # Hybrid Update:
-            # 1. Biological EqProp/DFA for all deep layers
+            # Biological EqProp/DFA for all deep layers
             engine.update_weights_phase2(
                 free_state,
                 nudge_pos,
                 learning_rate=lr,
             )
-
-            # 2. Local Adam for terminal thalamic -> motor layers
-            # This mimics cerebellar/climbing-fiber precision tuning
-            with torch.set_grad_enabled(True):
-                # Gradient is essentially prediction error projected back to thalamic nodes
-                # target_one_hot is [256], nudge_pos[thal_start:thal_start+128] is [128]
-                thal_act = nudge_pos[thal_start : thal_start + N_THALAMIC].detach()
-                motor_err = target_one_hot - torch.tanh(nudge_pos[256:512]) # [256]
-                
-                terminal_optimizer.zero_grad()
-                # Construct local loss for the terminal weights
-                # Loss = (Target - Motor)^2
-                # We apply the weights manually to get the grad
-                curr_w = terminal_edge_vals.view(N_THALAMIC, 256)
-                pred = thal_act @ curr_w
-                loss = F.mse_loss(pred, target_one_hot)
-                loss.backward()
-                terminal_optimizer.step()
-                
-                # Push updated values back to engine
-                engine.w_surface[terminal_mask] = terminal_edge_vals.detach()
 
             # Logging and periodic tasks
             if (i + 1) % 10 == 0:
@@ -620,12 +718,16 @@ def main():
                 bias_norm = engine.biases.norm().item()
                 inh_w_norm = engine.w_surface[engine.is_inhibitory[engine.indices[0]]].norm().item()
 
+                # Granule cell sparsity (should be ~5-10% active)
+                gc_sparsity = (granule_acts > 0).float().mean().item()
+                # Purkinje weight norm
+                pk_w_norm = cerebellum['purkinje_weights'].norm().item()
+
                 print(
-                    f"Step {i + 1}/{seq_len} | Acc: {avg_acc:.2%} | Err: {avg_err:.4f} | "
-                    f"Bst: {avg_bst:.3f} | "
-                    f"W_surf: {w_surf_norm:.4f} | Wmx: {w_max:.3f} | "
-                    f"Fr: {mean_firing:.3f} | B: {bias_norm:.2f} | Inh: {inh_w_norm:.4f} | "
-                    f"{tps:.0f} tok/s"
+                    f"Step {i+1}/{seq_len} | Acc: {avg_acc:.2%} | "
+                    f"Gate: {gate_value:.2f} | GC_spars: {gc_sparsity:.2%} | "
+                    f"CF_err: {cf_error:.4f} | PK_w: {pk_w_norm:.2f} | "
+                    f"Settle: {engine.last_settle_diff:.4f}"
                 )
 
                 # Diagnostic Linear Probe every 500 steps
