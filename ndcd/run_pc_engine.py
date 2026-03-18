@@ -321,7 +321,7 @@ def add_cerebellar_module(graph, num_nodes, n_granule=2048, sparsity=0.05, devic
         'bg_confidence_threshold': bg_confidence_threshold,
         'bg_gate_sharpness': bg_gate_sharpness,
         'gc_top_k': max(1, int(n_granule * 0.10)),       # 10% sparsity via Golgi cell competitive inhibition
-        'climbing_fiber_lr': 0.005,                       # Reduced 10x: prevents single-step row saturation
+        'climbing_fiber_lr': 0.01,                        # 2x increase, calibrated: lr/(1-decay)=100 → logit_σ≈1.5
         'purkinje_eligibility': torch.zeros(256, n_granule, device=device),
         'tau_eligibility': 5.0,
         'target_gc_norm': np.sqrt(n_granule * 0.1),      # Target L2 norm when ~10% active
@@ -455,9 +455,14 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value):
         cerebellum['purkinje_weights'] += delta_w
 
         # Per-row weight decay (constitutive parallel fiber LTD)
-        cerebellum['purkinje_weights'] *= 0.9995
+        # Calibrated using empirical logit_σ from previous run:
+        #   Previous: lr=0.005, decay=0.9995 → ratio=10 → logit_σ≈0.15
+        #   Now:      lr=0.01,  decay=0.9999 → ratio=100 → logit_σ≈1.5
+        # This targets sigmoid operating point at [0.18, 0.82] — confident
+        # but not saturated. 10x speedup over previous equilibrium.
+        cerebellum['purkinje_weights'] *= 0.9999
 
-        # Hard clip to prevent individual weight explosion
+        # Hard clip — safety net (row norms bounded by actual learning dynamics)
         cerebellum['purkinje_weights'].clamp_(-2.0, 2.0)
 
         return climbing_fiber_error.abs().mean().item()
