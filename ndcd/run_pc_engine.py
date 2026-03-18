@@ -190,7 +190,7 @@ def add_thalamocortical_loop(graph, edge_index, edge_weight, biases, taus, num_n
     return edge_index, edge_weight, biases, taus, new_num_nodes
 
 
-def add_cerebellar_module(graph, num_nodes, n_granule=4096, sparsity=0.05, device='cpu', 
+def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, device='cpu', 
                             thalamic_indices=None, broca_indices=None, wernicke_indices=None):
     """
     Cerebellar output module: Granule Cell expansion + Purkinje readout.
@@ -627,7 +627,7 @@ def main():
             wernicke_indices.extend(mod['l56_indices'].tolist())
     
     cerebellum = add_cerebellar_module(
-        graph, num_nodes, n_granule=4096, device=device, 
+        graph, num_nodes, n_granule=16384, device=device, 
         thalamic_indices=thal_indices,
         broca_indices=np.array(broca_indices),
         wernicke_indices=np.array(wernicke_indices)
