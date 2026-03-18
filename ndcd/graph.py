@@ -1,4 +1,3 @@
-
 import networkx as nx
 import numpy as np
 import scipy.sparse as sp
@@ -518,7 +517,7 @@ class DynamicGraph:
             shape=(num_nodes, num_nodes)
         )
 
-        target_sr = 1.60
+        target_sr = 1.15
         try:
             from scipy.sparse.linalg import eigs as sp_eigs
             eigvals = sp_eigs(free_sparse.astype(np.float64),

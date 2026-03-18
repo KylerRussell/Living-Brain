@@ -2,223 +2,1102 @@ Using device: cuda
 Building DynamicGraph with 3500 nodes, 10 modules, 2 levels...
 CLS: 0 hippocampal modules, 10 neocortical modules
 Lateralization: 1 Broca (seq), 1 Wernicke (sem)
-Hierarchical graph: 3500 nodes, 64992 edges, 10 modules across 2 levels
+Hierarchical graph: 3500 nodes, 64979 edges, 10 modules across 2 levels
   Level 0: 2 modules, avg size 299 nodes
   Level 1: 8 modules, avg size 299 nodes
-Free-edge spectral radius tuned: 1.3572 -> 1.6
-Input boost: 6.00x (calibrated to 3.0x lateral RMS=0.2546)
-Edges: 2048 input-proj (2x, outside SR), 62944 free (SR-tuned to 1.6)
-Scale-invariant E/I balancing (1/sqrt(K)) applied to 62944 free edges.
-Weight magnitudes: input=1.0344, free=0.1923
+Free-edge spectral radius tuned: 1.3065 -> 1.15
+Input boost: 5.17x (calibrated to 3.0x lateral RMS=0.1917)
+Edges: 2048 input-proj (2x, outside SR), 62931 free (SR-tuned to 1.15)
+Scale-invariant E/I balancing (1/sqrt(K)) applied to 62931 free edges.
+Weight magnitudes: input=0.8710, free=0.1447
 Applied hierarchical recurrent excitatory gradient (η=0.68) to 0 edges.
-Level 0 lateral edges: 496 made positive, fan-in normalized (avg fan-in=2)
-Bottom-up edges: 2495 fan-in normalized (bounded, min_mag=0.01)
+Level 0 lateral edges: 492 made positive, fan-in normalized (avg fan-in=2)
+Bottom-up edges: 2487 fan-in normalized (bounded, min_mag=0.01)
 PFA: 20480 independent feedback edges enabling Product Feedback Alignment.
 Output boost: added 24576 new output projections from higher-level modules
 Thalamocortical loop: 128 relay neurons (stabilization only, no motor output)
 Initializing PredictiveCodingEngine...
-Cerebellum: 2048 granule cells, 6 mossy fibers each, 256 Purkinje outputs
-DFA: Created connectivity-weighted feedback for 2 levels, 3116 nodes, avg motor connectivity: 0.163
+Cerebellum: 4096 granule cells (SAL partitioned), 16 mossy fibers each, 256 Purkinje outputs
+DFA: Created connectivity-weighted feedback for 2 levels, 3116 nodes, avg motor connectivity: 0.172
 
 --- Starting Phase: Holophrases ---
   Steps: Free=100, Nudge=30
   Learning rate: 0.01, Nudge strength: 5.0
-  DFA alpha: 0.15, Burst apical gain: 1.5
+  DFA alpha: 0.15, Burst apical gain: 15.0
   Thalamocortical loop: 128 neurons
-  Cerebellum: 2048 granule cells
-Step 10/20003 | Acc: 10.00% | Gate: 0.90 | GC_spars: 32.67% | CF_err: 0.3976 | PK_w: 16.12 | Settle: 9.9858
-Step 20/20003 | Acc: 10.00% | Gate: 0.91 | GC_spars: 29.59% | CF_err: 0.3459 | PK_w: 16.44 | Settle: 11.2857
-Step 30/20003 | Acc: 13.33% | Gate: 0.90 | GC_spars: 26.81% | CF_err: 0.3134 | PK_w: 16.78 | Settle: 11.5097
-Step 40/20003 | Acc: 12.50% | Gate: 0.90 | GC_spars: 22.95% | CF_err: 0.2966 | PK_w: 17.12 | Settle: 11.1645
-Step 50/20003 | Acc: 16.00% | Gate: 0.89 | GC_spars: 22.80% | CF_err: 0.2960 | PK_w: 17.46 | Settle: 11.5818
-  Top Bigrams (min 5): '. ': 40% (5), 'e.': 0% (5)
-Step 60/20003 | Acc: 15.00% | Gate: 0.90 | GC_spars: 19.68% | CF_err: 0.3009 | PK_w: 17.79 | Settle: 11.7535
-  Top Bigrams (min 5): '. ': 33% (6), 'e.': 0% (6)
-Step 70/20003 | Acc: 14.29% | Gate: 0.91 | GC_spars: 19.24% | CF_err: 0.2952 | PK_w: 18.12 | Settle: 11.8096
-  Top Bigrams (min 5): '. ': 29% (7), 'e.': 0% (6)
-Step 80/20003 | Acc: 15.00% | Gate: 0.91 | GC_spars: 18.70% | CF_err: 0.2782 | PK_w: 18.43 | Settle: 11.7311
-  Top Bigrams (min 5): 'me': 40% (5), '. ': 38% (8), 'e.': 0% (7)
-Step 90/20003 | Acc: 15.56% | Gate: 0.92 | GC_spars: 14.06% | CF_err: 0.3363 | PK_w: 18.74 | Settle: 12.1188
-  Top Bigrams (min 5): '. ': 44% (9), 'me': 40% (5), 'e.': 0% (7)
-Step 100/20003 | Acc: 16.00% | Gate: 0.92 | GC_spars: 16.80% | CF_err: 0.2768 | PK_w: 19.04 | Settle: 12.2406
-  Top Bigrams (min 5): '. ': 44% (9), 'me': 40% (5), 'e.': 0% (7)
-Step 110/20003 | Acc: 17.27% | Gate: 0.91 | GC_spars: 14.16% | CF_err: 0.3086 | PK_w: 19.34 | Settle: 12.0830
-  Top Bigrams (min 5): '. ': 44% (9), 'me': 40% (5), 'e.': 0% (7)
-Step 120/20003 | Acc: 17.50% | Gate: 0.93 | GC_spars: 12.55% | CF_err: 0.3149 | PK_w: 19.62 | Settle: 11.7654
-  Top Bigrams (min 5): '. ': 50% (10), 'me': 40% (5), 'e.': 0% (7)
-Step 130/20003 | Acc: 18.46% | Gate: 0.93 | GC_spars: 12.89% | CF_err: 0.2953 | PK_w: 19.90 | Settle: 11.9622
-  Top Bigrams (min 5): '. ': 55% (11), 'me': 40% (5), 'e.': 0% (7)
-Step 140/20003 | Acc: 18.57% | Gate: 0.94 | GC_spars: 11.77% | CF_err: 0.3201 | PK_w: 20.18 | Settle: 11.7921
-  Top Bigrams (min 5): '. ': 58% (12), 'me': 40% (5), 'e.': 0% (7)
-Step 150/20003 | Acc: 18.67% | Gate: 0.95 | GC_spars: 11.13% | CF_err: 0.3192 | PK_w: 20.46 | Settle: 11.8586
-  Top Bigrams (min 5): 'o ': 100% (5), '. ': 62% (13), 'me': 40% (5)
-Step 160/20003 | Acc: 18.75% | Gate: 0.95 | GC_spars: 10.45% | CF_err: 0.3115 | PK_w: 20.73 | Settle: 11.7418
-  Top Bigrams (min 5): 'o ': 100% (5), '. ': 64% (14), 'me': 33% (6)
-Step 170/20003 | Acc: 18.82% | Gate: 0.95 | GC_spars: 11.23% | CF_err: 0.3159 | PK_w: 21.00 | Settle: 12.1855
-  Top Bigrams (min 5): 'o ': 100% (6), '. ': 67% (15), 'me': 33% (6)
-Step 180/20003 | Acc: 18.89% | Gate: 0.96 | GC_spars: 11.87% | CF_err: 0.2949 | PK_w: 21.28 | Settle: 12.3093
-  Top Bigrams (min 5): 'o ': 100% (6), '. ': 69% (16), 'me': 29% (7)
-Step 190/20003 | Acc: 18.95% | Gate: 0.96 | GC_spars: 9.72% | CF_err: 0.3414 | PK_w: 21.56 | Settle: 12.3838
-  Top Bigrams (min 5): 'o ': 100% (6), '. ': 71% (17), 'me': 29% (7)
-Step 200/20003 | Acc: 19.50% | Gate: 0.96 | GC_spars: 11.04% | CF_err: 0.2686 | PK_w: 21.82 | Settle: 12.1370
-  Top Bigrams (min 5): 'o ': 100% (7), '. ': 74% (19), 'me': 29% (7)
-Step 210/20003 | Acc: 19.52% | Gate: 0.96 | GC_spars: 11.28% | CF_err: 0.2762 | PK_w: 22.10 | Settle: 11.9982
-  Top Bigrams (min 5): 'o ': 100% (7), 'p ': 80% (5), '. ': 75% (20)
-Step 220/20003 | Acc: 19.55% | Gate: 0.96 | GC_spars: 10.06% | CF_err: 0.2941 | PK_w: 22.37 | Settle: 11.9877
-  Top Bigrams (min 5): 'o ': 100% (7), 't ': 100% (5), 'p ': 80% (5)
-Step 230/20003 | Acc: 19.57% | Gate: 0.97 | GC_spars: 9.03% | CF_err: 0.3045 | PK_w: 22.63 | Settle: 12.2712
-  Top Bigrams (min 5): 'o ': 100% (7), 't ': 100% (5), 'p ': 83% (6)
-Step 240/20003 | Acc: 20.00% | Gate: 0.97 | GC_spars: 8.20% | CF_err: 0.3209 | PK_w: 22.89 | Settle: 12.2928
-  Top Bigrams (min 5): 'o ': 100% (7), 't ': 100% (6), 'p ': 83% (6)
-Step 250/20003 | Acc: 20.00% | Gate: 0.97 | GC_spars: 11.23% | CF_err: 0.2508 | PK_w: 23.13 | Settle: 12.2580
-  Top Bigrams (min 5): 'o ': 100% (8), 't ': 100% (6), 'p ': 83% (6)
-Step 260/20003 | Acc: 20.00% | Gate: 0.98 | GC_spars: 10.25% | CF_err: 0.2978 | PK_w: 23.41 | Settle: 11.9068
-  Top Bigrams (min 5): 'o ': 100% (9), 't ': 100% (6), 'p ': 83% (6)
-Step 270/20003 | Acc: 20.37% | Gate: 0.98 | GC_spars: 10.01% | CF_err: 0.3108 | PK_w: 23.67 | Settle: 11.9789
-  Top Bigrams (min 5): 'o ': 100% (9), 't ': 100% (7), 'p ': 83% (6)
-Step 280/20003 | Acc: 20.36% | Gate: 0.98 | GC_spars: 12.06% | CF_err: 0.2203 | PK_w: 23.93 | Settle: 12.0386
-  Top Bigrams (min 5): 'o ': 100% (9), 't ': 100% (7), 'k ': 100% (5)
-Step 290/20003 | Acc: 20.69% | Gate: 0.98 | GC_spars: 10.60% | CF_err: 0.2501 | PK_w: 24.18 | Settle: 12.3295
-  Top Bigrams (min 5): 'o ': 100% (9), 't ': 100% (8), 'k ': 100% (5)
-Step 300/20003 | Acc: 20.67% | Gate: 0.98 | GC_spars: 10.50% | CF_err: 0.2428 | PK_w: 24.44 | Settle: 12.3858
-  Top Bigrams (min 5): 'o ': 100% (9), 't ': 100% (9), 'k ': 100% (5)
-Step 310/20003 | Acc: 20.65% | Gate: 0.99 | GC_spars: 7.91% | CF_err: 0.3132 | PK_w: 24.70 | Settle: 12.1871
-  Top Bigrams (min 5): 'o ': 100% (9), 't ': 100% (10), 'k ': 100% (5)
-Step 320/20003 | Acc: 20.94% | Gate: 0.99 | GC_spars: 8.89% | CF_err: 0.3047 | PK_w: 24.95 | Settle: 11.5481
-  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (10), 'k ': 100% (5)
-Step 330/20003 | Acc: 20.61% | Gate: 0.99 | GC_spars: 10.69% | CF_err: 0.2573 | PK_w: 25.20 | Settle: 11.9044
-  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (10), 'k ': 100% (5)
-Step 340/20003 | Acc: 20.88% | Gate: 0.99 | GC_spars: 10.40% | CF_err: 0.2472 | PK_w: 25.45 | Settle: 12.2402
-  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (10), 'k ': 100% (5)
-Step 350/20003 | Acc: 20.86% | Gate: 0.99 | GC_spars: 10.01% | CF_err: 0.2536 | PK_w: 25.70 | Settle: 12.1838
-  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (11), 'k ': 100% (5)
-Step 360/20003 | Acc: 20.83% | Gate: 0.98 | GC_spars: 6.79% | CF_err: 0.3295 | PK_w: 25.95 | Settle: 12.6561
-  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (11), 'k ': 100% (5)
-Step 370/20003 | Acc: 20.81% | Gate: 0.98 | GC_spars: 9.77% | CF_err: 0.2283 | PK_w: 26.19 | Settle: 12.8498
-  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (12), 'k ': 100% (5)
-Step 380/20003 | Acc: 21.05% | Gate: 0.98 | GC_spars: 8.35% | CF_err: 0.2813 | PK_w: 26.42 | Settle: 12.4886
-  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (13), 'k ': 100% (6)
-Step 390/20003 | Acc: 21.03% | Gate: 0.99 | GC_spars: 9.57% | CF_err: 0.2463 | PK_w: 26.66 | Settle: 12.1483
-  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (13), 'k ': 100% (7)
-Step 400/20003 | Acc: 21.00% | Gate: 0.99 | GC_spars: 11.43% | CF_err: 0.1900 | PK_w: 26.88 | Settle: 11.8281
-  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (14), 'k ': 100% (7)
-Step 410/20003 | Acc: 21.22% | Gate: 0.99 | GC_spars: 11.23% | CF_err: 0.1966 | PK_w: 27.12 | Settle: 11.9855
-  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (15), 'k ': 100% (7)
-Step 420/20003 | Acc: 21.19% | Gate: 0.99 | GC_spars: 8.30% | CF_err: 0.2640 | PK_w: 27.34 | Settle: 12.3129
-  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (15), 'k ': 100% (7)
-Step 430/20003 | Acc: 21.16% | Gate: 0.99 | GC_spars: 10.69% | CF_err: 0.2018 | PK_w: 27.58 | Settle: 12.2566
-  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (16), 's ': 100% (5)
-Step 440/20003 | Acc: 21.14% | Gate: 0.99 | GC_spars: 9.57% | CF_err: 0.2391 | PK_w: 27.80 | Settle: 12.2163
-  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (16), 's ': 100% (5)
-Step 450/20003 | Acc: 21.33% | Gate: 0.99 | GC_spars: 9.47% | CF_err: 0.2322 | PK_w: 28.02 | Settle: 12.1381
-  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (18), 's ': 100% (5)
-Step 460/20003 | Acc: 21.30% | Gate: 0.99 | GC_spars: 10.21% | CF_err: 0.2214 | PK_w: 28.24 | Settle: 11.9063
-  Top Bigrams (min 5): 'o ': 100% (10), 't ': 100% (19), 's ': 100% (5)
-Step 470/20003 | Acc: 21.28% | Gate: 0.99 | GC_spars: 9.38% | CF_err: 0.2410 | PK_w: 28.45 | Settle: 12.0450
-  Top Bigrams (min 5): 'o ': 100% (11), 't ': 100% (19), 's ': 100% (5)
-Step 480/20003 | Acc: 21.25% | Gate: 0.99 | GC_spars: 11.67% | CF_err: 0.1721 | PK_w: 28.68 | Settle: 12.2261
-  Top Bigrams (min 5): 'o ': 100% (11), 't ': 100% (19), 's ': 100% (5)
-Step 490/20003 | Acc: 21.22% | Gate: 0.99 | GC_spars: 12.21% | CF_err: 0.1292 | PK_w: 28.89 | Settle: 12.4148
-  Top Bigrams (min 5): 'o ': 100% (11), 't ': 100% (19), 's ': 100% (5)
-Step 500/20003 | Acc: 21.40% | Gate: 0.99 | GC_spars: 8.59% | CF_err: 0.2357 | PK_w: 29.10 | Settle: 12.3981
+  Cerebellum: 4096 granule cells
+Step 10/20003 | Acc: 0.00% | Rank μ: 107.1 med: 96 top5: 0.0% | PK_w: 16.61 | GC_spars: 9.99%
+  Logit σ: 0.244 range: 1.509 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 0.00% (2) | Char->Char: 0.00% (6)
+Step 20/20003 | Acc: 0.00% | Rank μ: 110.6 med: 108 top5: 5.0% | PK_w: 16.53 | GC_spars: 9.99%
+  Logit σ: 0.242 range: 1.812 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 0.00% (4) | Char->Char: 0.00% (12)
+Step 30/20003 | Acc: 0.00% | Rank μ: 104.8 med: 108 top5: 16.7% | PK_w: 16.45 | GC_spars: 9.99%
+  Logit σ: 0.264 range: 2.295 | Sig in_range: 100.0% | H: 5.49/5.55
+  Structural Acc | Char->Space: 0.00% (6) | Char->Char: 0.00% (19)
+Step 40/20003 | Acc: 2.50% | Rank μ: 103.1 med: 108 top5: 17.5% | PK_w: 16.37 | GC_spars: 9.99%
+  Logit σ: 0.252 range: 1.857 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 0.00% (8) | Char->Char: 4.00% (25)
+Step 50/20003 | Acc: 2.00% | Rank μ: 97.7 med: 90 top5: 20.0% | PK_w: 16.28 | GC_spars: 9.99%
+  Logit σ: 0.231 range: 2.193 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 0.00% (10) | Char->Char: 3.33% (30)
+Step 60/20003 | Acc: 1.67% | Rank μ: 96.9 med: 76 top5: 20.0% | PK_w: 16.20 | GC_spars: 9.99%
+  Logit σ: 0.228 range: 1.471 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 0.00% (12) | Char->Char: 2.78% (36)
+Step 70/20003 | Acc: 1.43% | Rank μ: 101.3 med: 96 top5: 20.0% | PK_w: 16.12 | GC_spars: 9.99%
+  Logit σ: 0.236 range: 1.621 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 0.00% (14) | Char->Char: 2.38% (42)
+Step 80/20003 | Acc: 1.25% | Rank μ: 97.9 med: 89 top5: 20.0% | PK_w: 16.04 | GC_spars: 9.99%
+  Logit σ: 0.242 range: 1.492 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 0.00% (16) | Char->Char: 2.08% (48)
+Step 90/20003 | Acc: 1.11% | Rank μ: 100.3 med: 94 top5: 21.1% | PK_w: 15.96 | GC_spars: 9.99%
+  Logit σ: 0.251 range: 2.027 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 0.00% (18) | Char->Char: 1.85% (54)
+Step 100/20003 | Acc: 1.00% | Rank μ: 101.5 med: 95 top5: 19.0% | PK_w: 15.88 | GC_spars: 9.99%
+  Logit σ: 0.223 range: 2.111 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 0.00% (20) | Char->Char: 1.67% (60)
+Step 110/20003 | Acc: 0.91% | Rank μ: 98.6 med: 89 top5: 19.1% | PK_w: 15.80 | GC_spars: 9.99%
+  Logit σ: 0.251 range: 2.409 | Sig in_range: 100.0% | H: 5.50/5.55
+  Structural Acc | Char->Space: 0.00% (23) | Char->Char: 1.56% (64)
+Step 120/20003 | Acc: 1.67% | Rank μ: 100.7 med: 94 top5: 20.0% | PK_w: 15.72 | GC_spars: 9.99%
+  Logit σ: 0.229 range: 2.180 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 4.00% (25) | Char->Char: 1.43% (70)
+Step 130/20003 | Acc: 2.31% | Rank μ: 100.4 med: 94 top5: 20.0% | PK_w: 15.64 | GC_spars: 9.99%
+  Logit σ: 0.232 range: 1.465 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 7.14% (28) | Char->Char: 1.33% (75)
+Step 140/20003 | Acc: 2.14% | Rank μ: 101.3 med: 94 top5: 20.0% | PK_w: 15.57 | GC_spars: 9.99%
+  Logit σ: 0.238 range: 1.655 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 6.67% (30) | Char->Char: 1.25% (80)
+Step 150/20003 | Acc: 2.67% | Rank μ: 100.7 med: 95 top5: 20.0% | PK_w: 15.49 | GC_spars: 9.99%
+  Logit σ: 0.242 range: 1.560 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 9.38% (32) | Char->Char: 1.16% (86)
+Step 160/20003 | Acc: 2.50% | Rank μ: 99.1 med: 90 top5: 20.0% | PK_w: 15.41 | GC_spars: 9.99%
+  Logit σ: 0.238 range: 2.058 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 8.82% (34) | Char->Char: 1.09% (92)
+Step 170/20003 | Acc: 3.53% | Rank μ: 98.5 med: 86 top5: 20.0% | PK_w: 15.33 | GC_spars: 9.99%
+  Logit σ: 0.228 range: 1.577 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 13.89% (36) | Char->Char: 1.02% (98)
+Step 180/20003 | Acc: 3.89% | Rank μ: 98.7 med: 86 top5: 19.4% | PK_w: 15.26 | GC_spars: 9.99%
+  Logit σ: 0.235 range: 1.597 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 15.79% (38) | Char->Char: 0.96% (104)
+Step 190/20003 | Acc: 4.21% | Rank μ: 96.4 med: 71 top5: 18.9% | PK_w: 15.18 | GC_spars: 9.99%
+  Logit σ: 0.232 range: 1.280 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 17.50% (40) | Char->Char: 0.91% (110)
+Step 200/20003 | Acc: 5.00% | Rank μ: 95.1 med: 68 top5: 19.5% | PK_w: 15.11 | GC_spars: 9.99%
+  Logit σ: 0.260 range: 1.798 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 20.93% (43) | Char->Char: 0.87% (115)
+Step 210/20003 | Acc: 4.76% | Rank μ: 92.5 med: 64 top5: 20.5% | PK_w: 15.03 | GC_spars: 9.99%
+  Logit σ: 0.210 range: 1.934 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 20.00% (45) | Char->Char: 0.83% (120)
+Step 220/20003 | Acc: 4.55% | Rank μ: 94.2 med: 68 top5: 20.5% | PK_w: 14.96 | GC_spars: 9.99%
+  Logit σ: 0.234 range: 1.441 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 19.15% (47) | Char->Char: 0.79% (126)
+Step 230/20003 | Acc: 4.35% | Rank μ: 92.2 med: 66 top5: 21.3% | PK_w: 14.88 | GC_spars: 9.99%
+  Logit σ: 0.218 range: 1.319 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 18.37% (49) | Char->Char: 0.76% (132)
+Step 240/20003 | Acc: 4.58% | Rank μ: 91.9 med: 66 top5: 21.2% | PK_w: 14.81 | GC_spars: 9.99%
+  Logit σ: 0.217 range: 1.823 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 19.23% (52) | Char->Char: 0.74% (136)
+Step 250/20003 | Acc: 5.20% | Rank μ: 92.8 med: 68 top5: 21.2% | PK_w: 14.73 | GC_spars: 9.99%
+  Logit σ: 0.220 range: 1.443 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 22.22% (54) | Char->Char: 0.70% (142)
+Step 260/20003 | Acc: 5.38% | Rank μ: 92.3 med: 68 top5: 21.5% | PK_w: 14.66 | GC_spars: 9.99%
+  Logit σ: 0.227 range: 1.603 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 23.21% (56) | Char->Char: 0.68% (148)
+Step 270/20003 | Acc: 5.93% | Rank μ: 93.1 med: 70 top5: 21.9% | PK_w: 14.59 | GC_spars: 9.99%
+  Logit σ: 0.186 range: 1.635 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 25.42% (59) | Char->Char: 0.66% (152)
+Step 280/20003 | Acc: 6.07% | Rank μ: 92.4 med: 70 top5: 22.1% | PK_w: 14.51 | GC_spars: 9.99%
+  Logit σ: 0.203 range: 1.898 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 26.23% (61) | Char->Char: 0.63% (158)
+Step 290/20003 | Acc: 6.55% | Rank μ: 92.8 med: 72 top5: 22.1% | PK_w: 14.44 | GC_spars: 9.99%
+  Logit σ: 0.235 range: 1.588 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 28.12% (64) | Char->Char: 0.61% (163)
+Step 300/20003 | Acc: 6.33% | Rank μ: 91.4 med: 70 top5: 22.7% | PK_w: 14.37 | GC_spars: 9.99%
+  Logit σ: 0.225 range: 2.115 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 27.27% (66) | Char->Char: 0.60% (168)
+Step 310/20003 | Acc: 6.45% | Rank μ: 92.4 med: 72 top5: 22.9% | PK_w: 14.30 | GC_spars: 9.99%
+  Logit σ: 0.241 range: 1.511 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 27.94% (68) | Char->Char: 0.57% (174)
+Step 320/20003 | Acc: 7.19% | Rank μ: 91.7 med: 68 top5: 23.1% | PK_w: 14.23 | GC_spars: 9.99%
+  Logit σ: 0.193 range: 1.269 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 30.99% (71) | Char->Char: 0.56% (179)
+Step 330/20003 | Acc: 7.27% | Rank μ: 90.8 med: 64 top5: 22.7% | PK_w: 14.16 | GC_spars: 9.99%
+  Logit σ: 0.201 range: 1.483 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 31.94% (72) | Char->Char: 0.54% (186)
+Step 340/20003 | Acc: 7.65% | Rank μ: 88.6 med: 60 top5: 23.8% | PK_w: 14.09 | GC_spars: 9.99%
+  Logit σ: 0.204 range: 1.265 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 32.00% (75) | Char->Char: 1.05% (191)
+Step 350/20003 | Acc: 8.00% | Rank μ: 88.3 med: 59 top5: 23.7% | PK_w: 14.02 | GC_spars: 9.99%
+  Logit σ: 0.196 range: 1.507 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 32.47% (77) | Char->Char: 1.53% (196)
+Step 360/20003 | Acc: 7.78% | Rank μ: 87.4 med: 59 top5: 24.2% | PK_w: 13.95 | GC_spars: 9.99%
+  Logit σ: 0.225 range: 1.612 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 31.65% (79) | Char->Char: 1.49% (202)
+Step 370/20003 | Acc: 7.57% | Rank μ: 86.7 med: 58 top5: 24.6% | PK_w: 13.88 | GC_spars: 9.99%
+  Logit σ: 0.200 range: 1.500 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 30.86% (81) | Char->Char: 1.44% (208)
+Step 380/20003 | Acc: 7.63% | Rank μ: 85.8 med: 56 top5: 25.0% | PK_w: 13.81 | GC_spars: 9.99%
+  Logit σ: 0.188 range: 1.418 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 30.95% (84) | Char->Char: 1.41% (213)
+Step 390/20003 | Acc: 7.69% | Rank μ: 86.1 med: 56 top5: 25.1% | PK_w: 13.74 | GC_spars: 9.99%
+  Logit σ: 0.187 range: 1.618 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 31.40% (86) | Char->Char: 1.38% (218)
+Step 400/20003 | Acc: 8.00% | Rank μ: 85.9 med: 56 top5: 25.2% | PK_w: 13.67 | GC_spars: 9.99%
+  Logit σ: 0.243 range: 2.000 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 32.95% (88) | Char->Char: 1.34% (224)
+Step 410/20003 | Acc: 7.80% | Rank μ: 85.2 med: 56 top5: 26.1% | PK_w: 13.61 | GC_spars: 9.99%
+  Logit σ: 0.203 range: 1.492 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 31.87% (91) | Char->Char: 1.31% (229)
+Step 420/20003 | Acc: 8.10% | Rank μ: 84.4 med: 53 top5: 26.4% | PK_w: 13.54 | GC_spars: 9.99%
+  Logit σ: 0.203 range: 1.860 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 32.26% (93) | Char->Char: 1.71% (234)
+Step 430/20003 | Acc: 8.14% | Rank μ: 83.0 med: 48 top5: 26.7% | PK_w: 13.47 | GC_spars: 9.99%
+  Logit σ: 0.185 range: 1.325 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 31.58% (95) | Char->Char: 1.67% (240)
+Step 440/20003 | Acc: 8.18% | Rank μ: 82.4 med: 47 top5: 27.0% | PK_w: 13.40 | GC_spars: 9.99%
+  Logit σ: 0.183 range: 1.653 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 31.96% (97) | Char->Char: 1.63% (246)
+Step 450/20003 | Acc: 8.44% | Rank μ: 81.9 med: 46 top5: 27.1% | PK_w: 13.34 | GC_spars: 9.99%
+  Logit σ: 0.187 range: 1.387 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 33.00% (100) | Char->Char: 1.60% (250)
+Step 460/20003 | Acc: 8.91% | Rank μ: 81.8 med: 46 top5: 27.4% | PK_w: 13.27 | GC_spars: 9.99%
+  Logit σ: 0.217 range: 1.579 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 34.31% (102) | Char->Char: 1.95% (256)
+Step 470/20003 | Acc: 9.15% | Rank μ: 82.3 med: 46 top5: 27.2% | PK_w: 13.21 | GC_spars: 9.99%
+  Logit σ: 0.198 range: 1.184 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 35.58% (104) | Char->Char: 1.91% (262)
+Step 480/20003 | Acc: 9.38% | Rank μ: 82.1 med: 44 top5: 27.9% | PK_w: 13.14 | GC_spars: 9.99%
+  Logit σ: 0.232 range: 1.948 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 36.79% (106) | Char->Char: 1.87% (268)
+Step 490/20003 | Acc: 9.80% | Rank μ: 81.8 med: 43 top5: 28.2% | PK_w: 13.08 | GC_spars: 9.99%
+  Logit σ: 0.221 range: 1.814 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 37.96% (108) | Char->Char: 2.19% (274)
+Step 500/20003 | Acc: 10.00% | Rank μ: 81.4 med: 43 top5: 28.4% | PK_w: 13.01 | GC_spars: 9.99%
+  Logit σ: 0.171 range: 1.115 | Sig in_range: 100.0% | H: 5.53/5.55
+
+[DIAGNOSTIC] Running Linear Probe on 200 samples...
+  >>> LINEAR PROBE ACCURACY: 98.50% (Internal Representation Quality)
+  [!] ALERT: Representation (98.5%) >> Readout (10.0%). Readout is the bottleneck.
+  Structural Acc | Char->Space: 38.74% (111) | Char->Char: 2.16% (278)
+Step 510/20003 | Acc: 10.40% | Rank μ: 80.3 med: 41 top5: 28.8% | PK_w: 12.95 | GC_spars: 9.99%
+  Logit σ: 0.204 range: 1.363 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 39.82% (113) | Char->Char: 2.11% (284)
+Step 520/20003 | Acc: 11.00% | Rank μ: 79.8 med: 40 top5: 29.2% | PK_w: 12.89 | GC_spars: 9.99%
+  Logit σ: 0.234 range: 1.964 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 41.38% (116) | Char->Char: 2.08% (289)
+Step 530/20003 | Acc: 11.20% | Rank μ: 79.0 med: 40 top5: 28.8% | PK_w: 12.82 | GC_spars: 9.99%
+  Logit σ: 0.163 range: 1.134 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 41.53% (118) | Char->Char: 2.04% (294)
+Step 540/20003 | Acc: 11.40% | Rank μ: 78.8 med: 39 top5: 29.4% | PK_w: 12.76 | GC_spars: 9.99%
+  Logit σ: 0.190 range: 2.013 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 42.50% (120) | Char->Char: 1.99% (301)
+Step 550/20003 | Acc: 12.00% | Rank μ: 78.7 med: 39 top5: 29.6% | PK_w: 12.70 | GC_spars: 9.99%
+  Logit σ: 0.186 range: 1.490 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 43.44% (122) | Char->Char: 2.29% (306)
+Step 560/20003 | Acc: 12.60% | Rank μ: 78.3 med: 38 top5: 30.2% | PK_w: 12.64 | GC_spars: 9.99%
+  Logit σ: 0.194 range: 1.298 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 44.35% (124) | Char->Char: 2.56% (312)
+Step 570/20003 | Acc: 13.20% | Rank μ: 76.9 med: 34 top5: 30.8% | PK_w: 12.57 | GC_spars: 9.99%
+  Logit σ: 0.201 range: 1.870 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 45.67% (127) | Char->Char: 2.52% (317)
+Step 580/20003 | Acc: 13.60% | Rank μ: 76.4 med: 33 top5: 31.0% | PK_w: 12.51 | GC_spars: 9.99%
+  Logit σ: 0.170 range: 1.259 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 46.51% (129) | Char->Char: 2.48% (322)
+Step 590/20003 | Acc: 14.00% | Rank μ: 75.7 med: 33 top5: 31.0% | PK_w: 12.45 | GC_spars: 9.99%
+  Logit σ: 0.190 range: 1.443 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 47.33% (131) | Char->Char: 2.44% (328)
+Step 600/20003 | Acc: 14.80% | Rank μ: 74.1 med: 30 top5: 32.4% | PK_w: 12.39 | GC_spars: 9.99%
+  Logit σ: 0.191 range: 1.813 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 48.12% (133) | Char->Char: 2.99% (334)
+Step 610/20003 | Acc: 15.40% | Rank μ: 73.5 med: 28 top5: 33.0% | PK_w: 12.33 | GC_spars: 9.99%
+  Logit σ: 0.168 range: 1.163 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 48.53% (136) | Char->Char: 3.25% (338)
+Step 620/20003 | Acc: 16.00% | Rank μ: 71.4 med: 24 top5: 33.4% | PK_w: 12.27 | GC_spars: 9.99%
+  Logit σ: 0.182 range: 1.757 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 49.28% (138) | Char->Char: 3.49% (344)
+Step 630/20003 | Acc: 16.20% | Rank μ: 70.1 med: 22 top5: 34.2% | PK_w: 12.21 | GC_spars: 9.99%
+  Logit σ: 0.208 range: 1.729 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 49.65% (141) | Char->Char: 3.44% (349)
+Step 640/20003 | Acc: 16.60% | Rank μ: 68.3 med: 22 top5: 34.8% | PK_w: 12.15 | GC_spars: 9.99%
+  Logit σ: 0.171 range: 1.303 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 50.35% (143) | Char->Char: 3.39% (354)
+Step 650/20003 | Acc: 16.40% | Rank μ: 67.7 med: 20 top5: 35.0% | PK_w: 12.09 | GC_spars: 9.99%
+  Logit σ: 0.185 range: 1.283 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 49.66% (145) | Char->Char: 3.33% (360)
+Step 660/20003 | Acc: 16.80% | Rank μ: 67.1 med: 20 top5: 35.4% | PK_w: 12.03 | GC_spars: 9.99%
+  Logit σ: 0.246 range: 2.611 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 50.34% (147) | Char->Char: 3.28% (366)
+Step 670/20003 | Acc: 17.00% | Rank μ: 66.5 med: 20 top5: 35.8% | PK_w: 11.97 | GC_spars: 9.99%
+  Logit σ: 0.223 range: 1.955 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 51.01% (149) | Char->Char: 3.23% (372)
+Step 680/20003 | Acc: 17.20% | Rank μ: 65.7 med: 18 top5: 36.4% | PK_w: 11.91 | GC_spars: 9.99%
+  Logit σ: 0.210 range: 1.717 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 51.66% (151) | Char->Char: 3.17% (378)
+Step 690/20003 | Acc: 17.60% | Rank μ: 65.3 med: 17 top5: 37.2% | PK_w: 11.85 | GC_spars: 9.99%
+  Logit σ: 0.179 range: 1.452 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 52.60% (154) | Char->Char: 3.13% (383)
+Step 700/20003 | Acc: 17.40% | Rank μ: 65.4 med: 17 top5: 37.2% | PK_w: 11.80 | GC_spars: 9.99%
+  Logit σ: 0.194 range: 1.863 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 52.26% (155) | Char->Char: 3.33% (390)
+Step 710/20003 | Acc: 17.80% | Rank μ: 65.0 med: 16 top5: 37.6% | PK_w: 11.74 | GC_spars: 9.99%
+  Logit σ: 0.175 range: 1.503 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 52.53% (158) | Char->Char: 3.29% (395)
+Step 720/20003 | Acc: 18.20% | Rank μ: 63.5 med: 16 top5: 38.4% | PK_w: 11.68 | GC_spars: 9.99%
+  Logit σ: 0.176 range: 1.295 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 53.12% (160) | Char->Char: 3.25% (400)
+Step 730/20003 | Acc: 18.60% | Rank μ: 64.2 med: 16 top5: 38.4% | PK_w: 11.62 | GC_spars: 9.99%
+  Logit σ: 0.176 range: 1.284 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 53.70% (162) | Char->Char: 3.20% (406)
+Step 740/20003 | Acc: 18.80% | Rank μ: 64.0 med: 16 top5: 39.0% | PK_w: 11.57 | GC_spars: 9.99%
+  Logit σ: 0.192 range: 1.542 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 53.66% (164) | Char->Char: 3.40% (412)
+Step 750/20003 | Acc: 18.80% | Rank μ: 62.5 med: 14 top5: 39.4% | PK_w: 11.51 | GC_spars: 9.99%
+  Logit σ: 0.147 range: 1.486 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 54.22% (166) | Char->Char: 3.35% (418)
+Step 760/20003 | Acc: 19.20% | Rank μ: 61.7 med: 14 top5: 39.6% | PK_w: 11.46 | GC_spars: 9.99%
+  Logit σ: 0.233 range: 2.546 | Sig in_range: 100.0% | H: 5.50/5.55
+  Structural Acc | Char->Space: 55.03% (169) | Char->Char: 3.31% (423)
+Step 770/20003 | Acc: 19.60% | Rank μ: 60.0 med: 12 top5: 40.0% | PK_w: 11.40 | GC_spars: 9.99%
+  Logit σ: 0.169 range: 1.307 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 55.56% (171) | Char->Char: 3.50% (428)
+Step 780/20003 | Acc: 19.80% | Rank μ: 59.0 med: 11 top5: 40.6% | PK_w: 11.34 | GC_spars: 9.99%
+  Logit σ: 0.148 range: 1.121 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 56.07% (173) | Char->Char: 3.46% (434)
+Step 790/20003 | Acc: 19.80% | Rank μ: 57.1 med: 10 top5: 41.8% | PK_w: 11.29 | GC_spars: 9.99%
+  Logit σ: 0.184 range: 1.335 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 56.00% (175) | Char->Char: 3.64% (440)
+Step 800/20003 | Acc: 20.40% | Rank μ: 57.1 med: 9 top5: 42.2% | PK_w: 11.23 | GC_spars: 9.99%
+  Logit σ: 0.211 range: 2.310 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 56.74% (178) | Char->Char: 3.60% (445)
+Step 810/20003 | Acc: 20.80% | Rank μ: 56.2 med: 9 top5: 42.4% | PK_w: 11.18 | GC_spars: 9.99%
+  Logit σ: 0.213 range: 2.256 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 57.22% (180) | Char->Char: 3.77% (451)
+Step 820/20003 | Acc: 20.60% | Rank μ: 56.2 med: 9 top5: 42.6% | PK_w: 11.13 | GC_spars: 9.99%
+  Logit σ: 0.156 range: 1.374 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 57.69% (182) | Char->Char: 3.73% (456)
+Step 830/20003 | Acc: 20.80% | Rank μ: 56.6 med: 9 top5: 43.2% | PK_w: 11.07 | GC_spars: 9.99%
+  Logit σ: 0.186 range: 1.561 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 58.15% (184) | Char->Char: 3.68% (462)
+Step 840/20003 | Acc: 21.20% | Rank μ: 57.0 med: 9 top5: 43.2% | PK_w: 11.02 | GC_spars: 9.99%
+  Logit σ: 0.177 range: 1.422 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 58.60% (186) | Char->Char: 4.06% (468)
+Step 850/20003 | Acc: 21.00% | Rank μ: 56.0 med: 9 top5: 43.8% | PK_w: 10.96 | GC_spars: 9.99%
+  Logit σ: 0.199 range: 2.259 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 58.51% (188) | Char->Char: 4.01% (474)
+Step 860/20003 | Acc: 21.60% | Rank μ: 55.1 med: 8 top5: 44.2% | PK_w: 10.91 | GC_spars: 9.99%
+  Logit σ: 0.224 range: 1.819 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 58.95% (190) | Char->Char: 4.17% (480)
+Step 870/20003 | Acc: 22.00% | Rank μ: 54.2 med: 8 top5: 44.6% | PK_w: 10.86 | GC_spars: 9.99%
+  Logit σ: 0.205 range: 2.304 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 59.07% (193) | Char->Char: 4.12% (485)
+Step 880/20003 | Acc: 22.00% | Rank μ: 53.5 med: 7 top5: 45.2% | PK_w: 10.81 | GC_spars: 9.99%
+  Logit σ: 0.160 range: 1.119 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 58.97% (195) | Char->Char: 4.08% (490)
+Step 890/20003 | Acc: 22.40% | Rank μ: 52.5 med: 7 top5: 45.8% | PK_w: 10.75 | GC_spars: 9.99%
+  Logit σ: 0.177 range: 1.204 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 59.39% (197) | Char->Char: 4.23% (496)
+Step 900/20003 | Acc: 22.40% | Rank μ: 52.5 med: 7 top5: 45.8% | PK_w: 10.70 | GC_spars: 9.99%
+  Logit σ: 0.214 range: 2.192 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 59.80% (199) | Char->Char: 4.18% (502)
+Step 910/20003 | Acc: 23.00% | Rank μ: 52.8 med: 7 top5: 45.6% | PK_w: 10.65 | GC_spars: 9.99%
+  Logit σ: 0.164 range: 1.562 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 59.90% (202) | Char->Char: 4.35% (506)
+Step 920/20003 | Acc: 23.20% | Rank μ: 52.9 med: 7 top5: 45.6% | PK_w: 10.60 | GC_spars: 9.99%
+  Logit σ: 0.181 range: 1.319 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 59.80% (204) | Char->Char: 4.49% (512)
+Step 930/20003 | Acc: 23.40% | Rank μ: 52.7 med: 7 top5: 46.0% | PK_w: 10.55 | GC_spars: 9.99%
+  Logit σ: 0.181 range: 1.283 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 60.19% (206) | Char->Char: 4.44% (518)
+Step 940/20003 | Acc: 23.60% | Rank μ: 52.3 med: 7 top5: 46.2% | PK_w: 10.50 | GC_spars: 9.99%
+  Logit σ: 0.163 range: 1.330 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 60.29% (209) | Char->Char: 4.41% (522)
+Step 950/20003 | Acc: 23.60% | Rank μ: 51.4 med: 6 top5: 46.8% | PK_w: 10.45 | GC_spars: 9.99%
+  Logit σ: 0.189 range: 2.119 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 60.66% (211) | Char->Char: 4.35% (529)
+Step 960/20003 | Acc: 23.40% | Rank μ: 51.1 med: 6 top5: 47.0% | PK_w: 10.40 | GC_spars: 9.99%
+  Logit σ: 0.180 range: 1.621 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 61.03% (213) | Char->Char: 4.31% (534)
+Step 970/20003 | Acc: 23.40% | Rank μ: 49.9 med: 6 top5: 47.6% | PK_w: 10.35 | GC_spars: 9.99%
+  Logit σ: 0.200 range: 2.292 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 60.93% (215) | Char->Char: 4.44% (540)
+Step 980/20003 | Acc: 23.80% | Rank μ: 48.6 med: 6 top5: 48.0% | PK_w: 10.30 | GC_spars: 9.99%
+  Logit σ: 0.206 range: 2.709 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 61.29% (217) | Char->Char: 4.58% (546)
+Step 990/20003 | Acc: 23.60% | Rank μ: 47.3 med: 6 top5: 49.0% | PK_w: 10.25 | GC_spars: 9.99%
+  Logit σ: 0.199 range: 2.355 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 61.19% (219) | Char->Char: 4.71% (552)
+Step 1000/20003 | Acc: 23.80% | Rank μ: 46.8 med: 6 top5: 49.6% | PK_w: 10.20 | GC_spars: 9.99%
+  Logit σ: 0.165 range: 1.788 | Sig in_range: 100.0% | H: 5.53/5.55
+
+[DIAGNOSTIC] Running Linear Probe on 200 samples...
+  >>> LINEAR PROBE ACCURACY: 96.50% (Internal Representation Quality)
+  [!] ALERT: Representation (96.5%) >> Readout (23.8%). Readout is the bottleneck.
+  Structural Acc | Char->Space: 61.71% (222) | Char->Char: 4.68% (556)
+Step 1010/20003 | Acc: 24.00% | Rank μ: 46.6 med: 6 top5: 50.0% | PK_w: 10.15 | GC_spars: 9.99%
+  Logit σ: 0.178 range: 1.569 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 61.61% (224) | Char->Char: 4.98% (562)
+Step 1020/20003 | Acc: 24.20% | Rank μ: 45.1 med: 5 top5: 51.2% | PK_w: 10.10 | GC_spars: 9.99%
+  Logit σ: 0.158 range: 1.159 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 61.06% (226) | Char->Char: 5.28% (568)
+Step 1030/20003 | Acc: 24.40% | Rank μ: 44.6 med: 5 top5: 52.0% | PK_w: 10.05 | GC_spars: 9.99%
+  Logit σ: 0.185 range: 1.415 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 61.40% (228) | Char->Char: 5.23% (574)
+Step 1040/20003 | Acc: 24.60% | Rank μ: 43.4 med: 5 top5: 52.0% | PK_w: 10.00 | GC_spars: 9.99%
+  Logit σ: 0.199 range: 2.258 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 61.74% (230) | Char->Char: 5.34% (580)
+Step 1050/20003 | Acc: 24.60% | Rank μ: 42.3 med: 5 top5: 52.6% | PK_w: 9.95 | GC_spars: 9.99%
+  Logit σ: 0.168 range: 1.706 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 62.23% (233) | Char->Char: 5.30% (585)
+Step 1060/20003 | Acc: 24.40% | Rank μ: 42.2 med: 5 top5: 52.2% | PK_w: 9.91 | GC_spars: 9.99%
+  Logit σ: 0.175 range: 1.679 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 62.55% (235) | Char->Char: 5.25% (590)
+Step 1070/20003 | Acc: 24.40% | Rank μ: 42.5 med: 5 top5: 52.2% | PK_w: 9.86 | GC_spars: 9.99%
+  Logit σ: 0.181 range: 2.274 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 62.45% (237) | Char->Char: 5.53% (597)
+Step 1080/20003 | Acc: 24.40% | Rank μ: 42.2 med: 5 top5: 52.6% | PK_w: 9.81 | GC_spars: 9.99%
+  Logit σ: 0.156 range: 1.201 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 62.76% (239) | Char->Char: 5.48% (602)
+Step 1090/20003 | Acc: 24.60% | Rank μ: 41.6 med: 5 top5: 53.2% | PK_w: 9.76 | GC_spars: 9.99%
+  Logit σ: 0.189 range: 1.711 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 63.07% (241) | Char->Char: 5.43% (608)
+Step 1100/20003 | Acc: 24.40% | Rank μ: 41.6 med: 5 top5: 53.0% | PK_w: 9.72 | GC_spars: 9.99%
+  Logit σ: 0.187 range: 1.975 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 63.37% (243) | Char->Char: 5.54% (614)
+Step 1110/20003 | Acc: 24.40% | Rank μ: 42.1 med: 5 top5: 53.0% | PK_w: 9.67 | GC_spars: 9.99%
+  Logit σ: 0.172 range: 1.933 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 63.27% (245) | Char->Char: 5.81% (620)
+Step 1120/20003 | Acc: 24.60% | Rank μ: 42.1 med: 5 top5: 53.4% | PK_w: 9.62 | GC_spars: 9.99%
+  Logit σ: 0.194 range: 2.221 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 63.71% (248) | Char->Char: 5.92% (625)
+Step 1130/20003 | Acc: 25.00% | Rank μ: 41.8 med: 5 top5: 53.6% | PK_w: 9.58 | GC_spars: 9.99%
+  Logit σ: 0.140 range: 1.239 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 64.00% (250) | Char->Char: 6.03% (630)
+Step 1140/20003 | Acc: 24.80% | Rank μ: 41.9 med: 4 top5: 54.2% | PK_w: 9.53 | GC_spars: 9.99%
+  Logit σ: 0.201 range: 2.047 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 63.89% (252) | Char->Char: 5.97% (636)
+Step 1150/20003 | Acc: 25.20% | Rank μ: 41.4 med: 4 top5: 55.2% | PK_w: 9.49 | GC_spars: 9.99%
+  Logit σ: 0.189 range: 1.803 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 64.17% (254) | Char->Char: 5.92% (642)
+Step 1160/20003 | Acc: 25.40% | Rank μ: 41.5 med: 4 top5: 55.8% | PK_w: 9.44 | GC_spars: 9.99%
+  Logit σ: 0.190 range: 1.682 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 64.06% (256) | Char->Char: 6.17% (648)
+Step 1170/20003 | Acc: 25.60% | Rank μ: 40.5 med: 4 top5: 56.8% | PK_w: 9.40 | GC_spars: 9.99%
+  Logit σ: 0.203 range: 2.101 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 63.95% (258) | Char->Char: 6.42% (654)
+Step 1180/20003 | Acc: 25.80% | Rank μ: 39.6 med: 4 top5: 57.4% | PK_w: 9.35 | GC_spars: 9.99%
+  Logit σ: 0.177 range: 1.628 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 63.85% (260) | Char->Char: 6.52% (660)
+Step 1190/20003 | Acc: 26.20% | Rank μ: 39.7 med: 4 top5: 57.8% | PK_w: 9.31 | GC_spars: 9.99%
+  Logit σ: 0.184 range: 2.099 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 64.12% (262) | Char->Char: 6.76% (666)
+Step 1200/20003 | Acc: 26.60% | Rank μ: 38.4 med: 4 top5: 58.8% | PK_w: 9.26 | GC_spars: 9.99%
+  Logit σ: 0.222 range: 2.951 | Sig in_range: 100.0% | H: 5.49/5.55
+  Structural Acc | Char->Space: 64.02% (264) | Char->Char: 6.99% (672)
+Step 1210/20003 | Acc: 26.80% | Rank μ: 39.1 med: 4 top5: 59.0% | PK_w: 9.22 | GC_spars: 9.99%
+  Logit σ: 0.195 range: 1.764 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 63.91% (266) | Char->Char: 7.08% (678)
+Step 1220/20003 | Acc: 27.40% | Rank μ: 38.0 med: 3 top5: 59.4% | PK_w: 9.17 | GC_spars: 9.99%
+  Logit σ: 0.195 range: 1.884 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 64.18% (268) | Char->Char: 7.31% (684)
+Step 1230/20003 | Acc: 27.80% | Rank μ: 36.4 med: 3 top5: 60.4% | PK_w: 9.13 | GC_spars: 9.99%
+  Logit σ: 0.176 range: 2.211 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 64.07% (270) | Char->Char: 7.54% (690)
+Step 1240/20003 | Acc: 28.20% | Rank μ: 35.5 med: 3 top5: 61.0% | PK_w: 9.09 | GC_spars: 9.99%
+  Logit σ: 0.150 range: 1.397 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 64.47% (273) | Char->Char: 7.64% (694)
+Step 1250/20003 | Acc: 28.60% | Rank μ: 34.8 med: 3 top5: 61.6% | PK_w: 9.04 | GC_spars: 9.99%
+  Logit σ: 0.168 range: 1.637 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 64.73% (275) | Char->Char: 7.86% (700)
+Step 1260/20003 | Acc: 28.60% | Rank μ: 34.1 med: 3 top5: 62.2% | PK_w: 9.00 | GC_spars: 9.99%
+  Logit σ: 0.190 range: 1.806 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 64.75% (278) | Char->Char: 7.81% (704)
+Step 1270/20003 | Acc: 28.40% | Rank μ: 33.6 med: 3 top5: 62.8% | PK_w: 8.96 | GC_spars: 9.99%
+  Logit σ: 0.170 range: 1.568 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 65.00% (280) | Char->Char: 7.89% (710)
+Step 1280/20003 | Acc: 28.60% | Rank μ: 33.2 med: 3 top5: 63.2% | PK_w: 8.91 | GC_spars: 9.99%
+  Logit σ: 0.186 range: 2.197 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 65.02% (283) | Char->Char: 7.84% (714)
+Step 1290/20003 | Acc: 28.80% | Rank μ: 33.0 med: 3 top5: 63.0% | PK_w: 8.87 | GC_spars: 9.99%
+  Logit σ: 0.218 range: 2.614 | Sig in_range: 100.0% | H: 5.49/5.55
+  Structural Acc | Char->Space: 65.26% (285) | Char->Char: 7.91% (721)
+Step 1300/20003 | Acc: 28.60% | Rank μ: 32.2 med: 3 top5: 63.6% | PK_w: 8.83 | GC_spars: 9.99%
+  Logit σ: 0.236 range: 3.443 | Sig in_range: 99.6% | H: 5.45/5.55
+  Structural Acc | Char->Space: 65.28% (288) | Char->Char: 7.86% (725)
+Step 1310/20003 | Acc: 28.60% | Rank μ: 30.7 med: 3 top5: 64.2% | PK_w: 8.79 | GC_spars: 9.99%
+  Logit σ: 0.171 range: 1.506 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 65.40% (289) | Char->Char: 7.92% (732)
+Step 1320/20003 | Acc: 29.40% | Rank μ: 29.4 med: 3 top5: 65.0% | PK_w: 8.75 | GC_spars: 9.99%
+  Logit σ: 0.206 range: 2.470 | Sig in_range: 100.0% | H: 5.50/5.55
+  Structural Acc | Char->Space: 65.75% (292) | Char->Char: 8.28% (737)
+Step 1330/20003 | Acc: 29.60% | Rank μ: 28.0 med: 3 top5: 65.4% | PK_w: 8.70 | GC_spars: 9.99%
+  Logit σ: 0.139 range: 1.274 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 65.99% (294) | Char->Char: 8.22% (742)
+Step 1340/20003 | Acc: 29.20% | Rank μ: 27.4 med: 3 top5: 65.8% | PK_w: 8.66 | GC_spars: 9.99%
+  Logit σ: 0.168 range: 1.898 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 65.88% (296) | Char->Char: 8.29% (748)
+Step 1350/20003 | Acc: 29.80% | Rank μ: 27.3 med: 3 top5: 66.2% | PK_w: 8.62 | GC_spars: 9.99%
+  Logit σ: 0.164 range: 1.446 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 66.11% (298) | Char->Char: 8.49% (754)
+Step 1360/20003 | Acc: 29.80% | Rank μ: 27.1 med: 3 top5: 66.8% | PK_w: 8.58 | GC_spars: 9.99%
+  Logit σ: 0.185 range: 1.985 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 66.33% (300) | Char->Char: 8.42% (760)
+Step 1370/20003 | Acc: 30.20% | Rank μ: 26.8 med: 3 top5: 67.2% | PK_w: 8.54 | GC_spars: 9.99%
+  Logit σ: 0.150 range: 1.913 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 66.56% (302) | Char->Char: 8.49% (766)
+Step 1380/20003 | Acc: 31.00% | Rank μ: 26.6 med: 3 top5: 67.4% | PK_w: 8.50 | GC_spars: 9.99%
+  Logit σ: 0.136 range: 1.462 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 66.56% (305) | Char->Char: 8.69% (771)
+Step 1390/20003 | Acc: 30.80% | Rank μ: 26.2 med: 3 top5: 67.6% | PK_w: 8.46 | GC_spars: 9.99%
+  Logit σ: 0.161 range: 1.701 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 66.12% (307) | Char->Char: 8.76% (776)
+Step 1400/20003 | Acc: 31.00% | Rank μ: 25.7 med: 3 top5: 68.6% | PK_w: 8.42 | GC_spars: 9.99%
+  Logit σ: 0.229 range: 2.489 | Sig in_range: 100.0% | H: 5.50/5.55
+  Structural Acc | Char->Space: 66.34% (309) | Char->Char: 8.82% (782)
+Step 1410/20003 | Acc: 31.00% | Rank μ: 25.0 med: 3 top5: 68.6% | PK_w: 8.38 | GC_spars: 9.99%
+  Logit σ: 0.181 range: 1.958 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 66.56% (311) | Char->Char: 8.88% (788)
+Step 1420/20003 | Acc: 31.00% | Rank μ: 24.0 med: 3 top5: 69.0% | PK_w: 8.34 | GC_spars: 9.99%
+  Logit σ: 0.187 range: 1.821 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 66.45% (313) | Char->Char: 9.07% (794)
+Step 1430/20003 | Acc: 31.00% | Rank μ: 24.2 med: 3 top5: 69.2% | PK_w: 8.30 | GC_spars: 9.99%
+  Logit σ: 0.181 range: 2.249 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 66.35% (315) | Char->Char: 9.12% (800)
+Step 1440/20003 | Acc: 31.40% | Rank μ: 24.0 med: 3 top5: 69.6% | PK_w: 8.26 | GC_spars: 9.99%
+  Logit σ: 0.247 range: 3.626 | Sig in_range: 99.6% | H: 5.40/5.55
+  Structural Acc | Char->Space: 66.56% (317) | Char->Char: 9.31% (806)
+Step 1450/20003 | Acc: 31.40% | Rank μ: 24.8 med: 3 top5: 69.6% | PK_w: 8.22 | GC_spars: 9.99%
+  Logit σ: 0.149 range: 1.183 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 66.46% (319) | Char->Char: 9.36% (812)
+Step 1460/20003 | Acc: 32.00% | Rank μ: 23.7 med: 3 top5: 70.0% | PK_w: 8.18 | GC_spars: 9.99%
+  Logit σ: 0.205 range: 2.951 | Sig in_range: 99.6% | H: 5.46/5.55
+  Structural Acc | Char->Space: 66.77% (322) | Char->Char: 9.55% (817)
+Step 1470/20003 | Acc: 32.40% | Rank μ: 23.0 med: 3 top5: 70.2% | PK_w: 8.14 | GC_spars: 9.99%
+  Logit σ: 0.173 range: 2.196 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 66.98% (324) | Char->Char: 9.72% (823)
+Step 1480/20003 | Acc: 32.00% | Rank μ: 23.9 med: 3 top5: 69.6% | PK_w: 8.10 | GC_spars: 9.99%
+  Logit σ: 0.140 range: 1.362 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 66.87% (326) | Char->Char: 9.78% (828)
+Step 1490/20003 | Acc: 32.40% | Rank μ: 24.0 med: 3 top5: 68.8% | PK_w: 8.06 | GC_spars: 9.99%
+  Logit σ: 0.146 range: 1.533 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 66.77% (328) | Char->Char: 10.07% (834)
+Step 1500/20003 | Acc: 32.60% | Rank μ: 23.7 med: 3 top5: 68.8% | PK_w: 8.02 | GC_spars: 9.99%
+  Logit σ: 0.139 range: 1.261 | Sig in_range: 100.0% | H: 5.53/5.55
+
+[DIAGNOSTIC] Running Linear Probe on 200 samples...
+  >>> LINEAR PROBE ACCURACY: 94.50% (Internal Representation Quality)
+  [!] ALERT: Representation (94.5%) >> Readout (32.6%). Readout is the bottleneck.
+  Structural Acc | Char->Space: 66.67% (330) | Char->Char: 10.36% (840)
+Step 1510/20003 | Acc: 32.60% | Rank μ: 23.5 med: 3 top5: 69.0% | PK_w: 7.98 | GC_spars: 9.99%
+  Logit σ: 0.147 range: 1.287 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 66.87% (332) | Char->Char: 10.40% (846)
+Step 1520/20003 | Acc: 32.60% | Rank μ: 23.6 med: 3 top5: 68.6% | PK_w: 7.95 | GC_spars: 9.99%
+  Logit σ: 0.163 range: 1.719 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 67.07% (334) | Char->Char: 10.56% (852)
+Step 1530/20003 | Acc: 33.20% | Rank μ: 23.2 med: 3 top5: 69.0% | PK_w: 7.91 | GC_spars: 9.99%
+  Logit σ: 0.209 range: 2.988 | Sig in_range: 99.6% | H: 5.47/5.55
+  Structural Acc | Char->Space: 67.36% (337) | Char->Char: 10.74% (857)
+Step 1540/20003 | Acc: 33.20% | Rank μ: 23.1 med: 3 top5: 68.6% | PK_w: 7.87 | GC_spars: 9.99%
+  Logit σ: 0.137 range: 1.420 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 67.26% (339) | Char->Char: 10.90% (862)
+Step 1550/20003 | Acc: 33.80% | Rank μ: 23.0 med: 3 top5: 68.8% | PK_w: 7.83 | GC_spars: 9.99%
+  Logit σ: 0.160 range: 2.043 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 67.45% (341) | Char->Char: 11.18% (868)
+Step 1560/20003 | Acc: 34.20% | Rank μ: 21.7 med: 3 top5: 69.8% | PK_w: 7.80 | GC_spars: 9.99%
+  Logit σ: 0.220 range: 3.244 | Sig in_range: 99.6% | H: 5.46/5.55
+  Structural Acc | Char->Space: 67.73% (344) | Char->Char: 11.23% (873)
+Step 1570/20003 | Acc: 34.20% | Rank μ: 20.3 med: 3 top5: 70.4% | PK_w: 7.76 | GC_spars: 9.99%
+  Logit σ: 0.139 range: 1.202 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 67.92% (346) | Char->Char: 11.28% (878)
+Step 1580/20003 | Acc: 34.80% | Rank μ: 20.1 med: 3 top5: 70.8% | PK_w: 7.72 | GC_spars: 9.99%
+  Logit σ: 0.130 range: 1.123 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 68.19% (349) | Char->Char: 11.45% (882)
+Step 1590/20003 | Acc: 35.20% | Rank μ: 19.4 med: 3 top5: 71.0% | PK_w: 7.69 | GC_spars: 9.99%
+  Logit σ: 0.129 range: 0.955 | Sig in_range: 100.0% | H: 5.54/5.55
+  Structural Acc | Char->Space: 68.38% (351) | Char->Char: 11.71% (888)
+Step 1600/20003 | Acc: 35.80% | Rank μ: 19.0 med: 2 top5: 71.4% | PK_w: 7.65 | GC_spars: 9.99%
+  Logit σ: 0.235 range: 2.903 | Sig in_range: 100.0% | H: 5.47/5.55
+  Structural Acc | Char->Space: 68.56% (353) | Char->Char: 12.07% (895)
+Step 1610/20003 | Acc: 36.00% | Rank μ: 17.8 med: 2 top5: 72.2% | PK_w: 7.62 | GC_spars: 9.99%
+  Logit σ: 0.168 range: 1.740 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 68.82% (356) | Char->Char: 12.12% (899)
+Step 1620/20003 | Acc: 35.80% | Rank μ: 18.0 med: 2 top5: 72.2% | PK_w: 7.58 | GC_spars: 9.99%
+  Logit σ: 0.198 range: 2.767 | Sig in_range: 99.6% | H: 5.48/5.55
+  Structural Acc | Char->Space: 68.91% (357) | Char->Char: 12.36% (906)
+Step 1630/20003 | Acc: 35.40% | Rank μ: 18.2 med: 3 top5: 72.4% | PK_w: 7.54 | GC_spars: 9.99%
+  Logit σ: 0.209 range: 2.864 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 68.80% (359) | Char->Char: 12.39% (912)
+Step 1640/20003 | Acc: 36.00% | Rank μ: 17.9 med: 3 top5: 72.2% | PK_w: 7.51 | GC_spars: 9.99%
+  Logit σ: 0.157 range: 1.420 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 68.70% (361) | Char->Char: 12.64% (918)
+Step 1650/20003 | Acc: 36.40% | Rank μ: 17.3 med: 2 top5: 72.4% | PK_w: 7.47 | GC_spars: 9.99%
+  Logit σ: 0.254 range: 3.879 | Sig in_range: 99.6% | H: 5.40/5.55
+  Structural Acc | Char->Space: 68.96% (364) | Char->Char: 12.68% (923)
+Step 1660/20003 | Acc: 36.60% | Rank μ: 16.8 med: 2 top5: 72.6% | PK_w: 7.44 | GC_spars: 9.99%
+  Logit σ: 0.182 range: 2.198 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 69.13% (366) | Char->Char: 12.82% (928)
+Step 1670/20003 | Acc: 36.80% | Rank μ: 16.8 med: 3 top5: 72.0% | PK_w: 7.40 | GC_spars: 9.99%
+  Logit σ: 0.191 range: 2.638 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 69.29% (368) | Char->Char: 13.06% (934)
+Step 1680/20003 | Acc: 36.80% | Rank μ: 16.5 med: 2 top5: 72.0% | PK_w: 7.37 | GC_spars: 9.99%
+  Logit σ: 0.203 range: 2.560 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 69.19% (370) | Char->Char: 13.09% (940)
+Step 1690/20003 | Acc: 36.60% | Rank μ: 15.8 med: 2 top5: 72.2% | PK_w: 7.34 | GC_spars: 9.99%
+  Logit σ: 0.154 range: 1.621 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 69.44% (373) | Char->Char: 13.14% (944)
+Step 1700/20003 | Acc: 36.60% | Rank μ: 15.7 med: 2 top5: 72.2% | PK_w: 7.30 | GC_spars: 9.99%
+  Logit σ: 0.158 range: 1.282 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 69.33% (375) | Char->Char: 13.16% (950)
+Step 1710/20003 | Acc: 37.00% | Rank μ: 14.9 med: 2 top5: 72.4% | PK_w: 7.27 | GC_spars: 9.99%
+  Logit σ: 0.174 range: 2.123 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 69.50% (377) | Char->Char: 13.39% (956)
+Step 1720/20003 | Acc: 37.00% | Rank μ: 14.9 med: 2 top5: 72.2% | PK_w: 7.23 | GC_spars: 9.99%
+  Logit σ: 0.170 range: 2.149 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 69.47% (380) | Char->Char: 13.44% (960)
+Step 1730/20003 | Acc: 36.60% | Rank μ: 15.0 med: 2 top5: 72.2% | PK_w: 7.20 | GC_spars: 9.99%
+  Logit σ: 0.165 range: 2.012 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 69.63% (382) | Char->Char: 13.34% (967)
+Step 1740/20003 | Acc: 37.00% | Rank μ: 14.5 med: 2 top5: 72.4% | PK_w: 7.16 | GC_spars: 9.99%
+  Logit σ: 0.133 range: 1.373 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 69.79% (384) | Char->Char: 13.48% (972)
+Step 1750/20003 | Acc: 37.00% | Rank μ: 14.5 med: 2 top5: 72.4% | PK_w: 7.13 | GC_spars: 9.99%
+  Logit σ: 0.183 range: 2.306 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 69.95% (386) | Char->Char: 13.60% (978)
+Step 1760/20003 | Acc: 37.20% | Rank μ: 14.4 med: 2 top5: 72.8% | PK_w: 7.10 | GC_spars: 9.99%
+  Logit σ: 0.125 range: 1.077 | Sig in_range: 100.0% | H: 5.54/5.55
+  Structural Acc | Char->Space: 69.85% (388) | Char->Char: 13.72% (984)
+Step 1770/20003 | Acc: 37.40% | Rank μ: 14.5 med: 2 top5: 72.6% | PK_w: 7.06 | GC_spars: 9.99%
+  Logit σ: 0.182 range: 1.598 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 70.00% (390) | Char->Char: 13.74% (990)
+Step 1780/20003 | Acc: 37.80% | Rank μ: 14.6 med: 2 top5: 72.4% | PK_w: 7.03 | GC_spars: 9.99%
+  Logit σ: 0.180 range: 2.065 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 69.97% (393) | Char->Char: 13.98% (994)
+Step 1790/20003 | Acc: 38.40% | Rank μ: 15.4 med: 2 top5: 72.4% | PK_w: 7.00 | GC_spars: 9.99%
+  Logit σ: 0.158 range: 1.746 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.13% (395) | Char->Char: 14.30% (1000)
+Step 1800/20003 | Acc: 39.40% | Rank μ: 15.4 med: 2 top5: 72.4% | PK_w: 6.96 | GC_spars: 9.99%
+  Logit σ: 0.163 range: 1.967 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 70.28% (397) | Char->Char: 14.71% (1006)
+Step 1810/20003 | Acc: 39.60% | Rank μ: 15.3 med: 2 top5: 72.6% | PK_w: 6.93 | GC_spars: 9.99%
+  Logit σ: 0.119 range: 1.062 | Sig in_range: 100.0% | H: 5.54/5.55
+  Structural Acc | Char->Space: 70.50% (400) | Char->Char: 14.75% (1010)
+Step 1820/20003 | Acc: 39.00% | Rank μ: 15.6 med: 2 top5: 72.6% | PK_w: 6.90 | GC_spars: 9.99%
+  Logit σ: 0.169 range: 2.052 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 70.40% (402) | Char->Char: 14.76% (1016)
+Step 1830/20003 | Acc: 38.80% | Rank μ: 15.5 med: 2 top5: 73.0% | PK_w: 6.87 | GC_spars: 9.99%
+  Logit σ: 0.139 range: 1.719 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.30% (404) | Char->Char: 14.68% (1022)
+Step 1840/20003 | Acc: 39.40% | Rank μ: 15.9 med: 2 top5: 72.8% | PK_w: 6.84 | GC_spars: 9.99%
+  Logit σ: 0.160 range: 1.665 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.52% (407) | Char->Char: 14.81% (1026)
+Step 1850/20003 | Acc: 39.40% | Rank μ: 16.0 med: 2 top5: 73.2% | PK_w: 6.80 | GC_spars: 9.99%
+  Logit σ: 0.163 range: 1.616 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 70.66% (409) | Char->Char: 14.92% (1032)
+Step 1860/20003 | Acc: 39.20% | Rank μ: 16.5 med: 2 top5: 72.8% | PK_w: 6.77 | GC_spars: 9.99%
+  Logit σ: 0.146 range: 1.386 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.56% (411) | Char->Char: 14.84% (1038)
+Step 1870/20003 | Acc: 39.20% | Rank μ: 16.5 med: 2 top5: 72.8% | PK_w: 6.74 | GC_spars: 9.99%
+  Logit σ: 0.194 range: 1.988 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 70.46% (413) | Char->Char: 15.04% (1044)
+Step 1880/20003 | Acc: 39.20% | Rank μ: 16.5 med: 2 top5: 73.0% | PK_w: 6.71 | GC_spars: 9.99%
+  Logit σ: 0.189 range: 2.471 | Sig in_range: 100.0% | H: 5.50/5.55
+  Structural Acc | Char->Space: 70.36% (415) | Char->Char: 15.14% (1050)
+Step 1890/20003 | Acc: 39.20% | Rank μ: 16.4 med: 2 top5: 72.8% | PK_w: 6.68 | GC_spars: 9.99%
+  Logit σ: 0.153 range: 1.941 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.26% (417) | Char->Char: 15.15% (1056)
+Step 1900/20003 | Acc: 39.40% | Rank μ: 15.7 med: 2 top5: 72.6% | PK_w: 6.65 | GC_spars: 9.99%
+  Logit σ: 0.156 range: 1.884 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.24% (420) | Char->Char: 15.19% (1060)
+Step 1910/20003 | Acc: 39.40% | Rank μ: 15.3 med: 2 top5: 73.2% | PK_w: 6.62 | GC_spars: 9.99%
+  Logit σ: 0.128 range: 1.323 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.14% (422) | Char->Char: 15.20% (1066)
+Step 1920/20003 | Acc: 39.60% | Rank μ: 15.5 med: 2 top5: 73.6% | PK_w: 6.58 | GC_spars: 9.99%
+  Logit σ: 0.162 range: 1.696 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.28% (424) | Char->Char: 15.30% (1072)
+Step 1930/20003 | Acc: 39.80% | Rank μ: 15.5 med: 2 top5: 73.8% | PK_w: 6.55 | GC_spars: 9.99%
+  Logit σ: 0.172 range: 2.310 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 70.19% (426) | Char->Char: 15.31% (1078)
+Step 1940/20003 | Acc: 40.00% | Rank μ: 15.0 med: 2 top5: 74.2% | PK_w: 6.52 | GC_spars: 9.99%
+  Logit σ: 0.183 range: 2.895 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 70.33% (428) | Char->Char: 15.50% (1084)
+Step 1950/20003 | Acc: 40.20% | Rank μ: 14.0 med: 2 top5: 74.2% | PK_w: 6.49 | GC_spars: 9.99%
+  Logit σ: 0.211 range: 3.032 | Sig in_range: 100.0% | H: 5.50/5.55
+  Structural Acc | Char->Space: 70.23% (430) | Char->Char: 15.60% (1090)
+Step 1960/20003 | Acc: 40.20% | Rank μ: 14.4 med: 2 top5: 74.4% | PK_w: 6.46 | GC_spars: 9.99%
+  Logit σ: 0.177 range: 2.364 | Sig in_range: 100.0% | H: 5.50/5.55
+  Structural Acc | Char->Space: 70.44% (433) | Char->Char: 15.72% (1094)
+Step 1970/20003 | Acc: 40.20% | Rank μ: 14.8 med: 2 top5: 74.8% | PK_w: 6.43 | GC_spars: 9.99%
+  Logit σ: 0.151 range: 1.775 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.57% (435) | Char->Char: 15.82% (1100)
+Step 1980/20003 | Acc: 41.20% | Rank μ: 13.8 med: 2 top5: 75.8% | PK_w: 6.40 | GC_spars: 9.99%
+  Logit σ: 0.142 range: 1.423 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.71% (437) | Char->Char: 16.18% (1106)
+Step 1990/20003 | Acc: 41.40% | Rank μ: 13.8 med: 2 top5: 76.0% | PK_w: 6.37 | GC_spars: 9.99%
+  Logit σ: 0.146 range: 1.476 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.84% (439) | Char->Char: 16.37% (1112)
+Step 2000/20003 | Acc: 41.00% | Rank μ: 13.9 med: 2 top5: 76.2% | PK_w: 6.35 | GC_spars: 9.99%
+  Logit σ: 0.168 range: 2.218 | Sig in_range: 100.0% | H: 5.51/5.55
+
+[DIAGNOSTIC] Running Linear Probe on 200 samples...
+  >>> LINEAR PROBE ACCURACY: 100.00% (Internal Representation Quality)
+  [!] ALERT: Representation (100.0%) >> Readout (41.0%). Readout is the bottleneck.
+  Structural Acc | Char->Space: 70.59% (442) | Char->Char: 16.38% (1117)
+Step 2010/20003 | Acc: 40.80% | Rank μ: 14.9 med: 2 top5: 76.0% | PK_w: 6.32 | GC_spars: 9.99%
+  Logit σ: 0.145 range: 1.320 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.50% (444) | Char->Char: 16.40% (1122)
+Step 2020/20003 | Acc: 40.40% | Rank μ: 15.4 med: 2 top5: 75.8% | PK_w: 6.29 | GC_spars: 9.99%
+  Logit σ: 0.150 range: 1.775 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 70.40% (446) | Char->Char: 16.40% (1128)
+Step 2030/20003 | Acc: 40.40% | Rank μ: 15.3 med: 2 top5: 75.8% | PK_w: 6.26 | GC_spars: 9.99%
+  Logit σ: 0.212 range: 3.068 | Sig in_range: 99.6% | H: 5.48/5.55
+  Structural Acc | Char->Space: 70.54% (448) | Char->Char: 16.56% (1135)
+Step 2040/20003 | Acc: 40.40% | Rank μ: 14.9 med: 2 top5: 77.0% | PK_w: 6.23 | GC_spars: 9.99%
+  Logit σ: 0.202 range: 2.559 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 70.67% (450) | Char->Char: 16.58% (1140)
+Step 2050/20003 | Acc: 40.00% | Rank μ: 15.0 med: 2 top5: 76.8% | PK_w: 6.20 | GC_spars: 9.99%
+  Logit σ: 0.138 range: 1.304 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.58% (452) | Char->Char: 16.75% (1146)
+Step 2060/20003 | Acc: 39.80% | Rank μ: 15.0 med: 2 top5: 76.8% | PK_w: 6.17 | GC_spars: 9.99%
+  Logit σ: 0.152 range: 1.676 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.33% (455) | Char->Char: 16.85% (1151)
+Step 2070/20003 | Acc: 39.60% | Rank μ: 15.3 med: 2 top5: 77.0% | PK_w: 6.14 | GC_spars: 9.99%
+  Logit σ: 0.159 range: 2.102 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 70.39% (456) | Char->Char: 16.84% (1158)
+Step 2080/20003 | Acc: 39.40% | Rank μ: 14.9 med: 2 top5: 77.6% | PK_w: 6.12 | GC_spars: 9.99%
+  Logit σ: 0.199 range: 3.272 | Sig in_range: 99.6% | H: 5.47/5.55
+  Structural Acc | Char->Space: 70.37% (459) | Char->Char: 16.85% (1163)
+Step 2090/20003 | Acc: 39.40% | Rank μ: 15.1 med: 2 top5: 77.8% | PK_w: 6.09 | GC_spars: 9.99%
+  Logit σ: 0.165 range: 1.660 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 70.50% (461) | Char->Char: 17.04% (1168)
+Step 2100/20003 | Acc: 39.20% | Rank μ: 15.1 med: 2 top5: 78.0% | PK_w: 6.06 | GC_spars: 9.99%
+  Logit σ: 0.168 range: 2.163 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 70.63% (463) | Char->Char: 17.21% (1174)
+Step 2110/20003 | Acc: 39.20% | Rank μ: 15.9 med: 2 top5: 77.8% | PK_w: 6.03 | GC_spars: 9.99%
+  Logit σ: 0.164 range: 1.999 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 70.54% (465) | Char->Char: 17.37% (1180)
+Step 2120/20003 | Acc: 39.20% | Rank μ: 15.4 med: 2 top5: 78.2% | PK_w: 6.01 | GC_spars: 9.99%
+  Logit σ: 0.163 range: 1.609 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 70.66% (467) | Char->Char: 17.45% (1186)
+Step 2130/20003 | Acc: 39.80% | Rank μ: 14.9 med: 2 top5: 78.2% | PK_w: 5.98 | GC_spars: 9.99%
+  Logit σ: 0.195 range: 2.666 | Sig in_range: 100.0% | H: 5.49/5.55
+  Structural Acc | Char->Space: 70.79% (469) | Char->Char: 17.53% (1192)
+Step 2140/20003 | Acc: 40.00% | Rank μ: 14.7 med: 2 top5: 78.6% | PK_w: 5.95 | GC_spars: 9.99%
+  Logit σ: 0.130 range: 1.295 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.70% (471) | Char->Char: 17.70% (1198)
+Step 2150/20003 | Acc: 40.00% | Rank μ: 14.7 med: 2 top5: 78.4% | PK_w: 5.93 | GC_spars: 9.99%
+  Logit σ: 0.145 range: 2.026 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.68% (474) | Char->Char: 17.72% (1202)
+Step 2160/20003 | Acc: 40.40% | Rank μ: 14.2 med: 2 top5: 78.6% | PK_w: 5.90 | GC_spars: 9.99%
+  Logit σ: 0.202 range: 2.571 | Sig in_range: 100.0% | H: 5.48/5.55
+  Structural Acc | Char->Space: 70.80% (476) | Char->Char: 17.95% (1209)
+Step 2170/20003 | Acc: 40.40% | Rank μ: 14.0 med: 2 top5: 79.2% | PK_w: 5.87 | GC_spars: 9.99%
+  Logit σ: 0.167 range: 2.112 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 70.92% (478) | Char->Char: 18.04% (1214)
+Step 2180/20003 | Acc: 40.40% | Rank μ: 14.0 med: 2 top5: 79.4% | PK_w: 5.85 | GC_spars: 9.99%
+  Logit σ: 0.179 range: 2.116 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 70.83% (480) | Char->Char: 18.03% (1220)
+Step 2190/20003 | Acc: 40.60% | Rank μ: 14.0 med: 2 top5: 79.2% | PK_w: 5.82 | GC_spars: 9.99%
+  Logit σ: 0.165 range: 1.766 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 70.95% (482) | Char->Char: 18.11% (1226)
+Step 2200/20003 | Acc: 40.80% | Rank μ: 14.2 med: 2 top5: 79.2% | PK_w: 5.79 | GC_spars: 9.99%
+  Logit σ: 0.153 range: 1.648 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.93% (485) | Char->Char: 18.20% (1231)
+Step 2210/20003 | Acc: 40.80% | Rank μ: 14.0 med: 2 top5: 79.0% | PK_w: 5.77 | GC_spars: 9.99%
+  Logit σ: 0.145 range: 1.546 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.84% (487) | Char->Char: 18.37% (1236)
+Step 2220/20003 | Acc: 40.40% | Rank μ: 14.4 med: 2 top5: 79.0% | PK_w: 5.74 | GC_spars: 9.99%
+  Logit σ: 0.188 range: 2.409 | Sig in_range: 100.0% | H: 5.50/5.55
+  Structural Acc | Char->Space: 70.76% (489) | Char->Char: 18.42% (1243)
+Step 2230/20003 | Acc: 40.60% | Rank μ: 14.8 med: 2 top5: 78.6% | PK_w: 5.72 | GC_spars: 9.99%
+  Logit σ: 0.164 range: 1.971 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 70.88% (491) | Char->Char: 18.41% (1249)
+Step 2240/20003 | Acc: 40.60% | Rank μ: 15.2 med: 2 top5: 78.6% | PK_w: 5.69 | GC_spars: 9.99%
+  Logit σ: 0.156 range: 2.194 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 70.99% (493) | Char->Char: 18.66% (1254)
+Step 2250/20003 | Acc: 40.80% | Rank μ: 15.1 med: 2 top5: 79.0% | PK_w: 5.66 | GC_spars: 9.99%
+  Logit σ: 0.152 range: 1.821 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.91% (495) | Char->Char: 18.73% (1260)
+Step 2260/20003 | Acc: 40.60% | Rank μ: 15.4 med: 2 top5: 79.0% | PK_w: 5.64 | GC_spars: 9.99%
+  Logit σ: 0.173 range: 2.333 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 70.82% (497) | Char->Char: 18.80% (1266)
+Step 2270/20003 | Acc: 40.40% | Rank μ: 15.9 med: 2 top5: 79.2% | PK_w: 5.61 | GC_spars: 9.99%
+  Logit σ: 0.130 range: 1.230 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.94% (499) | Char->Char: 18.79% (1272)
+Step 2280/20003 | Acc: 40.00% | Rank μ: 16.2 med: 2 top5: 79.4% | PK_w: 5.59 | GC_spars: 9.99%
+  Logit σ: 0.176 range: 2.239 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 70.86% (501) | Char->Char: 18.86% (1278)
+Step 2290/20003 | Acc: 40.20% | Rank μ: 15.5 med: 2 top5: 79.6% | PK_w: 5.56 | GC_spars: 9.99%
+  Logit σ: 0.161 range: 2.071 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 70.97% (503) | Char->Char: 19.16% (1284)
+Step 2300/20003 | Acc: 40.00% | Rank μ: 15.5 med: 2 top5: 79.4% | PK_w: 5.54 | GC_spars: 9.99%
+  Logit σ: 0.201 range: 3.312 | Sig in_range: 99.6% | H: 5.43/5.55
+  Structural Acc | Char->Space: 70.95% (506) | Char->Char: 19.39% (1289)
+Step 2310/20003 | Acc: 39.60% | Rank μ: 15.6 med: 2 top5: 79.4% | PK_w: 5.51 | GC_spars: 9.99%
+  Logit σ: 0.126 range: 1.073 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 70.87% (508) | Char->Char: 19.40% (1294)
+Step 2320/20003 | Acc: 39.60% | Rank μ: 15.2 med: 2 top5: 79.8% | PK_w: 5.49 | GC_spars: 9.99%
+  Logit σ: 0.175 range: 2.294 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 70.98% (510) | Char->Char: 19.38% (1300)
+Step 2330/20003 | Acc: 40.20% | Rank μ: 15.2 med: 2 top5: 80.2% | PK_w: 5.46 | GC_spars: 9.99%
+  Logit σ: 0.177 range: 2.627 | Sig in_range: 100.0% | H: 5.50/5.55
+  Structural Acc | Char->Space: 70.96% (513) | Char->Char: 19.46% (1305)
+Step 2340/20003 | Acc: 40.00% | Rank μ: 14.7 med: 2 top5: 80.8% | PK_w: 5.44 | GC_spars: 9.99%
+  Logit σ: 0.160 range: 1.968 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 71.07% (515) | Char->Char: 19.47% (1310)
+Step 2350/20003 | Acc: 40.20% | Rank μ: 14.6 med: 2 top5: 80.6% | PK_w: 5.41 | GC_spars: 9.99%
+  Logit σ: 0.141 range: 1.868 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 71.18% (517) | Char->Char: 19.53% (1316)
+Step 2360/20003 | Acc: 40.60% | Rank μ: 14.1 med: 2 top5: 80.8% | PK_w: 5.39 | GC_spars: 9.99%
+  Logit σ: 0.194 range: 2.904 | Sig in_range: 99.6% | H: 5.47/5.55
+  Structural Acc | Char->Space: 71.35% (520) | Char->Char: 19.53% (1321)
+Step 2370/20003 | Acc: 40.40% | Rank μ: 14.8 med: 2 top5: 80.4% | PK_w: 5.37 | GC_spars: 9.99%
+  Logit σ: 0.114 range: 1.070 | Sig in_range: 100.0% | H: 5.54/5.55
+  Structural Acc | Char->Space: 71.26% (522) | Char->Char: 19.61% (1326)
+Step 2380/20003 | Acc: 40.20% | Rank μ: 14.8 med: 2 top5: 80.4% | PK_w: 5.34 | GC_spars: 9.99%
+  Logit σ: 0.199 range: 3.246 | Sig in_range: 99.6% | H: 5.44/5.55
+  Structural Acc | Char->Space: 71.18% (524) | Char->Char: 19.73% (1333)
+Step 2390/20003 | Acc: 40.80% | Rank μ: 14.3 med: 2 top5: 80.8% | PK_w: 5.32 | GC_spars: 9.99%
+  Logit σ: 0.151 range: 1.786 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 71.29% (526) | Char->Char: 19.81% (1338)
+Step 2400/20003 | Acc: 41.00% | Rank μ: 14.3 med: 2 top5: 81.2% | PK_w: 5.30 | GC_spars: 9.99%
+  Logit σ: 0.144 range: 1.781 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 71.40% (528) | Char->Char: 19.87% (1344)
+Step 2410/20003 | Acc: 41.20% | Rank μ: 14.5 med: 2 top5: 81.2% | PK_w: 5.27 | GC_spars: 9.99%
+  Logit σ: 0.112 range: 1.221 | Sig in_range: 100.0% | H: 5.54/5.55
+  Structural Acc | Char->Space: 71.56% (531) | Char->Char: 19.88% (1348)
+Step 2420/20003 | Acc: 41.20% | Rank μ: 14.6 med: 2 top5: 81.4% | PK_w: 5.25 | GC_spars: 9.99%
+  Logit σ: 0.144 range: 1.826 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 71.72% (534) | Char->Char: 19.88% (1353)
+Step 2430/20003 | Acc: 41.60% | Rank μ: 14.4 med: 2 top5: 81.6% | PK_w: 5.22 | GC_spars: 9.99%
+  Logit σ: 0.191 range: 2.914 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 71.78% (535) | Char->Char: 20.07% (1360)
+Step 2440/20003 | Acc: 41.60% | Rank μ: 14.4 med: 2 top5: 81.8% | PK_w: 5.20 | GC_spars: 9.99%
+  Logit σ: 0.174 range: 2.641 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 71.93% (538) | Char->Char: 20.16% (1364)
+Step 2450/20003 | Acc: 42.00% | Rank μ: 14.4 med: 2 top5: 82.6% | PK_w: 5.18 | GC_spars: 9.99%
+  Logit σ: 0.202 range: 3.068 | Sig in_range: 99.6% | H: 5.45/5.55
+  Structural Acc | Char->Space: 72.09% (541) | Char->Char: 20.23% (1369)
+Step 2460/20003 | Acc: 41.80% | Rank μ: 14.2 med: 2 top5: 82.8% | PK_w: 5.16 | GC_spars: 9.99%
+  Logit σ: 0.160 range: 1.674 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 72.19% (543) | Char->Char: 20.31% (1374)
+Step 2470/20003 | Acc: 42.00% | Rank μ: 13.9 med: 2 top5: 82.8% | PK_w: 5.13 | GC_spars: 9.99%
+  Logit σ: 0.166 range: 2.251 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 72.34% (546) | Char->Char: 20.38% (1379)
+Step 2480/20003 | Acc: 41.60% | Rank μ: 13.9 med: 2 top5: 82.6% | PK_w: 5.11 | GC_spars: 9.99%
+  Logit σ: 0.132 range: 1.533 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 72.26% (548) | Char->Char: 20.52% (1384)
+Step 2490/20003 | Acc: 41.40% | Rank μ: 14.3 med: 2 top5: 83.2% | PK_w: 5.09 | GC_spars: 9.99%
+  Logit σ: 0.142 range: 1.861 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 72.18% (550) | Char->Char: 20.58% (1390)
+Step 2500/20003 | Acc: 41.80% | Rank μ: 14.0 med: 2 top5: 83.2% | PK_w: 5.06 | GC_spars: 9.99%
+  Logit σ: 0.131 range: 1.508 | Sig in_range: 100.0% | H: 5.53/5.55
 
 [DIAGNOSTIC] Running Linear Probe on 200 samples...
   >>> LINEAR PROBE ACCURACY: 99.00% (Internal Representation Quality)
-  [!] ALERT: Representation (99.0%) >> Readout (21.4%). Readout is the bottleneck.
-  Top Bigrams (min 5): 'o ': 100% (11), 't ': 100% (20), 's ': 100% (5)
-Step 510/20003 | Acc: 21.60% | Gate: 1.00 | GC_spars: 9.33% | CF_err: 0.1957 | PK_w: 29.31 | Settle: 10.0000
-  Top Bigrams (min 5): 'o ': 100% (11), 't ': 100% (21), 's ': 100% (5)
-Step 520/20003 | Acc: 22.00% | Gate: 1.00 | GC_spars: 10.21% | CF_err: 0.1715 | PK_w: 29.51 | Settle: 9.9884
-  Top Bigrams (min 5): 'o ': 100% (12), 't ': 100% (21), 's ': 100% (5)
-Step 530/20003 | Acc: 22.00% | Gate: 1.00 | GC_spars: 9.67% | CF_err: 0.2058 | PK_w: 29.73 | Settle: 9.9730
-  Top Bigrams (min 5): 'o ': 100% (13), 't ': 100% (21), 's ': 100% (5)
-Step 540/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 10.60% | CF_err: 0.1564 | PK_w: 29.93 | Settle: 9.9734
-  Top Bigrams (min 5): 'o ': 100% (13), 't ': 100% (21), 's ': 100% (5)
-Step 550/20003 | Acc: 22.00% | Gate: 1.00 | GC_spars: 12.16% | CF_err: 0.1275 | PK_w: 30.12 | Settle: 9.9604
-  Top Bigrams (min 5): 'o ': 100% (13), 't ': 100% (21), 's ': 100% (5)
-Step 560/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 11.67% | CF_err: 0.1492 | PK_w: 30.32 | Settle: 9.9599
-  Top Bigrams (min 5): 'o ': 100% (13), 't ': 100% (21), 's ': 100% (5)
-Step 570/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 10.64% | CF_err: 0.1580 | PK_w: 30.51 | Settle: 9.9547
-  Top Bigrams (min 5): 'o ': 100% (13), 't ': 100% (22), 's ': 100% (5)
-Step 580/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 10.40% | CF_err: 0.1886 | PK_w: 30.70 | Settle: 9.9672
-  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (22), 's ': 100% (5)
-Step 590/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 9.96% | CF_err: 0.2073 | PK_w: 30.91 | Settle: 9.9511
-  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (24), 's ': 100% (5)
-Step 600/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 11.18% | CF_err: 0.1525 | PK_w: 31.10 | Settle: 9.9517
-  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (24), 's ': 100% (5)
-Step 610/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 9.72% | CF_err: 0.1998 | PK_w: 31.29 | Settle: 9.9584
-  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (25), 's ': 100% (5)
-Step 620/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 6.74% | CF_err: 0.3006 | PK_w: 31.48 | Settle: 9.9642
-  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (25), 's ': 100% (5)
-Step 630/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 10.35% | CF_err: 0.1421 | PK_w: 31.67 | Settle: 9.9700
-  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (26), 's ': 100% (5)
-Step 640/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 9.77% | CF_err: 0.1791 | PK_w: 31.86 | Settle: 9.9536
-  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (26), 's ': 100% (5)
-Step 650/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 10.94% | CF_err: 0.1273 | PK_w: 32.03 | Settle: 9.9764
-  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (26), 's ': 100% (5)
-Step 660/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 9.72% | CF_err: 0.2052 | PK_w: 32.22 | Settle: 9.9794
-  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (27), 's ': 100% (5)
-Step 670/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 10.89% | CF_err: 0.1374 | PK_w: 32.38 | Settle: 9.9746
-  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (27), 's ': 100% (6)
-Step 680/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 10.40% | CF_err: 0.1466 | PK_w: 32.54 | Settle: 9.9637
-  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (27), 's ': 100% (6)
-Step 690/20003 | Acc: 22.80% | Gate: 1.00 | GC_spars: 11.91% | CF_err: 0.1281 | PK_w: 32.72 | Settle: 9.9654
-  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (28), 's ': 100% (7)
-Step 700/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 12.45% | CF_err: 0.0962 | PK_w: 32.88 | Settle: 9.9532
-  Top Bigrams (min 5): 'o ': 100% (14), 't ': 100% (28), 's ': 100% (7)
-Step 710/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 8.94% | CF_err: 0.1732 | PK_w: 33.07 | Settle: 9.9700
-  Top Bigrams (min 5): 'o ': 100% (15), 't ': 100% (28), 's ': 100% (7)
-Step 720/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 9.96% | CF_err: 0.1783 | PK_w: 33.24 | Settle: 9.9453
-  Top Bigrams (min 5): 'o ': 100% (15), 't ': 100% (28), 's ': 100% (7)
-Step 730/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 9.52% | CF_err: 0.1677 | PK_w: 33.40 | Settle: 9.9778
-  Top Bigrams (min 5): 'o ': 100% (15), 't ': 100% (28), 's ': 100% (7)
-Step 740/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 8.64% | CF_err: 0.2027 | PK_w: 33.56 | Settle: 9.9541
-  Top Bigrams (min 5): 'o ': 100% (16), 't ': 100% (28), 's ': 100% (7)
-Step 750/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 9.28% | CF_err: 0.1396 | PK_w: 33.73 | Settle: 9.9613
-  Top Bigrams (min 5): 'o ': 100% (16), 't ': 100% (29), 's ': 100% (8)
-Step 760/20003 | Acc: 22.60% | Gate: 1.00 | GC_spars: 9.77% | CF_err: 0.1584 | PK_w: 33.88 | Settle: 9.9726
-  Top Bigrams (min 5): 'o ': 100% (17), 't ': 100% (29), 's ': 100% (8)
-Step 770/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 10.40% | CF_err: 0.1375 | PK_w: 34.05 | Settle: 9.9642
-  Top Bigrams (min 5): 'o ': 100% (17), 't ': 100% (30), 's ': 100% (9)
-Step 780/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 10.01% | CF_err: 0.1292 | PK_w: 34.22 | Settle: 9.9591
-  Top Bigrams (min 5): 'o ': 100% (17), 't ': 100% (31), 's ': 100% (9)
-Step 790/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 7.57% | CF_err: 0.2013 | PK_w: 34.39 | Settle: 9.9680
-  Top Bigrams (min 5): 'o ': 100% (17), 't ': 100% (31), 's ': 100% (10)
-Step 800/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 12.50% | CF_err: 0.0917 | PK_w: 34.52 | Settle: 9.9666
-  Top Bigrams (min 5): 'o ': 100% (17), 't ': 100% (32), 's ': 100% (10)
-Step 810/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 12.60% | CF_err: 0.0842 | PK_w: 34.66 | Settle: 9.9647
-  Top Bigrams (min 5): 'o ': 100% (17), 't ': 100% (32), 's ': 100% (10)
-Step 820/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 10.60% | CF_err: 0.1296 | PK_w: 34.81 | Settle: 9.9817
-  Top Bigrams (min 5): 'o ': 100% (18), 't ': 100% (32), 's ': 100% (10)
-Step 830/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 10.50% | CF_err: 0.1430 | PK_w: 34.97 | Settle: 9.9647
-  Top Bigrams (min 5): 'o ': 100% (18), 't ': 100% (32), 's ': 100% (10)
-Step 840/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 9.28% | CF_err: 0.1428 | PK_w: 35.11 | Settle: 9.9589
-  Top Bigrams (min 5): 'o ': 100% (18), 't ': 100% (32), 's ': 100% (10)
-Step 850/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 10.69% | CF_err: 0.0968 | PK_w: 35.26 | Settle: 9.9484
-  Top Bigrams (min 5): 'o ': 100% (19), 't ': 100% (32), 's ': 100% (10)
-Step 860/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 12.74% | CF_err: 0.0819 | PK_w: 35.40 | Settle: 9.9773
-  Top Bigrams (min 5): 'o ': 100% (19), 't ': 100% (32), 's ': 100% (10)
-Step 870/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 8.35% | CF_err: 0.2350 | PK_w: 35.56 | Settle: 9.9664
-  Top Bigrams (min 5): 'o ': 100% (19), 't ': 100% (33), 's ': 100% (11)
-Step 880/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 9.33% | CF_err: 0.1686 | PK_w: 35.70 | Settle: 9.9627
-  Top Bigrams (min 5): 'o ': 100% (19), 't ': 100% (34), 's ': 100% (12)
-Step 890/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 11.33% | CF_err: 0.0959 | PK_w: 35.84 | Settle: 9.9621
-  Top Bigrams (min 5): 'o ': 100% (19), 't ': 100% (34), 's ': 100% (12)
-Step 900/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 9.33% | CF_err: 0.1370 | PK_w: 35.97 | Settle: 9.9612
-  Top Bigrams (min 5): 'o ': 100% (19), 't ': 100% (34), 's ': 100% (12)
-Step 910/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 7.28% | CF_err: 0.1867 | PK_w: 36.10 | Settle: 9.9616
-  Top Bigrams (min 5): 'o ': 100% (19), 't ': 100% (36), 's ': 100% (12)
-Step 920/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 9.86% | CF_err: 0.1321 | PK_w: 36.22 | Settle: 9.9598
-  Top Bigrams (min 5): 'o ': 100% (20), 't ': 100% (36), 's ': 100% (12)
-Step 930/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 9.18% | CF_err: 0.1914 | PK_w: 36.38 | Settle: 9.9725
-  Top Bigrams (min 5): 'o ': 100% (20), 't ': 100% (36), 's ': 100% (12)
-Step 940/20003 | Acc: 22.40% | Gate: 1.00 | GC_spars: 9.52% | CF_err: 0.1635 | PK_w: 36.52 | Settle: 9.9653
-  Top Bigrams (min 5): 'o ': 100% (21), 't ': 100% (37), 's ': 100% (12)
-Step 950/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 8.50% | CF_err: 0.1749 | PK_w: 36.66 | Settle: 9.9709
-  Top Bigrams (min 5): 'o ': 100% (21), 't ': 100% (37), 's ': 100% (12)
-Step 960/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 11.38% | CF_err: 0.0946 | PK_w: 36.81 | Settle: 9.9689
-  Top Bigrams (min 5): 'o ': 100% (22), 't ': 100% (37), 's ': 100% (12)
-Step 970/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 9.96% | CF_err: 0.1313 | PK_w: 36.94 | Settle: 9.9586
-  Top Bigrams (min 5): 'o ': 100% (22), 't ': 100% (37), 's ': 100% (12)
-Step 980/20003 | Acc: 22.20% | Gate: 1.00 | GC_spars: 10.94% | CF_err: 0.0949 | PK_w: 37.08 | Settle: 9.9462
-  Top Bigrams (min 5): 'o ': 100% (22), 't ': 100% (38), 's ': 100% (12)
+  [!] ALERT: Representation (99.0%) >> Readout (41.8%). Readout is the bottleneck.
+  Structural Acc | Char->Space: 72.28% (552) | Char->Char: 20.63% (1396)
+Step 2510/20003 | Acc: 42.20% | Rank μ: 12.6 med: 2 top5: 83.6% | PK_w: 5.04 | GC_spars: 9.99%
+  Logit σ: 0.161 range: 2.208 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 72.38% (554) | Char->Char: 20.68% (1402)
+Step 2520/20003 | Acc: 42.40% | Rank μ: 12.1 med: 2 top5: 84.2% | PK_w: 5.02 | GC_spars: 9.99%
+  Logit σ: 0.151 range: 1.927 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 72.48% (556) | Char->Char: 20.67% (1408)
+Step 2530/20003 | Acc: 42.60% | Rank μ: 12.0 med: 2 top5: 84.4% | PK_w: 4.99 | GC_spars: 9.99%
+  Logit σ: 0.182 range: 2.876 | Sig in_range: 99.6% | H: 5.48/5.55
+  Structural Acc | Char->Space: 72.63% (559) | Char->Char: 20.74% (1413)
+Step 2540/20003 | Acc: 43.20% | Rank μ: 12.8 med: 2 top5: 84.0% | PK_w: 4.97 | GC_spars: 9.99%
+  Logit σ: 0.160 range: 1.643 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 72.73% (561) | Char->Char: 20.94% (1418)
+Step 2550/20003 | Acc: 43.60% | Rank μ: 12.7 med: 2 top5: 84.2% | PK_w: 4.95 | GC_spars: 9.99%
+  Logit σ: 0.174 range: 2.197 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 72.82% (563) | Char->Char: 21.07% (1424)
+Step 2560/20003 | Acc: 43.80% | Rank μ: 12.7 med: 2 top5: 84.6% | PK_w: 4.93 | GC_spars: 9.99%
+  Logit σ: 0.167 range: 2.526 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 72.74% (565) | Char->Char: 21.12% (1430)
+Step 2570/20003 | Acc: 44.20% | Rank μ: 12.4 med: 2 top5: 84.6% | PK_w: 4.91 | GC_spars: 9.99%
+  Logit σ: 0.119 range: 1.509 | Sig in_range: 100.0% | H: 5.54/5.55
+  Structural Acc | Char->Space: 72.89% (568) | Char->Char: 21.13% (1434)
+Step 2580/20003 | Acc: 43.80% | Rank μ: 12.4 med: 2 top5: 84.2% | PK_w: 4.89 | GC_spars: 9.99%
+  Logit σ: 0.115 range: 1.113 | Sig in_range: 100.0% | H: 5.54/5.55
+  Structural Acc | Char->Space: 72.81% (570) | Char->Char: 21.11% (1440)
+Step 2590/20003 | Acc: 43.80% | Rank μ: 12.4 med: 2 top5: 84.0% | PK_w: 4.87 | GC_spars: 9.99%
+  Logit σ: 0.159 range: 1.949 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 72.73% (572) | Char->Char: 21.23% (1446)
+Step 2600/20003 | Acc: 43.80% | Rank μ: 12.2 med: 2 top5: 84.2% | PK_w: 4.85 | GC_spars: 9.99%
+  Logit σ: 0.246 range: 4.009 | Sig in_range: 99.6% | H: 5.30/5.55
+  Structural Acc | Char->Space: 72.87% (575) | Char->Char: 21.23% (1451)
+Step 2610/20003 | Acc: 43.40% | Rank μ: 11.9 med: 2 top5: 84.0% | PK_w: 4.83 | GC_spars: 9.99%
+  Logit σ: 0.095 range: 0.864 | Sig in_range: 100.0% | H: 5.54/5.55
+  Structural Acc | Char->Space: 72.96% (577) | Char->Char: 21.15% (1456)
+Step 2620/20003 | Acc: 43.40% | Rank μ: 11.9 med: 2 top5: 84.0% | PK_w: 4.81 | GC_spars: 9.99%
+  Logit σ: 0.137 range: 1.711 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 72.88% (579) | Char->Char: 21.20% (1462)
+Step 2630/20003 | Acc: 43.00% | Rank μ: 11.9 med: 2 top5: 84.2% | PK_w: 4.79 | GC_spars: 9.99%
+  Logit σ: 0.143 range: 1.876 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 72.81% (581) | Char->Char: 21.25% (1468)
+Step 2640/20003 | Acc: 42.60% | Rank μ: 12.4 med: 2 top5: 84.0% | PK_w: 4.76 | GC_spars: 9.99%
+  Logit σ: 0.136 range: 1.387 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 72.73% (583) | Char->Char: 21.30% (1474)
+Step 2650/20003 | Acc: 42.80% | Rank μ: 12.5 med: 2 top5: 84.0% | PK_w: 4.74 | GC_spars: 9.99%
+  Logit σ: 0.165 range: 2.173 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 72.82% (585) | Char->Char: 21.42% (1480)
+Step 2660/20003 | Acc: 42.80% | Rank μ: 12.5 med: 2 top5: 84.2% | PK_w: 4.72 | GC_spars: 9.99%
+  Logit σ: 0.131 range: 1.189 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 72.91% (587) | Char->Char: 21.53% (1486)
+Step 2670/20003 | Acc: 42.60% | Rank μ: 12.5 med: 2 top5: 84.2% | PK_w: 4.70 | GC_spars: 9.99%
+  Logit σ: 0.167 range: 2.175 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 73.01% (589) | Char->Char: 21.58% (1492)
+Step 2680/20003 | Acc: 43.20% | Rank μ: 12.5 med: 2 top5: 84.4% | PK_w: 4.68 | GC_spars: 9.99%
+  Logit σ: 0.180 range: 2.887 | Sig in_range: 99.6% | H: 5.48/5.55
+  Structural Acc | Char->Space: 72.97% (592) | Char->Char: 21.64% (1497)
+Step 2690/20003 | Acc: 43.00% | Rank μ: 12.5 med: 2 top5: 85.0% | PK_w: 4.66 | GC_spars: 9.99%
+  Logit σ: 0.134 range: 1.648 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 73.06% (594) | Char->Char: 21.70% (1502)
+Step 2700/20003 | Acc: 43.00% | Rank μ: 12.3 med: 2 top5: 85.2% | PK_w: 4.64 | GC_spars: 9.99%
+  Logit σ: 0.178 range: 2.350 | Sig in_range: 100.0% | H: 5.50/5.55
+  Structural Acc | Char->Space: 72.99% (596) | Char->Char: 21.82% (1508)
+Step 2710/20003 | Acc: 43.00% | Rank μ: 12.8 med: 2 top5: 85.6% | PK_w: 4.62 | GC_spars: 9.99%
+  Logit σ: 0.175 range: 2.643 | Sig in_range: 99.6% | H: 5.48/5.55
+  Structural Acc | Char->Space: 72.95% (599) | Char->Char: 21.88% (1513)
+Step 2720/20003 | Acc: 42.80% | Rank μ: 12.5 med: 2 top5: 85.6% | PK_w: 4.60 | GC_spars: 9.99%
+  Logit σ: 0.151 range: 2.145 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 72.88% (601) | Char->Char: 21.81% (1518)
+Step 2730/20003 | Acc: 42.80% | Rank μ: 12.0 med: 2 top5: 86.0% | PK_w: 4.58 | GC_spars: 9.99%
+  Logit σ: 0.143 range: 1.537 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 72.80% (603) | Char->Char: 21.85% (1524)
+Step 2740/20003 | Acc: 42.80% | Rank μ: 11.6 med: 2 top5: 86.0% | PK_w: 4.56 | GC_spars: 9.99%
+  Logit σ: 0.209 range: 2.937 | Sig in_range: 99.6% | H: 5.48/5.55
+  Structural Acc | Char->Space: 72.89% (605) | Char->Char: 22.01% (1531)
+Step 2750/20003 | Acc: 42.80% | Rank μ: 12.1 med: 2 top5: 86.0% | PK_w: 4.54 | GC_spars: 9.99%
+  Logit σ: 0.097 range: 1.059 | Sig in_range: 100.0% | H: 5.54/5.55
+  Structural Acc | Char->Space: 72.98% (607) | Char->Char: 22.07% (1536)
+Step 2760/20003 | Acc: 43.00% | Rank μ: 11.7 med: 2 top5: 86.0% | PK_w: 4.52 | GC_spars: 9.99%
+  Logit σ: 0.120 range: 1.560 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 72.91% (609) | Char->Char: 22.18% (1542)
+Step 2770/20003 | Acc: 43.00% | Rank μ: 11.3 med: 2 top5: 85.6% | PK_w: 4.50 | GC_spars: 9.99%
+  Logit σ: 0.142 range: 1.468 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 72.83% (611) | Char->Char: 22.16% (1548)
+Step 2780/20003 | Acc: 43.60% | Rank μ: 11.2 med: 2 top5: 85.8% | PK_w: 4.49 | GC_spars: 9.99%
+  Logit σ: 0.183 range: 2.592 | Sig in_range: 100.0% | H: 5.50/5.55
+  Structural Acc | Char->Space: 72.92% (613) | Char->Char: 22.33% (1554)
+Step 2790/20003 | Acc: 43.20% | Rank μ: 11.6 med: 2 top5: 85.6% | PK_w: 4.47 | GC_spars: 9.99%
+  Logit σ: 0.181 range: 2.859 | Sig in_range: 99.6% | H: 5.47/5.55
+  Structural Acc | Char->Space: 73.05% (616) | Char->Char: 22.32% (1559)
+Step 2800/20003 | Acc: 43.00% | Rank μ: 11.8 med: 2 top5: 85.6% | PK_w: 4.45 | GC_spars: 9.99%
+  Logit σ: 0.120 range: 1.270 | Sig in_range: 100.0% | H: 5.54/5.55
+  Structural Acc | Char->Space: 73.14% (618) | Char->Char: 22.38% (1564)
+Step 2810/20003 | Acc: 43.60% | Rank μ: 11.7 med: 2 top5: 86.0% | PK_w: 4.43 | GC_spars: 9.99%
+  Logit σ: 0.197 range: 3.221 | Sig in_range: 99.6% | H: 5.44/5.55
+  Structural Acc | Char->Space: 73.06% (620) | Char->Char: 22.53% (1571)
+Step 2820/20003 | Acc: 44.00% | Rank μ: 11.7 med: 2 top5: 85.6% | PK_w: 4.41 | GC_spars: 9.99%
+  Logit σ: 0.135 range: 1.360 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 73.15% (622) | Char->Char: 22.59% (1576)
+Step 2830/20003 | Acc: 43.80% | Rank μ: 12.2 med: 2 top5: 85.4% | PK_w: 4.39 | GC_spars: 9.99%
+  Logit σ: 0.167 range: 1.824 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 73.24% (624) | Char->Char: 22.57% (1582)
+Step 2840/20003 | Acc: 43.80% | Rank μ: 12.3 med: 2 top5: 85.0% | PK_w: 4.38 | GC_spars: 9.99%
+  Logit σ: 0.131 range: 1.542 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 73.16% (626) | Char->Char: 22.61% (1588)
+Step 2850/20003 | Acc: 43.80% | Rank μ: 11.9 med: 2 top5: 85.2% | PK_w: 4.36 | GC_spars: 9.99%
+  Logit σ: 0.238 range: 3.869 | Sig in_range: 99.6% | H: 5.26/5.55
+  Structural Acc | Char->Space: 73.29% (629) | Char->Char: 22.66% (1593)
+Step 2860/20003 | Acc: 43.80% | Rank μ: 12.4 med: 2 top5: 85.2% | PK_w: 4.34 | GC_spars: 9.99%
+  Logit σ: 0.127 range: 1.454 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 73.22% (631) | Char->Char: 22.78% (1598)
+Step 2870/20003 | Acc: 43.80% | Rank μ: 11.7 med: 2 top5: 85.8% | PK_w: 4.32 | GC_spars: 9.99%
+  Logit σ: 0.149 range: 1.595 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 73.14% (633) | Char->Char: 22.82% (1604)
+Step 2880/20003 | Acc: 43.40% | Rank μ: 11.8 med: 2 top5: 85.4% | PK_w: 4.30 | GC_spars: 9.99%
+  Logit σ: 0.162 range: 2.179 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 73.23% (635) | Char->Char: 22.73% (1610)
+Step 2890/20003 | Acc: 43.20% | Rank μ: 12.3 med: 2 top5: 85.6% | PK_w: 4.29 | GC_spars: 9.99%
+  Logit σ: 0.158 range: 1.540 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 73.31% (637) | Char->Char: 22.77% (1616)
+Step 2900/20003 | Acc: 43.40% | Rank μ: 12.0 med: 2 top5: 85.6% | PK_w: 4.27 | GC_spars: 9.99%
+  Logit σ: 0.175 range: 2.454 | Sig in_range: 100.0% | H: 5.50/5.55
+  Structural Acc | Char->Space: 73.44% (640) | Char->Char: 22.89% (1621)
+Step 2910/20003 | Acc: 43.40% | Rank μ: 11.6 med: 2 top5: 86.0% | PK_w: 4.25 | GC_spars: 9.99%
+  Logit σ: 0.101 range: 1.181 | Sig in_range: 100.0% | H: 5.54/5.55
+  Structural Acc | Char->Space: 73.36% (642) | Char->Char: 22.94% (1626)
+Step 2920/20003 | Acc: 43.60% | Rank μ: 11.2 med: 2 top5: 86.0% | PK_w: 4.23 | GC_spars: 9.99%
+  Logit σ: 0.156 range: 2.069 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 73.45% (644) | Char->Char: 23.04% (1632)
+Step 2930/20003 | Acc: 43.40% | Rank μ: 11.3 med: 2 top5: 85.6% | PK_w: 4.22 | GC_spars: 9.99%
+  Logit σ: 0.131 range: 1.653 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 73.57% (647) | Char->Char: 23.04% (1636)
+Step 2940/20003 | Acc: 43.40% | Rank μ: 11.8 med: 2 top5: 85.4% | PK_w: 4.20 | GC_spars: 9.99%
+  Logit σ: 0.116 range: 1.320 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 73.65% (649) | Char->Char: 23.14% (1642)
+Step 2950/20003 | Acc: 43.60% | Rank μ: 12.0 med: 2 top5: 85.2% | PK_w: 4.18 | GC_spars: 9.99%
+  Logit σ: 0.168 range: 2.714 | Sig in_range: 99.6% | H: 5.49/5.55
+  Structural Acc | Char->Space: 73.77% (652) | Char->Char: 23.19% (1647)
+Step 2960/20003 | Acc: 43.80% | Rank μ: 11.7 med: 2 top5: 85.4% | PK_w: 4.17 | GC_spars: 9.99%
+  Logit σ: 0.191 range: 2.283 | Sig in_range: 100.0% | H: 5.50/5.55
+  Structural Acc | Char->Space: 73.81% (653) | Char->Char: 23.34% (1654)
+Step 2970/20003 | Acc: 44.00% | Rank μ: 11.5 med: 2 top5: 85.8% | PK_w: 4.15 | GC_spars: 9.99%
+  Logit σ: 0.197 range: 3.062 | Sig in_range: 99.6% | H: 5.45/5.55
+  Structural Acc | Char->Space: 73.78% (656) | Char->Char: 23.39% (1659)
+Step 2980/20003 | Acc: 43.80% | Rank μ: 11.9 med: 2 top5: 85.6% | PK_w: 4.13 | GC_spars: 9.99%
+  Logit σ: 0.130 range: 1.709 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 73.71% (658) | Char->Char: 23.44% (1664)
+Step 2990/20003 | Acc: 43.80% | Rank μ: 11.4 med: 2 top5: 85.8% | PK_w: 4.11 | GC_spars: 9.99%
+  Logit σ: 0.148 range: 1.647 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 73.79% (660) | Char->Char: 23.47% (1670)
+Step 3000/20003 | Acc: 43.80% | Rank μ: 11.2 med: 2 top5: 86.2% | PK_w: 4.10 | GC_spars: 9.99%
+  Logit σ: 0.159 range: 1.842 | Sig in_range: 100.0% | H: 5.52/5.55
+
+[DIAGNOSTIC] Running Linear Probe on 200 samples...
+  >>> LINEAR PROBE ACCURACY: 96.50% (Internal Representation Quality)
+  [!] ALERT: Representation (96.5%) >> Readout (43.8%). Readout is the bottleneck.
+  Structural Acc | Char->Space: 73.87% (662) | Char->Char: 23.51% (1676)
+Step 3010/20003 | Acc: 44.00% | Rank μ: 11.9 med: 2 top5: 86.4% | PK_w: 4.08 | GC_spars: 9.99%
+  Logit σ: 0.217 range: 3.458 | Sig in_range: 99.6% | H: 5.39/5.55
+  Structural Acc | Char->Space: 73.68% (665) | Char->Char: 23.62% (1681)
+Step 3020/20003 | Acc: 44.00% | Rank μ: 11.7 med: 2 top5: 86.2% | PK_w: 4.06 | GC_spars: 9.99%
+  Logit σ: 0.158 range: 2.331 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 73.76% (667) | Char->Char: 23.59% (1687)
+Step 3030/20003 | Acc: 43.40% | Rank μ: 11.7 med: 2 top5: 86.2% | PK_w: 4.05 | GC_spars: 9.99%
+  Logit σ: 0.141 range: 1.576 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 73.84% (669) | Char->Char: 23.58% (1692)
+Step 3040/20003 | Acc: 43.00% | Rank μ: 10.8 med: 2 top5: 86.6% | PK_w: 4.03 | GC_spars: 9.99%
+  Logit σ: 0.177 range: 2.565 | Sig in_range: 99.6% | H: 5.49/5.55
+  Structural Acc | Char->Space: 73.77% (671) | Char->Char: 23.62% (1698)
+Step 3050/20003 | Acc: 42.40% | Rank μ: 10.8 med: 2 top5: 86.8% | PK_w: 4.02 | GC_spars: 9.99%
+  Logit σ: 0.176 range: 2.603 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 73.70% (673) | Char->Char: 23.65% (1704)
+Step 3060/20003 | Acc: 42.80% | Rank μ: 10.8 med: 2 top5: 86.8% | PK_w: 4.00 | GC_spars: 9.99%
+  Logit σ: 0.206 range: 3.350 | Sig in_range: 99.6% | H: 5.43/5.55
+  Structural Acc | Char->Space: 73.82% (676) | Char->Char: 23.70% (1709)
+Step 3070/20003 | Acc: 43.00% | Rank μ: 11.0 med: 2 top5: 86.8% | PK_w: 3.98 | GC_spars: 9.99%
+  Logit σ: 0.151 range: 2.356 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 73.89% (678) | Char->Char: 23.75% (1714)
+Step 3080/20003 | Acc: 43.00% | Rank μ: 11.5 med: 2 top5: 87.0% | PK_w: 3.97 | GC_spars: 9.99%
+  Logit σ: 0.093 range: 0.860 | Sig in_range: 100.0% | H: 5.54/5.55
+  Structural Acc | Char->Space: 73.97% (680) | Char->Char: 23.66% (1720)
+Step 3090/20003 | Acc: 42.80% | Rank μ: 11.0 med: 2 top5: 87.4% | PK_w: 3.95 | GC_spars: 9.99%
+  Logit σ: 0.164 range: 2.365 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 74.05% (682) | Char->Char: 23.70% (1726)
+Step 3100/20003 | Acc: 43.20% | Rank μ: 11.0 med: 2 top5: 87.2% | PK_w: 3.93 | GC_spars: 9.99%
+  Logit σ: 0.149 range: 2.166 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 74.16% (685) | Char->Char: 23.80% (1731)
+Step 3110/20003 | Acc: 44.00% | Rank μ: 10.5 med: 2 top5: 87.6% | PK_w: 3.92 | GC_spars: 9.99%
+  Logit σ: 0.122 range: 1.287 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 74.24% (687) | Char->Char: 23.91% (1736)
+Step 3120/20003 | Acc: 44.00% | Rank μ: 10.9 med: 2 top5: 87.6% | PK_w: 3.90 | GC_spars: 9.99%
+  Logit σ: 0.179 range: 2.867 | Sig in_range: 100.0% | H: 5.49/5.55
+  Structural Acc | Char->Space: 74.17% (689) | Char->Char: 24.00% (1742)
+Step 3130/20003 | Acc: 44.00% | Rank μ: 10.8 med: 2 top5: 87.6% | PK_w: 3.89 | GC_spars: 9.99%
+  Logit σ: 0.169 range: 2.468 | Sig in_range: 100.0% | H: 5.50/5.55
+  Structural Acc | Char->Space: 74.24% (691) | Char->Char: 23.97% (1748)
+Step 3140/20003 | Acc: 44.80% | Rank μ: 10.4 med: 2 top5: 87.8% | PK_w: 3.87 | GC_spars: 9.99%
+  Logit σ: 0.148 range: 1.961 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 74.31% (693) | Char->Char: 24.17% (1754)
+Step 3150/20003 | Acc: 44.60% | Rank μ: 10.3 med: 2 top5: 87.4% | PK_w: 3.86 | GC_spars: 9.99%
+  Logit σ: 0.156 range: 1.921 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 74.39% (695) | Char->Char: 24.20% (1760)
+Step 3160/20003 | Acc: 44.00% | Rank μ: 11.2 med: 2 top5: 86.6% | PK_w: 3.84 | GC_spars: 9.99%
+  Logit σ: 0.105 range: 0.970 | Sig in_range: 100.0% | H: 5.54/5.55
+  Structural Acc | Char->Space: 74.50% (698) | Char->Char: 24.15% (1764)
+Step 3170/20003 | Acc: 44.20% | Rank μ: 11.4 med: 2 top5: 86.6% | PK_w: 3.83 | GC_spars: 9.99%
+  Logit σ: 0.135 range: 1.851 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 74.57% (700) | Char->Char: 24.24% (1770)
+Step 3180/20003 | Acc: 44.20% | Rank μ: 11.5 med: 2 top5: 86.6% | PK_w: 3.81 | GC_spars: 9.99%
+  Logit σ: 0.149 range: 1.420 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 74.64% (702) | Char->Char: 24.38% (1776)
+Step 3190/20003 | Acc: 44.40% | Rank μ: 11.9 med: 2 top5: 86.4% | PK_w: 3.80 | GC_spars: 9.99%
+  Logit σ: 0.176 range: 2.891 | Sig in_range: 99.6% | H: 5.48/5.55
+  Structural Acc | Char->Space: 74.75% (705) | Char->Char: 24.42% (1781)
+Step 3200/20003 | Acc: 44.60% | Rank μ: 11.9 med: 2 top5: 86.4% | PK_w: 3.79 | GC_spars: 9.99%
+  Logit σ: 0.118 range: 1.293 | Sig in_range: 100.0% | H: 5.54/5.55
+  Structural Acc | Char->Space: 74.82% (707) | Char->Char: 24.52% (1786)
+Step 3210/20003 | Acc: 44.60% | Rank μ: 11.5 med: 2 top5: 86.4% | PK_w: 3.77 | GC_spars: 9.99%
+  Logit σ: 0.150 range: 1.984 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 74.75% (709) | Char->Char: 24.65% (1793)
+Step 3220/20003 | Acc: 45.00% | Rank μ: 11.9 med: 2 top5: 86.8% | PK_w: 3.76 | GC_spars: 9.99%
+  Logit σ: 0.158 range: 1.823 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 74.79% (710) | Char->Char: 24.72% (1800)
+Step 3230/20003 | Acc: 45.60% | Rank μ: 11.8 med: 2 top5: 87.0% | PK_w: 3.74 | GC_spars: 9.99%
+  Logit σ: 0.206 range: 3.430 | Sig in_range: 99.6% | H: 5.41/5.55
+  Structural Acc | Char->Space: 74.89% (713) | Char->Char: 24.76% (1805)
+Step 3240/20003 | Acc: 45.00% | Rank μ: 11.9 med: 2 top5: 86.8% | PK_w: 3.73 | GC_spars: 9.99%
+  Logit σ: 0.116 range: 1.123 | Sig in_range: 100.0% | H: 5.54/5.55
+  Structural Acc | Char->Space: 74.83% (715) | Char->Char: 24.75% (1810)
+Step 3250/20003 | Acc: 44.80% | Rank μ: 11.4 med: 2 top5: 87.0% | PK_w: 3.71 | GC_spars: 9.99%
+  Logit σ: 0.158 range: 2.302 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 74.76% (717) | Char->Char: 24.78% (1816)
+Step 3260/20003 | Acc: 44.80% | Rank μ: 11.4 med: 2 top5: 87.0% | PK_w: 3.70 | GC_spars: 9.99%
+  Logit σ: 0.147 range: 2.228 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 74.69% (719) | Char->Char: 24.81% (1822)
+Step 3270/20003 | Acc: 45.00% | Rank μ: 11.8 med: 2 top5: 87.6% | PK_w: 3.69 | GC_spars: 9.99%
+  Logit σ: 0.159 range: 1.885 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 74.62% (721) | Char->Char: 24.84% (1828)
+Step 3280/20003 | Acc: 45.00% | Rank μ: 11.5 med: 2 top5: 87.6% | PK_w: 3.67 | GC_spars: 9.99%
+  Logit σ: 0.169 range: 2.226 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 74.69% (723) | Char->Char: 24.92% (1834)
+Step 3290/20003 | Acc: 44.80% | Rank μ: 11.4 med: 2 top5: 87.8% | PK_w: 3.66 | GC_spars: 9.99%
+  Logit σ: 0.102 range: 1.122 | Sig in_range: 100.0% | H: 5.54/5.55
+  Structural Acc | Char->Space: 74.76% (725) | Char->Char: 24.89% (1840)
+Step 3300/20003 | Acc: 45.00% | Rank μ: 11.3 med: 2 top5: 88.0% | PK_w: 3.65 | GC_spars: 9.99%
+  Logit σ: 0.140 range: 1.772 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 74.83% (727) | Char->Char: 24.97% (1846)
+Step 3310/20003 | Acc: 44.60% | Rank μ: 11.8 med: 2 top5: 87.6% | PK_w: 3.63 | GC_spars: 9.99%
+  Logit σ: 0.171 range: 2.448 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 74.90% (729) | Char->Char: 24.95% (1852)
+Step 3320/20003 | Acc: 44.80% | Rank μ: 11.8 med: 2 top5: 87.8% | PK_w: 3.62 | GC_spars: 9.99%
+  Logit σ: 0.190 range: 2.451 | Sig in_range: 100.0% | H: 5.49/5.55
+  Structural Acc | Char->Space: 74.86% (732) | Char->Char: 25.04% (1857)
+Step 3330/20003 | Acc: 44.60% | Rank μ: 11.3 med: 2 top5: 87.8% | PK_w: 3.60 | GC_spars: 9.99%
+  Logit σ: 0.137 range: 1.500 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 74.90% (733) | Char->Char: 25.05% (1864)
+Step 3340/20003 | Acc: 44.80% | Rank μ: 11.6 med: 2 top5: 88.0% | PK_w: 3.59 | GC_spars: 9.99%
+  Logit σ: 0.120 range: 1.509 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 75.00% (736) | Char->Char: 25.11% (1868)
+Step 3350/20003 | Acc: 45.00% | Rank μ: 11.6 med: 2 top5: 88.0% | PK_w: 3.58 | GC_spars: 9.99%
+  Logit σ: 0.191 range: 3.085 | Sig in_range: 99.6% | H: 5.45/5.55
+  Structural Acc | Char->Space: 75.07% (738) | Char->Char: 25.23% (1875)
+Step 3360/20003 | Acc: 45.40% | Rank μ: 11.2 med: 2 top5: 88.2% | PK_w: 3.56 | GC_spars: 9.99%
+  Logit σ: 0.124 range: 1.425 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 75.14% (740) | Char->Char: 25.32% (1880)
+Step 3370/20003 | Acc: 45.80% | Rank μ: 11.3 med: 2 top5: 88.2% | PK_w: 3.55 | GC_spars: 9.99%
+  Logit σ: 0.145 range: 1.859 | Sig in_range: 100.0% | H: 5.52/5.55
+  Structural Acc | Char->Space: 75.20% (742) | Char->Char: 25.34% (1886)
+Step 3380/20003 | Acc: 46.40% | Rank μ: 11.2 med: 2 top5: 88.6% | PK_w: 3.54 | GC_spars: 9.99%
+  Logit σ: 0.121 range: 1.422 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 75.17% (745) | Char->Char: 25.34% (1890)
+Step 3390/20003 | Acc: 46.80% | Rank μ: 10.7 med: 2 top5: 88.4% | PK_w: 3.53 | GC_spars: 9.99%
+  Logit σ: 0.116 range: 1.294 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 75.23% (747) | Char->Char: 25.42% (1896)
+Step 3400/20003 | Acc: 46.40% | Rank μ: 10.7 med: 2 top5: 88.4% | PK_w: 3.51 | GC_spars: 9.99%
+  Logit σ: 0.160 range: 1.837 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 75.30% (749) | Char->Char: 25.39% (1902)
+Step 3410/20003 | Acc: 46.20% | Rank μ: 10.8 med: 2 top5: 88.2% | PK_w: 3.50 | GC_spars: 9.99%
+  Logit σ: 0.196 range: 2.606 | Sig in_range: 99.6% | H: 5.48/5.55
+  Structural Acc | Char->Space: 75.27% (752) | Char->Char: 25.33% (1907)
+Step 3420/20003 | Acc: 46.20% | Rank μ: 10.8 med: 2 top5: 88.2% | PK_w: 3.49 | GC_spars: 9.99%
+  Logit σ: 0.127 range: 1.524 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 75.20% (754) | Char->Char: 25.37% (1912)
+Step 3430/20003 | Acc: 46.40% | Rank μ: 10.9 med: 2 top5: 88.6% | PK_w: 3.48 | GC_spars: 9.99%
+  Logit σ: 0.125 range: 1.467 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 75.26% (756) | Char->Char: 25.44% (1918)
+Step 3440/20003 | Acc: 46.60% | Rank μ: 10.4 med: 2 top5: 88.8% | PK_w: 3.46 | GC_spars: 9.99%
+  Logit σ: 0.141 range: 1.643 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 75.33% (758) | Char->Char: 25.52% (1924)
+Step 3450/20003 | Acc: 46.20% | Rank μ: 10.2 med: 2 top5: 88.6% | PK_w: 3.45 | GC_spars: 9.99%
+  Logit σ: 0.161 range: 2.301 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 75.43% (761) | Char->Char: 25.45% (1929)
+Step 3460/20003 | Acc: 46.20% | Rank μ: 10.7 med: 2 top5: 88.4% | PK_w: 3.44 | GC_spars: 9.99%
+  Logit σ: 0.111 range: 1.201 | Sig in_range: 100.0% | H: 5.54/5.55
+  Structural Acc | Char->Space: 75.49% (763) | Char->Char: 25.54% (1934)
+Step 3470/20003 | Acc: 46.00% | Rank μ: 10.7 med: 2 top5: 88.4% | PK_w: 3.42 | GC_spars: 9.99%
+  Logit σ: 0.172 range: 2.042 | Sig in_range: 100.0% | H: 5.51/5.55
+  Structural Acc | Char->Space: 75.56% (765) | Char->Char: 25.57% (1940)
+Step 3480/20003 | Acc: 46.40% | Rank μ: 10.2 med: 2 top5: 88.6% | PK_w: 3.41 | GC_spars: 9.99%
+  Logit σ: 0.121 range: 1.579 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 75.65% (768) | Char->Char: 25.57% (1944)
+Step 3490/20003 | Acc: 46.80% | Rank μ: 10.4 med: 2 top5: 88.0% | PK_w: 3.40 | GC_spars: 9.99%
+  Logit σ: 0.118 range: 1.543 | Sig in_range: 100.0% | H: 5.53/5.55
+  Structural Acc | Char->Space: 75.71% (770) | Char->Char: 25.69% (1950)
+Step 3500/20003 | Acc: 46.80% | Rank μ: 10.9 med: 2 top5: 87.6% | PK_w: 3.39 | GC_spars: 9.99%
+  Logit σ: 0.191 range: 3.153 | Sig in_range: 99.6% | H: 5.47/5.55
+
+[DIAGNOSTIC] Running Linear Probe on 200 samples...

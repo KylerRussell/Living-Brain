@@ -265,19 +265,45 @@ def jit_solve_dynamics_imex(
     current_s = get_soma(current_b, i_exc, i_inh, current_a, cahva_states, is_neg_pe, current_threshold, is_sst, is_pv, is_dg, current_ip_gain, current_ip_bias, nmda_ratio)
 
     while step_count < max_steps and diff > tolerance:
-        # Update PV/SST interneuron activity for somatic/dendritic inhibition
-        # 1. VIP interneurons driven by feedback (apical) inhibit SOM/PV cells.
-        vip_drive = torch.relu(current_a).mean() if current_a.any() else torch.tensor(0.0, device=current_b.device)
-        vip_activity = torch.sigmoid(vip_drive * 5.0 - 2.0)
+        # 1. Module-Specific Interneuron Dynamics (Local Disinhibition)
+        num_mods = module_starts.size(0)
+        vip_activity_mod = torch.zeros(num_mods, device=current_b.device)
+        sst_activity_mod = torch.zeros(num_mods, device=current_b.device)
+        pv_activity_mod = torch.zeros(num_mods, device=current_b.device)
+        sst_conscience_mod = torch.ones(num_mods, device=current_b.device)
+
+        for m in range(num_mods):
+            ms, me = module_starts[m], module_ends[m]
+            
+            # VIP: driven by feedback (apical)
+            mod_a = current_a[ms:me]
+            mod_vip_drive = torch.relu(mod_a).mean() if mod_a.numel() > 0 else torch.tensor(0.0, device=current_b.device)
+            vip_activity_mod[m] = torch.sigmoid(mod_vip_drive * 5.0 - 2.0)
+            
+            # SST: slow, target apical
+            mod_s_sst = current_s[ms:me][is_sst[ms:me]]
+            if mod_s_sst.numel() > 0:
+                sst_activity_mod[m] = torch.relu(mod_s_sst).mean()
+                sst_conscience_mod[m] = 1.0 + 0.5 * current_lifetime[ms:me][is_sst[ms:me]].mean()
+            
+            # PV: fast, perisomatic
+            mod_s_pv = current_s[ms:me][is_pv[ms:me]]
+            if mod_s_pv.numel() > 0:
+                pv_activity_mod[m] = torch.relu(mod_s_pv).mean()
+
+        # Broadcast module-wise activity to node-wise drives
+        node_mod_idx = torch.zeros(num_nodes, dtype=torch.long, device=current_b.device)
+        for m in range(num_mods):
+            node_mod_idx[module_starts[m]:module_ends[m]] = m
+            
+        vip_node = vip_activity_mod[node_mod_idx]
+        sst_node = sst_activity_mod[node_mod_idx]
+        pv_node = pv_activity_mod[node_mod_idx]
+        conscience_node = sst_conscience_mod[node_mod_idx]
         
-        # 2. SOM+ Martinotti: slow, target apical dendrites.
-        sst_activity = torch.relu(current_s[is_sst]).mean() if is_sst.any() else torch.tensor(0.0, device=current_b.device)
-        conscience_factor = 1.0 + 0.5 * current_lifetime[is_sst].mean() if is_sst.any() else torch.tensor(1.0, device=current_b.device)
-        sst_drive = (sst_activity * conscience_factor) / (1.0 + 10.0 * vip_activity)
-        
-        # 3. PV+ Basket: fast, perisomatic (basal targeting).
-        pv_activity = torch.relu(current_s[is_pv]).mean() if is_pv.any() else torch.tensor(0.0, device=current_b.device)
-        pv_drive = pv_activity / (1.0 + 5.0 * vip_activity)
+        # Local disinhibition: VIP suppresses SST/PV within the same module
+        sst_drive = (sst_node * conscience_node) / (1.0 + 10.0 * vip_node)
+        pv_drive = pv_node / (1.0 + 5.0 * vip_node)
 
         # Hard clamp input nodes
         if input_mask is not None:
@@ -1975,9 +2001,19 @@ class PredictiveCodingEngine:
                 
                 # Scale components to maintain the budget
                 # BUG FIX: Do NOT scale _weight_values_raw — preserve SR-tuned base topology
-                self.w_surface *= scaling_factor[dst_idx]
-                self.w_mid *= scaling_factor[dst_idx]
-                self.w_deep *= scaling_factor[dst_idx]
+                # Fix 6: Exempt motor neurons (256-511) from aggressive scaling
+                motor_mask = (dst_idx >= 256) & (dst_idx < 512)
+                non_motor_mask = ~motor_mask
+                
+                # Apply scaling to non-motor neurons
+                self.w_surface[non_motor_mask] *= scaling_factor[dst_idx[non_motor_mask]]
+                self.w_mid[non_motor_mask] *= scaling_factor[dst_idx[non_motor_mask]]
+                self.w_deep[non_motor_mask] *= scaling_factor[dst_idx[non_motor_mask]]
+                
+                # Motor neurons get gentle weight decay only to prevent explosion
+                self.w_surface[motor_mask] *= 0.9999
+                self.w_mid[motor_mask] *= 0.9999
+                self.w_deep[motor_mask] *= 0.9999
 
                 # Hard clip to prevent runaway synaptic growth
                 self._weight_values_raw.clamp_(-1.0, 1.0)
@@ -2330,4 +2366,3 @@ class PredictiveCodingEngine:
 
 import torch.nn as nn
 import torch.nn.functional as F
-
