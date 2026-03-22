@@ -620,7 +620,7 @@ class DynamicGraph:
             boost = 1.0 + eta * h_l
             weight_vals[idx] *= boost
             
-        print(f"Applied hierarchical recurrent excitatory gradient (η={eta}) to {len(target_indices)} edges.")
+        print(f"Applied hierarchical recurrent excitatory gradient (eta={eta}) to {len(target_indices)} edges.")
 
         # Enforce minimum weight magnitude for lateral signal propagation
         lat_min_magnitude = 0.01

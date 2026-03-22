@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 from typing import List, Tuple
 
@@ -346,8 +347,9 @@ def cerebellar_forward(engine, cerebellum):
         if gc_norm > 1e-6:
             granule_acts = granule_acts * (target_norm / gc_norm)
 
-        # Store for diagnostics
+        # Store for diagnostics and backward pass (co-adaptation)
         cerebellum['granule_state'] = granule_acts
+        cerebellum['gc_active_mask'] = (granule_acts > 0).float()
 
         # 6. Parallel fiber → Purkinje (plastic weights, linear readout)
         logits = cerebellum['purkinje_weights'] @ granule_acts
@@ -363,21 +365,14 @@ def cerebellar_forward(engine, cerebellum):
 def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value):
     """
     Climbing fiber learning rule (inferior olive → Purkinje LTD/LTP).
-
-    The inferior olive computes: error = target - purkinje_output
-    The climbing fiber delivers this error to each Purkinje cell.
-    Parallel fiber → Purkinje synapses undergo:
-      - LTD when climbing fiber fires AND parallel fiber is active
-        (wrong prediction while granule cell was active → weaken)
-      - LTP when climbing fiber is silent AND parallel fiber is active
-        (correct prediction while granule cell was active → strengthen)
-
-    Learning rule:
-      Δw_ij = -η * error_j * granule_i * gate
-
-    The eligibility trace adds a temporal buffer so that the error signal
-    from the next timestep can update weights based on the current
-    granule cell activity.
+    Uses standard softmax error — no temperature scaling.
+    
+    Temperature warmup was tried and found HARMFUL: high T flattens 
+    softmax, which weakens the negative feedback for over-represented 
+    classes (space at 22%). This lets the space row grow unchecked during
+    warmup, locking in a monopoly that can't be broken afterward.
+    Standard T=1.0 softmax provides strong corrective feedback from the
+    start, preventing any single class from monopolizing.
     """
     with torch.no_grad():
         lr = cerebellum['climbing_fiber_lr']
@@ -387,11 +382,9 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value):
         target = torch.zeros(256, device=logits.device)
         target[target_byte] = 1.0
 
-        # Cross-Entropy / Softmax Error (Fix 3)
-        # Concentrates the error signal on the most-wrong predictions.
-        # Biologically analogous to basket cell / stellate cell lateral inhibition.
-        purkinje_output = torch.softmax(logits, dim=0)  # [256]
-        climbing_fiber_error = target - purkinje_output  # [256] (Softmax gradient)
+        # Standard softmax error (T=1.0, no temperature)
+        purkinje_output = torch.softmax(logits, dim=0)
+        climbing_fiber_error = target - purkinje_output
         
         # Update eligibility trace (low-pass filter of granule activity)
         cerebellum['purkinje_eligibility'] *= (1.0 - 1.0 / tau_e)
@@ -429,6 +422,40 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value):
         )
 
         return climbing_fiber_error.abs().mean().item()
+
+
+def compute_cerebellar_cortical_feedback(cerebellum, output_error):
+    """
+    Cerebello-thalamo-cortical feedback: exact gradient of cerebellar
+    readout error with respect to L5/6 activations.
+
+    Biological pathway: Purkinje → deep cerebellar nuclei (DCN) →
+    ventrolateral thalamus (VL) → cortical L5/6.
+
+    When the cerebellum makes a prediction error, this pathway carries
+    a teaching signal back to cortex that reshapes L5/6 representations
+    to be more "readout-friendly". Unlike random DFA matrices, this uses
+    the actual learned Purkinje weights and fixed mossy fiber connectivity.
+
+    Math: d_loss/d_L56 = mossy_w.T @ ((purkinje_w.T @ error) * gc_mask)
+
+    Args:
+        cerebellum: dict with cerebellar state
+        output_error: [256] softmax error (target - softmax(logits))
+    Returns:
+        l56_gradient: [n_l56] tensor — gradient for each L5/6 node
+    """
+    with torch.no_grad():
+        # Backward through Purkinje readout
+        gc_error = cerebellum['purkinje_weights'].T @ output_error  # [n_granule]
+
+        # Backward through ReLU + top-k (straight-through estimator)
+        gc_error_masked = gc_error * cerebellum['gc_active_mask']  # [n_granule]
+
+        # Backward through mossy fiber projection
+        l56_gradient = cerebellum['mossy_weights'].T @ gc_error_masked  # [n_l56]
+
+        return l56_gradient
 
 
 def create_dfa_matrices(engine, n_output=256, device='cpu'):
@@ -550,6 +577,230 @@ def run_linear_probe(engine, data, batch_size=200, free_steps=100, device='cpu')
     return acc
 
 
+def run_eval(engine, cerebellum, eval_data, free_steps=100, n_samples=500, 
+             leak_factor=0.95, device='cpu'):
+    """
+    Run the cerebellar readout on held-out eval data (no learning).
+    Processes data SEQUENTIALLY with LEAK_FACTOR to replicate training dynamics.
+    Tests whether the model generalizes or just memorizes training sequences.
+    """
+    input_mask = torch.zeros(engine.num_nodes, device=device)
+    input_mask[:256] = 1.0
+    
+    # Save engine state
+    saved_state = engine.state.clone()
+    saved_basal = engine.state_basal.clone()
+    saved_apical = engine.state_apical.clone()
+    
+    correct = 0
+    total = 0
+    cs_correct = cs_total = 0
+    cc_correct = cc_total = 0
+    sc_correct = sc_total = 0
+    
+    # Run sequentially through a random chunk of eval data
+    n_samples = min(n_samples, len(eval_data) - 2)
+    start = np.random.randint(0, max(1, len(eval_data) - n_samples - 2))
+    
+    with torch.no_grad():
+        engine.state.zero_()
+        engine.state_basal.zero_()
+        engine.state_apical.zero_()
+        
+        for j in range(n_samples):
+            idx = start + j
+            if idx >= len(eval_data) - 1:
+                break
+            
+            prev_byte = int(eval_data[idx - 1]) if idx > 0 else 0
+            curr_byte = int(eval_data[idx])
+            next_byte = int(eval_data[idx + 1])
+            
+            # Replicate training dynamics
+            engine.state *= leak_factor
+            engine.state_basal *= leak_factor
+            engine.state_apical *= leak_factor
+            
+            input_vec = torch.zeros(engine.num_nodes, device=device)
+            input_vec[curr_byte] = 10.0
+            
+            engine.settle(
+                input_vec, input_mask=input_mask, max_steps=free_steps,
+                tol=0.0, sigma_noise=0.0, damping=0.8
+            )
+            
+            logits, _, _ = cerebellar_forward(engine, cerebellum)
+            pred = torch.argmax(logits).item()
+            is_correct = (pred == next_byte)
+            
+            # Skip sentence boundaries (not learnable)
+            is_sentence_boundary = (curr_byte == 32 and prev_byte in (ord('.'), ord('?'), ord('!')))
+            
+            if not is_sentence_boundary:
+                total += 1
+                if is_correct: correct += 1
+                
+                if next_byte == 32:
+                    cs_total += 1
+                    if is_correct: cs_correct += 1
+                elif curr_byte == 32:
+                    sc_total += 1
+                    if is_correct: sc_correct += 1
+                else:
+                    cc_total += 1
+                    if is_correct: cc_correct += 1
+    
+    # Restore engine state
+    engine.state = saved_state
+    engine.state_basal = saved_basal
+    engine.state_apical = saved_apical
+    
+    acc = correct / total if total > 0 else 0
+    cs_acc = cs_correct / cs_total if cs_total > 0 else 0
+    cc_acc = cc_correct / cc_total if cc_total > 0 else 0
+    sc_acc = sc_correct / sc_total if sc_total > 0 else 0
+    
+    return acc, cs_acc, cc_acc, sc_acc
+
+
+def show_readout(engine, cerebellum, data, free_steps=100, n_chars=80, 
+                 leak_factor=0.95, warmup_chars=20, device='cpu'):
+    """
+    Display a sample of model predictions vs actual targets.
+    Replicates training dynamics: LEAK_FACTOR between steps + warmup period
+    to build temporal context before the display window.
+    """
+    input_mask = torch.zeros(engine.num_nodes, device=device)
+    input_mask[:256] = 1.0
+    
+    # Save engine state
+    saved_state = engine.state.clone()
+    saved_basal = engine.state_basal.clone()
+    saved_apical = engine.state_apical.clone()
+    
+    # Pick a random starting point with room for warmup
+    display_start = np.random.randint(warmup_chars, max(warmup_chars + 1, len(data) - n_chars - 2))
+    warmup_start = display_start - warmup_chars
+    
+    actual_chars = []
+    predicted_chars = []
+    match_markers = []
+    
+    with torch.no_grad():
+        engine.state.zero_()
+        engine.state_basal.zero_()
+        engine.state_apical.zero_()
+        
+        # Warmup: run chars before display window to build temporal context
+        for j in range(warmup_start, display_start):
+            if j >= len(data) - 1:
+                break
+            curr_byte = int(data[j])
+            engine.state *= leak_factor
+            engine.state_basal *= leak_factor
+            engine.state_apical *= leak_factor
+            input_vec = torch.zeros(engine.num_nodes, device=device)
+            input_vec[curr_byte] = 10.0
+            engine.settle(
+                input_vec, input_mask=input_mask, max_steps=free_steps,
+                tol=0.0, sigma_noise=0.0, damping=0.8
+            )
+        
+        # Display window: predict and record
+        for j in range(n_chars):
+            idx = display_start + j
+            if idx >= len(data) - 1:
+                break
+            
+            curr_byte = int(data[idx])
+            next_byte = int(data[idx + 1])
+            
+            # Replicate training dynamics: leak before settle
+            engine.state *= leak_factor
+            engine.state_basal *= leak_factor
+            engine.state_apical *= leak_factor
+            
+            input_vec = torch.zeros(engine.num_nodes, device=device)
+            input_vec[curr_byte] = 10.0
+            
+            engine.settle(
+                input_vec, input_mask=input_mask, max_steps=free_steps,
+                tol=0.0, sigma_noise=0.0, damping=0.8
+            )
+            
+            logits, _, _ = cerebellar_forward(engine, cerebellum)
+            pred_byte = torch.argmax(logits).item()
+            
+            # Convert to printable chars
+            actual_ch = chr(next_byte) if 32 <= next_byte < 127 else '.'
+            pred_ch = chr(pred_byte) if 32 <= pred_byte < 127 else '.'
+            
+            actual_chars.append(actual_ch)
+            predicted_chars.append(pred_ch)
+            match_markers.append('+' if pred_byte == next_byte else '-')
+    
+    # Restore engine state
+    engine.state = saved_state
+    engine.state_basal = saved_basal
+    engine.state_apical = saved_apical
+    
+    actual_str = ''.join(actual_chars)
+    pred_str = ''.join(predicted_chars)
+    match_str = ''.join(match_markers)
+    n_correct = match_markers.count('+')
+    
+    print(f"\n[READOUT] ({n_correct}/{len(match_markers)} correct)")
+    print(f"  Target: {actual_str}")
+    print(f"  Output: {pred_str}")
+    print(f"  Match:  {match_str}")
+
+
+def ensure_curriculum_data(data_dir):
+    """Generate curriculum data if it doesn't exist."""
+    train_dir = os.path.join(data_dir, "train")
+    eval_dir = os.path.join(data_dir, "eval")
+    
+    needed_files = [
+        os.path.join(train_dir, "level1_holophrases.txt"),
+        os.path.join(eval_dir, "level1_holophrases.txt"),
+        os.path.join(train_dir, "level2_slot_frame.txt"),
+        os.path.join(eval_dir, "level2_slot_frame.txt"),
+    ]
+    
+    if all(os.path.exists(f) for f in needed_files):
+        return  # All data exists
+    
+    print("Curriculum data not found, generating...")
+    os.makedirs(train_dir, exist_ok=True)
+    os.makedirs(eval_dir, exist_ok=True)
+    
+    # Import and run curriculum generator
+    try:
+        from curriculum_gen import (
+            generate_holophrases, generate_slot_and_frame,
+            generate_complex_constructions, generate_contextual_continuity
+        )
+        generate_holophrases(
+            train_file=os.path.join(train_dir, "level1_holophrases.txt"),
+            test_file=os.path.join(eval_dir, "level1_holophrases.txt"),
+        )
+        generate_slot_and_frame(
+            train_file=os.path.join(train_dir, "level2_slot_frame.txt"),
+            test_file=os.path.join(eval_dir, "level2_slot_frame.txt"),
+        )
+        generate_complex_constructions(
+            train_file=os.path.join(train_dir, "level3_complex.txt"),
+            test_file=os.path.join(eval_dir, "level3_complex.txt"),
+        )
+        generate_contextual_continuity(
+            train_file=os.path.join(train_dir, "level4_contextual.txt"),
+            test_file=os.path.join(eval_dir, "level4_contextual.txt"),
+        )
+        print("Curriculum data generated successfully.")
+    except ImportError:
+        print("WARNING: curriculum_gen.py not found. Please generate data manually.")
+
+
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -641,17 +892,22 @@ def main():
     # Curriculum setup
     script_dir = os.path.dirname(os.path.abspath(__file__))
     data_dir = os.path.join(script_dir, "data")
+    
+    # Auto-generate curriculum data if missing
+    ensure_curriculum_data(data_dir)
 
     phases = [
         {
             "name": "Holophrases",
             "file": "train/level1_holophrases.txt",
+            "eval_file": "eval/level1_holophrases.txt",
             "lr": 0.05,
-            "epochs": 2, # Reduced to transition faster
+            "epochs": 2,
         },
         {
             "name": "Construction",
             "file": "train/level2_slot_frame.txt",
+            "eval_file": "eval/level2_slot_frame.txt",
             "lr": 0.02,
             "epochs": 5,
         },
@@ -671,17 +927,25 @@ def main():
     sigma_noise_free = 0.01
     sigma_noise_nudge = 0.01
     LEAK_FACTOR = 0.95
-    ALPHA_DFA = 0.15         # DFA feedback strength
+    ALPHA_DFA = 0.15         # DFA feedback strength (all hidden layers)
+    ALPHA_CEREBELLAR = 0.0   # DISABLED: causes non-stationarity collapse.
+                             # CB gradient shifts L5/6 patterns every step,
+                             # Purkinje weights can't track the moving target,
+                             # decay dominates → death spiral (52% → 16% in 7K steps).
+                             # L5/6 representations are already 94-99% separable (probe),
+                             # so co-adaptation solves a non-existent problem.
+                             # Re-enable only with much slower timescale (every ~500 steps).
     BURST_APICAL_GAIN = 15.0 # Increased from 1.5 to overcome readout bottleneck
 
     for phase_info in phases:
         phase_name = phase_info["name"]
         file_path = os.path.join(data_dir, phase_info["file"])
+        eval_path = os.path.join(data_dir, phase_info.get("eval_file", ""))
 
         print(f"\n--- Starting Phase: {phase_name} ---")
         print(f"  Steps: Free={FREE_STEPS}, Nudge={NUDGE_STEPS}")
         print(f"  Learning rate: {lr}, Nudge strength: {nudge_strength}")
-        print(f"  DFA alpha: {ALPHA_DFA}, Burst apical gain: {BURST_APICAL_GAIN}")
+        print(f"  DFA alpha: {ALPHA_DFA}, CB alpha: {ALPHA_CEREBELLAR}, Burst apical gain: {BURST_APICAL_GAIN}")
         print(f"  Thalamocortical loop: {N_THALAMIC} neurons")
         print(f"  Cerebellum: {cerebellum['n_granule']} granule cells")
 
@@ -694,14 +958,26 @@ def main():
 
         data = np.frombuffer(text.encode("utf-8"), dtype=np.uint8)
         seq_len = len(data)
+        
+        # Load eval data if available
+        eval_data = None
+        if eval_path and os.path.exists(eval_path):
+            with open(eval_path, "r", encoding="utf-8") as f:
+                eval_data = np.frombuffer(f.read().encode("utf-8"), dtype=np.uint8)
+            print(f"  Eval data: {len(eval_data)} bytes from {eval_path}")
+        else:
+            print(f"  Eval data: not available")
 
         # Metrics tracking
         spatial_errors = []
-        accuracies = []
+        accuracies = []       # Excludes sentence boundaries
+        accuracies_all = []   # Includes everything (for raw logging)
         burst_strengths = []
-        # Structural Acc Metrics
-        seq_total, seq_correct = 0, 0 # Target is Space (Char->Space)
-        sem_total, sem_correct = 0, 0 # Target is Non-Space (Char->Char)
+        # Structural Acc Metrics (excluding sentence-boundary S→C)
+        cs_total, cs_correct = 0, 0   # Char->Space (learnable)
+        cc_total, cc_correct = 0, 0   # Char->Char (learnable)
+        sc_total, sc_correct = 0, 0   # Space->Char within sentence (learnable)
+        sb_total = 0                   # Sentence boundary transitions (not learnable, just counted)
         
         settle_history = deque(maxlen=50) # Track settle diffs for adaptive gating
 
@@ -747,15 +1023,31 @@ def main():
             logits, granule_acts, gate_value = cerebellar_forward(engine, cerebellum)
             pred_byte = torch.argmax(logits).item()
             is_correct = pred_byte == next_byte
-            accuracies.append(1.0 if is_correct else 0.0)
+            
+            # Detect sentence boundaries: space after . ? !
+            # These predict the first char of a RANDOM next sentence — not learnable
+            prev_byte = int(data[i - 1]) if i > 0 else 0
+            is_sentence_boundary = (current_byte == 32 and prev_byte in (ord('.'), ord('?'), ord('!')))
+            
+            # Track all predictions for raw window accuracy
+            accuracies_all.append(1.0 if is_correct else 0.0)
+            
+            # Track learnable predictions only (exclude sentence boundaries)
+            if not is_sentence_boundary:
+                accuracies.append(1.0 if is_correct else 0.0)
 
-            # Update structural stats
-            if next_byte == 32: # Target is space
-                seq_total += 1
-                if is_correct: seq_correct += 1
-            elif current_byte != 32: # Both are characters
-                sem_total += 1
-                if is_correct: sem_correct += 1
+            # Update structural stats (learnable transitions only)
+            if is_sentence_boundary:
+                sb_total += 1  # Count but don't score
+            elif next_byte == 32:  # Char->Space
+                cs_total += 1
+                if is_correct: cs_correct += 1
+            elif current_byte == 32:  # Space->Char (within sentence)
+                sc_total += 1
+                if is_correct: sc_correct += 1
+            else:  # Char->Char
+                cc_total += 1
+                if is_correct: cc_correct += 1
 
             # === CEREBELLAR LEARNING (replaces terminal Adam optimizer) ===
             cf_error = cerebellar_learn(cerebellum, logits, granule_acts, next_byte, gate_value)
@@ -787,6 +1079,14 @@ def main():
                 # B @ output_error gives a [level_size] feedback signal
                 dfa_signal = B @ output_error  # [level_size]
                 nudge_vec[level_mask] += ALPHA_DFA * dfa_signal
+
+            # ENHANCEMENT 3c: Cerebello-thalamo-cortical co-adaptation
+            # Exact gradient of cerebellar readout error w.r.t. L5/6,
+            # backpropagated through learned Purkinje weights and fixed
+            # mossy fibers. Makes cortical EqProp push L5/6 toward
+            # representations that are more separable by the readout.
+            l56_grad = compute_cerebellar_cortical_feedback(cerebellum, output_error)
+            nudge_vec[cerebellum['l56_indices']] += ALPHA_CEREBELLAR * l56_grad
 
             # ENHANCEMENT 3b: Burst Coincidence — inject target into apical
             engine.inject_apical_nudge(target_one_hot, strength=BURST_APICAL_GAIN)
@@ -855,7 +1155,7 @@ def main():
                 print(
                     f"Step {i+1}/{seq_len} | Acc: {avg_acc:.2%} | "
                     f"P(target): {avg_target_prob:.3f} | "
-                    f"PK_w: {pk_w_norm:.2f} (row μ: {pk_row_mean:.2f} max: {pk_row_max:.2f}) | "
+                    f"PK_w: {pk_w_norm:.2f} (row mean: {pk_row_mean:.2f} max: {pk_row_max:.2f}) | "
                     f"GC_spars: {gc_sparsity:.2%}"
                 )
                 print(
@@ -864,7 +1164,7 @@ def main():
                     f"Settle: {engine.last_settle_diff:.4f}"
                 )
 
-                # Diagnostic Linear Probe every 500 steps
+                # Diagnostic Linear Probe + Readout every 500 steps
                 if (i + 1) % 500 == 0:
                     probe_acc = run_linear_probe(
                         engine, data, batch_size=200, 
@@ -874,12 +1174,24 @@ def main():
                     if probe_acc > avg_acc * 2:
                         print(f"  [!] ALERT: Representation ({probe_acc:.1%}) >> Readout ({avg_acc:.1%}). Readout is the bottleneck.")
                     else:
-                        print(f"  [!] NOTE: Representation ({probe_acc:.1%}) ≈ Readout ({avg_acc:.1%}). Hebbian learning is the bottleneck.")
+                        print(f"  [!] NOTE: Representation ({probe_acc:.1%}) ~= Readout ({avg_acc:.1%}). Hebbian learning is the bottleneck.")
+                    
+                    # Show what the model is actually outputting
+                    show_readout(engine, cerebellum, data, free_steps=FREE_STEPS, n_chars=80, leak_factor=LEAK_FACTOR, device=device)
+                
+                # Eval on held-out data every 2500 steps
+                if (i + 1) % 2500 == 0 and eval_data is not None:
+                    eval_acc, eval_cs, eval_cc, eval_sc = run_eval(
+                        engine, cerebellum, eval_data,
+                        free_steps=FREE_STEPS, n_samples=300, leak_factor=LEAK_FACTOR, device=device
+                    )
+                    print(f"  >>> EVAL (held-out): {eval_acc:.2%} | C->S: {eval_cs:.2%} | C->C: {eval_cc:.2%} | S->C: {eval_sc:.2%}")
 
-                # Structural Diagnostics
-                seq_acc = (seq_correct / seq_total) if seq_total > 0 else 0
-                sem_acc = (sem_correct / sem_total) if sem_total > 0 else 0
-                print(f"  Structural Acc | Char->Space: {seq_acc:.2%} ({seq_total}) | Char->Char: {sem_acc:.2%} ({sem_total})")
+                # Structural Diagnostics (learnable transitions only)
+                cs_acc = (cs_correct / cs_total) if cs_total > 0 else 0
+                cc_acc = (cc_correct / cc_total) if cc_total > 0 else 0
+                sc_acc = (sc_correct / sc_total) if sc_total > 0 else 0
+                print(f"  Structural Acc | C->S: {cs_acc:.2%} ({cs_total}) | C->C: {cc_acc:.2%} ({cc_total}) | S->C: {sc_acc:.2%} ({sc_total}) | SentBound: {sb_total}")
 
         elapsed = time.time() - start_time
         final_acc = (
