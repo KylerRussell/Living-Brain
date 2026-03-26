@@ -16,7 +16,7 @@ def create_training_graph(
     num_modules=10, num_levels=2
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Builds a smaller hierarchical graph suitable for initial PC engine training.
+    Builds a smaller hierarchical graph suitable for simple PC engine testing.
     Adapts logic from micro_scale_diagnostics and DynamicGraph.
     """
     total_nodes = num_modules * 350  # Increased to 3500 nodes total
@@ -292,15 +292,43 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
         'l56_indices': torch.tensor(all_l56, dtype=torch.long),
         'thalamic_indices': torch.tensor(thalamic_indices, dtype=torch.long) if thalamic_indices is not None else None,
         'mossy_weights': mossy_weights.to(device),
-        'purkinje_weights': purkinje_weights.to(device),
         'granule_state': granule_state.to(device),
-        'bg_confidence_threshold': bg_confidence_threshold,
-        'bg_gate_sharpness': bg_gate_sharpness,
-        'gc_top_k': max(1, int(n_granule * 0.10)),       # 10% sparsity via Golgi competitive inhibition
-        'climbing_fiber_lr': 0.15,                         # Increased to compensate for drift tracking lag
-        'granule_buffer': torch.zeros(6, n_granule, device=device), # 6-step temporal delay buffer
+        'l56_indices': torch.tensor(all_l56, dtype=torch.long, device=device),
+        # FIX: Non-negative init — PF-PC synapses are excitatory
+        # Uniform [0, 0.1] instead of randn*0.01 (which was 50% negative → clamped to 0)
+        'purkinje_weights': torch.rand(256, n_granule, device=device) * 0.1,
+        'bg_confidence_threshold': 0.3,
+        'bg_gate_sharpness': 20.0,
+        
+        # BIO-ADAM MOMENTS
+        'm1_err': torch.zeros(256, device=device),
+        'm2_err': torch.ones(256, device=device) * 0.01,
+        
+        # STOCHASTIC IO GATE
+        'io_buffer': torch.zeros(256, device=device),
+        'io_threshold': 0.1,
+        
+        # TD ERROR TRACKING
+        'last_v_target': 0.0,
+
+        'gc_top_k': max(1, int(n_granule * 0.10)),
+        'climbing_fiber_lr': 0.15,
+        'granule_buffer': torch.zeros(6, n_granule, device=device),
         'buffer_idx': 0,
-        'purkinje_bias': torch.zeros(256, device=device),  # Excitability homeostasis
+        'purkinje_bias': torch.zeros(256, device=device),
+        
+        # --- MOSSY FIBER SLOW PLASTICITY (D'Angelo 1999, Mapelli 2007) ---
+        'mossy_lr': 0.01,  # Raised from 0.001 — old rate was ~1e-5 effective (invisible)
+        'mossy_weights_baseline_norm': mossy_weights.norm().item(),
+        'mossy_eligibility': torch.zeros_like(mossy_weights, device=device),
+        
+        # --- PURKINJE WEIGHT HOMEOSTASIS (Coesmans 2004, Piochon 2016) ---
+        # FIX: Weight bounds [0, 2.0] — was [0, 0.02] which killed all discrimination
+        # Biology: PF-PC excitatory synapses range from 0 (silent) to ~2x naive level
+        # The DCN sign inversion (logits = -PK@GC) handles the output sign
+        'purkinje_weights_baseline': 1.0,  # Was 0.01 → w_max was 0.02 (absurdly tight)
+        'calcium_threshold': torch.ones(256, device=device) * 0.5,
+        'mli_inhibition_scale': torch.ones(n_granule, device=device),
     }
 
     print(f"Cerebellum: {n_granule} granule cells (SAL partitioned), "
@@ -310,259 +338,266 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
 
 def cerebellar_forward(engine, cerebellum):
     """
-    Cerebellar forward pass with all stability mechanisms:
-    - Golgi cell competitive inhibition (top-k sparsity)
-    - Stellate/basket cell L2 normalization  
-    - Population centering (prevents logit explosion with softmax)
+    Cerebellar forward pass with DCN sign inversion and MLI inhibition.
+    
+    CRITICAL FIX: Added Deep Cerebellar Nuclei (DCN) sign inversion.
+    Biology: Purkinje cells INHIBIT DCN neurons. DCN output drives behavior.
+    
+    Without this, the LTD learning rule (CF → depress PF-PC weight) pushes
+    the readout in the WRONG direction — depressing the correct class 
+    instead of boosting it. The DCN inversion flips the sign:
+      LTD → less PK firing → less DCN inhibition → HIGHER output ✓
+    
+    Result: logits = -(purkinje_weights @ granule_acts)
     """
     with torch.no_grad():
-        # 1. Basal ganglia gate — MONITOR ONLY
-        gate_value = engine.get_bg_gate_confidence(
-            threshold=cerebellum['bg_confidence_threshold'],
-            sharpness=cerebellum['bg_gate_sharpness']
-        )
-
-        # 2. Extract L5/6 activations (pontine nucleus pathway)
+        # 1. Extract L5/6 activations (pontine nucleus pathway)
         input_idx = cerebellum['l56_indices']
         input_acts = engine.state[input_idx]
 
-        # 3. Mossy fiber → Granule cell pre-activation
+        # 2. Mossy fiber → Granule cell pre-activation
         granule_pre = cerebellum['mossy_weights'] @ input_acts
 
-        # 4. Golgi cell competitive inhibition (Bio-plausible lateral inhibition)
-        # Target sparsity: ~2.5% (we have 16384 GC cells, so ~409 active).
-        # We enforce this biologically through strong, fast-spiking Golgi cell lateral 
-        # inhibition that implements a k-winner-take-all dynamical state.
+        # 3. Golgi cell competitive inhibition (k-winner-take-all)
         k_winners = int(granule_pre.size(0) * 0.025)
         topk_vals, topk_indices = torch.topk(granule_pre, k_winners)
         granule_acts = torch.zeros_like(granule_pre)
         granule_acts.scatter_(0, topk_indices, torch.relu(topk_vals))
         
-        # 5. Molecular layer normalization (stellate/basket cell inhibition)
-        # target_norm controls the scale of Purkinje inputs and thus logit magnitude.
-        # With lr=0.1, delta_logit_per_step = lr * target_norm^2 for same-input.
-        # At target_norm=20.2 (sqrt(k)): delta=40.8 → instant softmax saturation.
-        # At target_norm=5.0: delta=2.5 → meaningful signal, gradual learning.
-        # This matches the effective GC scale from the successful un-normalized run.
+        # 4. Molecular layer normalization
         target_norm = 5.0
         gc_norm = granule_acts.norm()
         if gc_norm > 1e-6:
             granule_acts = granule_acts * (target_norm / gc_norm)
 
-        # Store for diagnostics and backward pass (co-adaptation)
-        cerebellum['granule_state'] = granule_acts
-        cerebellum['gc_active_mask'] = (granule_acts > 0).float()
+        # 5. MLI Feedforward Inhibition (Wulff 2009)
+        # Stellate/basket cells scale inhibition proportional to PF excitation
+        mli_inhibition = cerebellum['mli_inhibition_scale'] * granule_acts
+        gc_for_purkinje = torch.relu(granule_acts - 0.3 * mli_inhibition)
 
-        # Buffer granule acts (Fix 1: Temporal Eligibility Traces)
-        cerebellum['buffer_idx'] = (cerebellum['buffer_idx'] + 1) % 6
-        cerebellum['granule_buffer'][cerebellum['buffer_idx']] = granule_acts
-
-        # 6. Parallel fiber → Purkinje (plastic weights, linear readout)
-        # Fix 6: Excitability homeostasis via purkinje_bias
-        logits = cerebellum['purkinje_weights'] @ granule_acts + cerebellum.get('purkinje_bias', 0.0)
-
-        # 7. Population centering (basket/stellate cell feedforward inhibition)
-        # Prevents all logits from drifting together, which causes softmax
-        # to collapse to a delta function on whichever logit has the most drift.
+        # 6. Parallel fiber → Purkinje → DCN readout
+        # CRITICAL: Purkinje cells INHIBIT DCN. DCN output = -PK_activity.
+        # Without this negation, LTD pushes weights in the wrong direction.
+        purkinje_output = cerebellum['purkinje_weights'] @ gc_for_purkinje
+        logits = -purkinje_output  # DCN sign inversion
+        
+        # 7. Population centering
         logits = logits - logits.mean()
 
-        return logits, granule_acts, gate_value
+        # 8. Store state for learning
+        cerebellum['gc_active_mask'] = (granule_acts > 0).float()
+        cerebellum['_last_granule_acts_raw'] = granule_acts
+        cerebellum['_last_gc_for_purkinje'] = gc_for_purkinje
+        
+        # 9. PRECISION-WEIGHTED CONTINUOUS BG GATING
+        probs = torch.softmax(logits, dim=0)
+        entropy = -torch.sum(probs * torch.log(probs + 1e-9))
+        
+        go_signal = torch.max(logits)
+        stop_signal = (entropy - 1.0) * 2.0
+        gate_value = torch.sigmoid(go_signal - stop_signal)
+        gated_logits = logits * gate_value
+
+        return gated_logits, granule_acts, gate_value
 
 
-def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, settle_diff=0.0):
+def prune_and_rewire_output(engine, prune_ratio=0.05):
     """
-    Climbing fiber learning rule (inferior olive → Purkinje LTD/LTP).
-    
-    Three bioplausible mechanisms to prevent class collapse:
-    
-    1. Surprise-Modulated CF: Global error novelty scales overall LR.
-    
-    2. IO Frequency Habituation (NEW): The inferior olive habituates to 
-       frequently-presented stimuli and sensitizes to rare ones 
-       (Ohmae & Medina 2015). Complex spike probability decreases with 
-       stimulus repetition. This scales the per-class CF signal inversely 
-       with class frequency, giving rare characters ~3-5x stronger updates 
-       vs space's ~0.3x. Directly addresses the 5:1 learning opportunity 
-       imbalance that causes class collapse.
-       
-    3. Activity-Dependent Decay: Only active Purkinje rows decay.
-       Protects rare-class rows from erosion between sparse updates.
+    Hebbian Structural Plasticity for direct L5/6 -> Motor projections.
+    Consolidates successful correlations and prunes weak ones.
     """
     with torch.no_grad():
-        lr = cerebellum['climbing_fiber_lr']
-
-        # Target one-hot
-        target = torch.zeros(256, device=logits.device)
-        target[target_byte] = 1.0
-
-        # Standard softmax error (T=1.0, no temperature)
-        purkinje_output = torch.softmax(logits, dim=0)
-        climbing_fiber_error = target - purkinje_output
-
-        # --- FIX 2: Gap Junction IO Coupling (Chaotic Resonance) ---
-        if 'io_gap_junctions' not in cerebellum:
-            # Sparse symmetric random gap junctions between IO cells
-            io_gj = torch.randn(256, 256, device=logits.device) * 0.1
-            io_gj = (io_gj + io_gj.T) / 2.0  # symmetric electrical coupling
-            io_gj.fill_diagonal_(0.0)
-            cerebellum['io_gap_junctions'] = io_gj
+        if not hasattr(engine, 'output_edge_mask') or not engine.output_edge_mask.any():
+            return
             
-        # Laterally diffuse the IO error to induce chaotic resonance and high dimensionality
-        climbing_fiber_error = climbing_fiber_error + torch.matmul(cerebellum['io_gap_junctions'], climbing_fiber_error) * 0.5
-        climbing_fiber_error = climbing_fiber_error / climbing_fiber_error.norm().clamp(min=1e-6)
+        mask = engine.output_edge_mask
+        weights = engine.w_surface[mask]
+        abs_weights = weights.abs()
         
-        # --- FIX 1: Surprise-Modulated Climbing Fiber Discharge ---
-        error_magnitude = climbing_fiber_error.abs().sum().item()
-        if 'error_ema' not in cerebellum:
-            cerebellum['error_ema'] = error_magnitude
+        # Determine pruning threshold (bottom X% of weights)
+        n_edges = mask.sum().item()
+        n_prune = int(n_edges * prune_ratio)
         
-        surprise_ratio = error_magnitude / max(cerebellum['error_ema'], 1e-6)
-        modulated_lr = lr * min(max(surprise_ratio, 0.5), 3.0)
-        cerebellum['error_ema'] = 0.99 * cerebellum['error_ema'] + 0.01 * error_magnitude
+        if n_prune == 0:
+            return
+            
+        threshold = torch.kthvalue(abs_weights, n_prune).values
         
-        # --- FIX 4: EMA-Based Graded Climbing Fiber Signal ---
-        # Use EMA of settle_diff to modulate CF learning rate.
-        # Well-settled networks (low diff) produce more precise CF signals;
-        # unsettled networks (high diff) produce attenuated, noisy signals.
-        if 'settle_diff_ema' not in cerebellum:
-            cerebellum['settle_diff_ema'] = settle_diff
-        cerebellum['settle_diff_ema'] = 0.99 * cerebellum['settle_diff_ema'] + 0.01 * settle_diff
-        # Graded factor: high when settled (low EMA), low when unsettled
-        # Typical settle_diff_ema range: 4-14. Target midpoint ~6.
-        settle_quality = torch.sigmoid(torch.tensor(2.0 * (8.0 - cerebellum['settle_diff_ema']))).item()
-        modulated_lr *= settle_quality
+        # Identifiers for pruning
+        prune_indices = abs_weights <= threshold
         
-        # --- FIX 2: IO Frequency Habituation (Per-Class CF Modulation) ---
-        # Track exponentially-decaying class frequency.
-        # Bio: IO complex spike rates decrease with stimulus repetition.
-        # Rare stimuli evoke strong complex spikes (sensitization),
-        # frequent stimuli evoke weak complex spikes (habituation).
-        if 'class_counts' not in cerebellum:
-            cerebellum['class_counts'] = torch.ones(256, device=logits.device)
-        cerebellum['class_counts'] *= 0.999  # Slow exponential decay
-        cerebellum['class_counts'][target_byte] += 1.0
+        # Reassign pruned edges to new random L5/6 -> Motor targets
+        # Motor nodes are 256-511. L5/6 indices are engine.is_l56
+        l56_indices = torch.where(engine.is_l56)[0]
+        motor_indices = torch.arange(256, 512, device=engine.device)
         
-        # Inverse frequency scaling: uniform baseline (1/256) divided by actual freq
-        class_freq = cerebellum['class_counts'] / cerebellum['class_counts'].sum().clamp(min=1.0)
-        uniform_freq = 1.0 / 256.0
-        io_habituation = (uniform_freq / class_freq[target_byte].clamp(min=1e-6))
-        io_habituation = io_habituation.clamp(0.3, 5.0)  # Floor 0.3x for space, ceil 5x for rare
+        # Randomly sample new source/dest pairs
+        new_src = l56_indices[torch.randint(0, len(l56_indices), (n_prune,), device=engine.device)]
+        new_dst = motor_indices[torch.randint(0, len(motor_indices), (n_prune,), device=engine.device)]
         
-        # --- FIX 1: Temporal Eligibility Traces ---
-        # Fetch the delayed granule cell activity from the circular buffer
-        # This aligns the CF error exactly with the PF activity from ~120ms ago
-        delayed_idx = (cerebellum['buffer_idx'] + 1) % 6
-        delayed_granule_acts = cerebellum['granule_buffer'][delayed_idx].unsqueeze(0)
-
-        # --- FIX 3: State-Dependent Climbing Fiber Responses ---
-        # Scale LTD update magnitude proportional to Purkinje cell's somatic depolarization
-        state_dep_scale = torch.sigmoid(logits).unsqueeze(1)
-
-        # --- FIX 2: Gap Junction IO Coupling (Chaotic Resonance) ---
-        # We allow the gap junctions to organically spread the IO error into a 
-        # high-dimensional signal, removing the artificial top-K scalar clamp entirely!
-        # Save for diagnostic logging:
-        cerebellum['last_climbing_fiber_error'] = climbing_fiber_error.detach()
+        # Apply pruning and rewiring to global index/weight tensors
+        # Find global edge indices that match the output mask and pruning mask
+        global_indices = torch.where(mask)[0][prune_indices]
         
-        # Combined: surprise × IO habituation × state-dep scale × delayed trace
-        delta_w = modulated_lr * io_habituation * climbing_fiber_error.unsqueeze(1) * state_dep_scale * delayed_granule_acts
+        engine.indices[0, global_indices] = new_src
+        engine.indices[1, global_indices] = new_dst
+        engine._weight_values_raw[global_indices] = torch.randn(n_prune, device=engine.device) * 0.1
+        engine.w_surface[global_indices] = engine._weight_values_raw[global_indices].clone()
         
-        # Mask out updates per Purkinje cell (Removed Top-K constraint)
-        # The organically spread climbing_fiber_error handles the masking natively.
-        delta_w = delta_w
+    return n_prune
 
-        # Apply climbing fiber UPDATE (Error-driven LTD/LTP)
-        cerebellum['purkinje_weights'] += delta_w
 
-        # --- FIX 2: Compensatory Bidirectional Plasticity (LTP) ---
-        # Homeostatic LTP rule for active parallel fibers that lack coinciding error signal
-        # This counteracts monotonic LTD weight decay to prevent complete synaptic silencing.
-        # When CF error is small or zero (masked), parallel fibers that fire should potentiate.
-        ltp_rate = 1e-4
-        # Calculate CF magnitude for each row
-        cf_mag = climbing_fiber_error.abs().unsqueeze(1)
-        # If CF error is low, LTP is high. If CF error is high, LTP is suppressed by LTD.
-        homeostatic_ltp = ltp_rate * granule_acts.unsqueeze(0) * torch.exp(-2.0 * cf_mag)
-        cerebellum['purkinje_weights'] += homeostatic_ltp
-
-        # --- FIX 6: Excitability Homeostasis at the Readout ---
-        # Intrinsic plasticity on the soma lowering firing threshold when average activity drops
-        target_act = 1.0 / 256.0
-        cerebellum['purkinje_bias'] += 0.01 * (target_act - purkinje_output)
-
-        # --- FIX 5: Readout Homeostatic Scaling (Anti-Drift) ---
-        # Track per-class Purkinje activation EMA to detect and correct drift
-        if 'purkinje_act_ema' not in cerebellum:
-            cerebellum['purkinje_act_ema'] = torch.zeros(256, device=logits.device)
-        # EMA of each row's response magnitude
-        row_response = (cerebellum['purkinje_weights'] @ granule_acts).abs()
-        cerebellum['purkinje_act_ema'] = 0.99 * cerebellum['purkinje_act_ema'] + 0.01 * row_response
-        # Target: all rows should have similar mean response (uniform readout)
-        mean_response = cerebellum['purkinje_act_ema'].mean().clamp(min=1e-4)
-        # Scale rows with weak response UP, strong response slightly DOWN
-        drift_correction = (mean_response / cerebellum['purkinje_act_ema'].clamp(min=1e-4)).clamp(0.98, 1.02)
-        cerebellum['purkinje_weights'] *= drift_correction.unsqueeze(1)
-
-        # --- FIX 3: Soft Homeostatic Synaptic Scaling (LTD Balance) ---
-        # Replace tight L1/L2 clamps with a soft homeostatic equilibrium.
-        l2_norms = cerebellum['purkinje_weights'].norm(dim=1, keepdim=True)
-        # Smooth weight decay (LTD) grows quadratically with weight magnitude, 
-        # softly balancing against LTP without a rigid numerical ceiling.
-        soft_decay = 1e-4 * (l2_norms ** 2)
-        cerebellum['purkinje_weights'] *= (1.0 - soft_decay.clamp(max=0.1))
+def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, engine, settle_diff=0.0):
+    """
+    Cerebellar learning with DCN-correct sign convention.
+    
+    CRITICAL FIX: With DCN sign inversion (logits = -PK@GC):
+      CF fires → LTD at PF-PC → PK weight ↓ → PK output ↓ → DCN inhibition ↓ → logit ↑
+    
+    This means the LTD rule (Δw = -η * CF * GC) produces the CORRECT gradient
+    direction through the DCN inversion, equivalent to standard gradient descent
+    on the cross-entropy loss.
+    
+    For correct class: CF positive → weight ↓ → logit ↑ ✓
+    For incorrect class: CF negative → weight ↑ → logit ↓ ✓
+    
+    Also implements:
+    - Inverse BCM sliding threshold (Piochon 2016)
+    - Weight bounds [0, 2.0] (Isope & Barbour 2002: silent → 2x naive)
+    - Reciprocal MLI plasticity (Jörntell & Ekerot 2002)
+    - Mossy fiber slow plasticity (D'Angelo 1999)
+    """
+    lr_purkinje = 0.02
+    beta2 = 0.99
+    epsilon = 1e-8
+    gamma = 0.95
+    
+    device = logits.device
+    n_granule = cerebellum['n_granule']
+    
+    # ========================================================================
+    # STEP 1: Climbing fiber error signal (inferior olive)
+    # ========================================================================
+    v_t = logits[target_byte].detach()
+    r = 1.0 if torch.argmax(logits) == target_byte else 0.0
+    td_error_scalar = r + gamma * v_t - cerebellum['last_v_target']
+    cerebellum['last_v_target'] = v_t
+    
+    target_one_hot = torch.zeros(256, device=device)
+    target_one_hot[target_byte] = 1.0
+    raw_error = target_one_hot - torch.softmax(logits, dim=0)
+    cf_error = raw_error * (1.0 + td_error_scalar.abs())
+    
+    # Bio-Adam moment tracking
+    cerebellum['m2_err'] = beta2 * cerebellum['m2_err'] + (1 - beta2) * (cf_error ** 2)
+    
+    # Stochastic IO gate
+    cerebellum['io_buffer'] += cf_error
+    io_fire_mask = cerebellum['io_buffer'].abs() > cerebellum['io_threshold']
+    
+    gc_for_pk = cerebellum.get('_last_gc_for_purkinje', granule_acts)
+    
+    if not io_fire_mask.any():
+        # PF-alone → baseline LTP at PF-PC (Coesmans 2004)
+        # LTP increases PK weight → through DCN inversion → logit decreases
+        # This is biological: PF-alone potentiates the inhibitory pathway,
+        # acting as natural forgetting/regression-to-mean
+        baseline_ltp = 0.0005 * gc_for_pk.unsqueeze(0).expand(256, -1)
+        cerebellum['purkinje_weights'] += baseline_ltp
+        w_max = 2.0 * cerebellum['purkinje_weights_baseline']
+        cerebellum['purkinje_weights'].clamp_(0.0, w_max)
+        return 0.0
         
-        # (Row norm cap removed entirely to allow biological equilibrium)
+    active_cf = cerebellum['io_buffer'] * io_fire_mask.float()
+    cerebellum['io_buffer'][io_fire_mask] = 0.0
+    
+    # ========================================================================
+    # STEP 2: LTD at PF-PC synapses (Coesmans 2004 inverse BCM)
+    # ========================================================================
+    norm_factor = 1.0 / (torch.sqrt(cerebellum['m2_err']) + epsilon)
+    cf_normalized = active_cf * norm_factor  # [256]
+    
+    # Sliding calcium threshold (Piochon 2016)
+    calcium_level = cf_normalized.abs()
+    theta_ca = cerebellum['calcium_threshold']
+    cerebellum['calcium_threshold'] = 0.999 * theta_ca + 0.001 * calcium_level
+    
+    # LTD: CF-driven depression. Δw = -η * CF * GC
+    # With DCN inversion: weight ↓ → PK output ↓ → logit ↑ (correct gradient!)
+    ltd_update = -cf_normalized.unsqueeze(1) * gc_for_pk.unsqueeze(0)
+    
+    # LTP: baseline potentiation for PCs with low calcium (no CF firing)
+    ltp_mask = (calcium_level < theta_ca).float()
+    ltp_update = 0.001 * ltp_mask.unsqueeze(1) * gc_for_pk.unsqueeze(0)
+    
+    weight_delta = lr_purkinje * ltd_update + ltp_update
+    cerebellum['purkinje_weights'] += weight_delta
+    
+    # ========================================================================
+    # STEP 3: Weight bounds [0, 2.0] (Isope & Barbour 2002)
+    # ========================================================================
+    w_max = 2.0 * cerebellum['purkinje_weights_baseline']
+    cerebellum['purkinje_weights'].clamp_(0.0, w_max)
+    
+    # ========================================================================
+    # STEP 4: Reciprocal MLI plasticity (Jörntell & Ekerot 2002)
+    # ========================================================================
+    cf_fired_gc = (gc_for_pk > 0).float() * (io_fire_mask.float().sum() / 256.0)
+    cerebellum['mli_inhibition_scale'] += 0.01 * cf_fired_gc
+    cerebellum['mli_inhibition_scale'] -= 0.001
+    cerebellum['mli_inhibition_scale'].clamp_(0.1, 3.0)
+    
+    # ========================================================================
+    # STEP 5: Mossy fiber slow plasticity (D'Angelo 1999)
+    # ========================================================================
+    input_idx = cerebellum['l56_indices']
+    input_acts = engine.state[input_idx]
+    
+    gc_active = (granule_acts > 0).float()
+    hebbian_corr = gc_active.unsqueeze(1) * input_acts.unsqueeze(0)
+    
+    # Faster eligibility accumulation (was 0.01, raised to 0.05)
+    cerebellum['mossy_eligibility'] = 0.95 * cerebellum['mossy_eligibility'] + 0.05 * hebbian_corr
+    
+    # Center-surround plasticity (Mapelli 2007)
+    center_mask = gc_active.unsqueeze(1)
+    surround_mask = 1.0 - center_mask
+    
+    mossy_delta = cerebellum['mossy_lr'] * (
+        center_mask * cerebellum['mossy_eligibility'] * 1.0
+        - surround_mask * cerebellum['mossy_eligibility'] * 0.3
+    )
+    
+    mossy_mask = (cerebellum['mossy_weights'] != 0)
+    cerebellum['mossy_weights'] += mossy_delta * mossy_mask.float()
+    
+    # Bound mossy fiber gain to 3x range
+    row_norms = cerebellum['mossy_weights'].norm(dim=1, keepdim=True).clamp(min=1e-6)
+    baseline_norm = cerebellum['mossy_weights_baseline_norm'] / cerebellum['n_granule'] ** 0.5
+    max_row_norm = 3.0 * max(baseline_norm, 0.1)
+    scale = torch.clamp(max_row_norm / row_norms, max=1.0)
+    cerebellum['mossy_weights'] *= scale
+    
+    # ========================================================================
+    # DIAGNOSTICS
+    # ========================================================================
+    cerebellum['last_climbing_fiber_error'] = active_cf
+    cerebellum['error_ema'] = 0.99 * cerebellum.get('error_ema', 0.0) + 0.01 * active_cf.abs().mean().item()
 
-        # --- FIX 4: Per-Class Row Norm Equalization (Anti-Collapse) ---
-        # The existing mechanisms (IO habituation, surprise modulation, 
-        # activity-dependent decay) are insufficient because dominant-class
-        # rows at equal norms still win via softmax: a row with uniformly 
-        # high weights (space, ~20% of inputs) produces higher softmax P
-        # than rows with sparser weights (rare chars).
-        # Fix: Soft-normalize each row toward the mean norm. This ensures
-        # no class can accumulate systematically more total weight than others.
-        row_norms_eq = cerebellum['purkinje_weights'].norm(dim=1, keepdim=True)
-        mean_norm = row_norms_eq.mean()
-        if mean_norm > 1e-6:
-            # Soft equalization: gently pull each row toward mean norm
-            # Scale factor clamped to [0.95, 1.05] for stability
-            eq_scale = (mean_norm / row_norms_eq.clamp(min=1e-6)).clamp(0.95, 1.05)
-            cerebellum['purkinje_weights'] *= eq_scale
-
-        return climbing_fiber_error.abs().mean().item()
+    return active_cf.abs().mean().item()
 
 
 def compute_cerebellar_cortical_feedback(cerebellum, output_error):
     """
-    Cerebello-thalamo-cortical feedback: exact gradient of cerebellar
-    readout error with respect to L5/6 activations.
-
-    Biological pathway: Purkinje → deep cerebellar nuclei (DCN) →
-    ventrolateral thalamus (VL) → cortical L5/6.
-
-    When the cerebellum makes a prediction error, this pathway carries
-    a teaching signal back to cortex that reshapes L5/6 representations
-    to be more "readout-friendly". Unlike random DFA matrices, this uses
-    the actual learned Purkinje weights and fixed mossy fiber connectivity.
-
-    Math: d_loss/d_L56 = mossy_w.T @ ((purkinje_w.T @ error) * gc_mask)
-
-    Args:
-        cerebellum: dict with cerebellar state
-        output_error: [256] softmax error (target - softmax(logits))
-    Returns:
-        l56_gradient: [n_l56] tensor — gradient for each L5/6 node
+    Cerebello-thalamo-cortical feedback with DCN-consistent backward pass.
+    Uses MLI-modulated GC activations for correct gradient computation.
     """
     with torch.no_grad():
-        # Backward through Purkinje readout
-        gc_error = cerebellum['purkinje_weights'].T @ output_error  # [n_granule]
-
-        # Backward through ReLU + top-k (straight-through estimator)
-        gc_error_masked = gc_error * cerebellum['gc_active_mask']  # [n_granule]
-
-        # Backward through mossy fiber projection
-        l56_gradient = cerebellum['mossy_weights'].T @ gc_error_masked  # [n_l56]
-
+        gc_error = cerebellum['purkinje_weights'].T @ output_error
+        gc_mask = cerebellum.get('_last_gc_for_purkinje', 
+                                  cerebellum['gc_active_mask'])
+        gc_error_masked = gc_error * (gc_mask > 0).float()
+        l56_gradient = cerebellum['mossy_weights'].T @ gc_error_masked
         return l56_gradient
 
 
@@ -959,7 +994,7 @@ def main():
             wernicke_indices.extend(mod['l56_indices'].tolist())
     
     cerebellum = add_cerebellar_module(
-        graph, num_nodes, n_granule=16384, device=device, 
+        graph, num_nodes, n_granule=1024, device=device, 
         thalamic_indices=thal_indices,
         broca_indices=np.array(broca_indices),
         wernicke_indices=np.array(wernicke_indices)
@@ -970,28 +1005,15 @@ def main():
     # =====================================================================
     pfa_matrices = create_pfa_matrices(engine, n_output=256, n_hidden_pfa=128, device=device)
 
-    # Curriculum setup
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    data_dir = os.path.join(script_dir, "data")
-    
-    # Auto-generate curriculum data if missing
-    ensure_curriculum_data(data_dir)
-
+    # Simplified Dummy Curriculum for Testing
     phases = [
         {
-            "name": "Holophrases",
-            "file": "train/level1_holophrases.txt",
-            "eval_file": "eval/level1_holophrases.txt",
+            "name": "SimpleSequenceTracking",
             "lr": 0.05,
-            "epochs": 2,
-        },
-        {
-            "name": "Construction",
-            "file": "train/level2_slot_frame.txt",
-            "eval_file": "eval/level2_slot_frame.txt",
-            "lr": 0.02,
-            "epochs": 5,
-        },
+            "epochs": 1,
+            "text": "abc abc abc abc " * 200,
+            "eval_text": "abc abc abc abc " * 50
+        }
     ]
 
     # Input Mask: clamp input nodes only during settling
@@ -999,27 +1021,23 @@ def main():
     input_mask[:256] = 1.0
 
     # =================================================================
-    # Hyperparameters (Round 3 — with DFA + Thalamic + Burst)
+    # Hyperparameters (Round 4 — DCN inversion + Cerebellar homeostasis)
     # =================================================================
-    FREE_STEPS = 100
-    NUDGE_STEPS = 30
+    FREE_STEPS = 40
+    NUDGE_STEPS = 12
     nudge_strength = 5.0
     lr = 0.01
     sigma_noise_free = 0.01
     sigma_noise_nudge = 0.01
     LEAK_FACTOR = 0.95
     ALPHA_PFA = 0.15         # PFA feedback strength (all hidden layers)
-    ALPHA_CEREBELLAR = 0.01  # Re-enabled at slow timescale (every 500 steps).
-                             # Previously 0.0 because per-step CB gradient caused
-                             # non-stationarity collapse. Now safe at 500-step
-                             # intervals, allowing L5/6 representations to stabilize
-                             # between Purkinje weight adaptations.
-    BURST_APICAL_GAIN = 1.5 # Drastically reduced from 15.0 to preserve continuous geometric margins
+    ALPHA_CEREBELLAR = 0.05  # Raised — mossy fibers now plastic, can handle stronger feedback
+    BURST_APICAL_GAIN = 2.0  # Raised — BAC thresholds now lower (matched to literature)
 
     for phase_info in phases:
         phase_name = phase_info["name"]
-        file_path = os.path.join(data_dir, phase_info["file"])
-        eval_path = os.path.join(data_dir, phase_info.get("eval_file", ""))
+        text = phase_info["text"]
+        eval_text = phase_info["eval_text"]
 
         print(f"\n--- Starting Phase: {phase_name} ---")
         print(f"  Steps: Free={FREE_STEPS}, Nudge={NUDGE_STEPS}")
@@ -1028,24 +1046,10 @@ def main():
         print(f"  Thalamocortical loop: {N_THALAMIC} neurons")
         print(f"  Cerebellum: {cerebellum['n_granule']} granule cells")
 
-        if not os.path.exists(file_path):
-            print(f"File not found: {file_path}")
-            continue
-
-        with open(file_path, "r", encoding="utf-8") as f:
-            text = f.read()
-
         data = np.frombuffer(text.encode("utf-8"), dtype=np.uint8)
         seq_len = len(data)
-        
-        # Load eval data if available
-        eval_data = None
-        if eval_path and os.path.exists(eval_path):
-            with open(eval_path, "r", encoding="utf-8") as f:
-                eval_data = np.frombuffer(f.read().encode("utf-8"), dtype=np.uint8)
-            print(f"  Eval data: {len(eval_data)} bytes from {eval_path}")
-        else:
-            print(f"  Eval data: not available")
+        eval_data = np.frombuffer(eval_text.encode("utf-8"), dtype=np.uint8)
+        print(f"  Eval data: {len(eval_data)} bytes")
 
         # Metrics tracking
         spatial_errors = []
@@ -1140,7 +1144,7 @@ def main():
 
             # === CEREBELLAR LEARNING (replaces terminal Adam optimizer) ===
             cf_error = cerebellar_learn(cerebellum, logits, granule_acts, next_byte, gate_value,
-                                        settle_diff=engine.last_settle_diff)
+                                        engine=engine, settle_diff=engine.last_settle_diff)
 
             # Prediction errors
             spatial_err = engine.compute_prediction_errors()
@@ -1176,11 +1180,9 @@ def main():
                 pfa_signal = R @ (B @ output_error)  # [level_size]
                 nudge_vec[level_mask] += ALPHA_PFA * pfa_signal
 
-            # ENHANCEMENT 3c: Cerebello-thalamo-cortical co-adaptation (slow timescale)
-            # Re-enabled at every 500 steps to prevent non-stationarity collapse.
-            # The slow timescale gives L5/6 representations time to stabilize
-            # before Purkinje weights re-adapt.
-            if (i + 1) % 500 == 0:
+            # ENHANCEMENT 3c: Cerebello-thalamo-cortical co-adaptation
+            # FIX: every 50 steps (was 500). Mossy fibers absorb alignment.
+            if (i + 1) % 50 == 0:
                 l56_grad = compute_cerebellar_cortical_feedback(cerebellum, output_error)
                 nudge_vec[cerebellum['l56_indices']] += ALPHA_CEREBELLAR * l56_grad
 
@@ -1233,6 +1235,11 @@ def main():
             engine.state = free_state.clone()
             engine.state_basal = free_basal.clone()
             engine.state_apical = free_apical.clone()
+
+            # Periodic Structural Plasticity (Hebbian Rewiring)
+            if (i + 1) % 1000 == 0:
+                n_pruned = prune_and_rewire_output(engine, prune_ratio=0.03)
+                print(f"\n  [STRUCTURAL] Pruned and rewired {n_pruned} weak output projections.")
 
             # Logging and periodic tasks
             if (i + 1) % 10 == 0:
@@ -1306,6 +1313,21 @@ def main():
                     f"  OutProj w_surf: norm={out_w_norm:.4f} mean={out_w_mean:.6f} | "
                     f"Burst: mean={burst_mean:.4f} frac>0.5={burst_frac:.2%} | "
                     f"CF_ema: {cf_surprise:.4f} | IO_space: {io_dim:.1f}%"
+                )
+                
+                # Cerebellar homeostasis diagnostics
+                pk_silent = (cerebellum['purkinje_weights'] < 1e-6).float().mean().item()
+                mossy_norm = cerebellum['mossy_weights'].norm().item()
+                mossy_baseline = cerebellum['mossy_weights_baseline_norm']
+                mossy_ratio = mossy_norm / max(mossy_baseline, 1e-6)
+                mli_mean = cerebellum['mli_inhibition_scale'].mean().item()
+                ca_thresh_mean = cerebellum['calcium_threshold'].mean().item()
+                
+                print(
+                    f"  PK_silent: {pk_silent:.1%} | "
+                    f"MF_gain: {mossy_ratio:.2f}x | "
+                    f"MLI: {mli_mean:.3f} | "
+                    f"Ca_θ: {ca_thresh_mean:.4f}"
                 )
 
 

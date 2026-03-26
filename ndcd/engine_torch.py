@@ -11,13 +11,21 @@ def get_soma(v_m: torch.Tensor, i_exc: torch.Tensor, i_inh: torch.Tensor, a: tor
     # Solution 2: State-Locked NMDAR Bistability
     # Ties magnesium block to current membrane potential (v_m)
     v_m_scaled = v_m * 100.0
-    mg_block = 1.0 / (1.0 + (1.2 / 3.57) * torch.exp(-0.062 * v_m_scaled))
+    # Soften the NMDA Magnesium Block via reduced voltage dependence (decay exponent -0.062 -> -0.03)
+    mg_block = 1.0 / (1.0 + (1.2 / 3.57) * torch.exp(-0.03 * v_m_scaled))
     
     # Fast AIS kinetics for PV interneurons (lower threshold)
     effective_threshold = torch.where(is_pv, threshold * 0.7, threshold)
     
+    # Local Disinhibition Motifs: Apical input actively suppresses shunting inhibition
+    apical_disinhibition = torch.sigmoid(a * 5.0)
+    i_inh = i_inh / (1.0 + apical_disinhibition * 2.0)
+    
     # Proposal 2: Shunting Inhibition (Divisive Gain Control)
-    i_soma_base = (i_exc * ip_gain + ip_bias) / (1.0 + i_inh)
+    # Hybrid shunting: subtractive component lets strong signals punch through
+    i_sub = i_exc * ip_gain + ip_bias - 0.5 * i_inh  # Subtractive
+    i_div = (i_exc * ip_gain + ip_bias) / (1.0 + i_inh)  # Divisive
+    i_soma_base = 0.5 * i_sub + 0.5 * i_div  # Hybrid blend
     
     # NMDA/AMPA blend (Phase 2)
     # AMPA component (1-ratio) has no mg_block, NMDA component (ratio) is blocked
@@ -25,20 +33,23 @@ def get_soma(v_m: torch.Tensor, i_exc: torch.Tensor, i_inh: torch.Tensor, a: tor
     base_drive = torch.tanh(i_soma_base) * nmda_drive_scale
     
     # Proposal 3: Two-Compartment Coincidence Logic (BAC Firing)
-    # Sharp gate (gain=15.0, threshold=7.5) for precise coincident detection
-    somatic_spike_detected = torch.sigmoid(base_drive * 15.0 - 7.5)
+    # FIX: Recalibrated per Larkum 1999 / Hay 2011 / De Kock & Sakmann 2008.
+    # Target: ~15% of L5/6 spikes should be bursts.
+    somatic_spike_detected = torch.sigmoid(base_drive * 10.0 - 2.5)
     
-    # Non-linear Apical XOR Logic (wider gate)
-    apical_gate_fast = torch.sigmoid(a * 8.0 - 3.0)  # Opens at ~0.37
-    apical_gate_slow = torch.sigmoid(a * 12.0 - 10.0) # Closes at ~0.83
-    apical_xor_logic = apical_gate_fast - 0.4 * apical_gate_slow # Relaxed XOR
+    # Apical gate: Opens at a ≈ 0.1 (lowered from 0.4)
+    # Removed XOR upper gate: SST handles suppression biologically
+    apical_gate = torch.sigmoid(a * 8.0 - 0.8)
     
-    # Coincidence detection gating
-    bac_burst_trigger = somatic_spike_detected * apical_xor_logic
+    # Coincidence detection: AND gate for Ca²⁺ spike initiation
+    bac_burst_trigger = somatic_spike_detected * apical_gate
     
-    # burst(coincidence) + high-voltage calcium plateaus (CaHVA)
-    # Increased burst amp to 25.0 for clearer diagnostic signatures
-    burst_amp = 1.0 + 25.0 * bac_burst_trigger * (1.1 + cahva)
+    # L5-specific CaHVA hot zone enrichment (Hay et al. 2011)
+    cahva_l5_boost = torch.where(is_neg_pe | (~is_pv & ~is_sst),
+                                 cahva * 3.0,
+                                 cahva)
+    
+    burst_amp = 1.0 + 2.0 * bac_burst_trigger * (1.0 + cahva_l5_boost)
     
     # Omission signaling (PE-)
     omission_diff = torch.clamp(a - i_exc, min=0.0)
@@ -278,7 +289,7 @@ def jit_solve_dynamics_imex(
             # VIP: driven by feedback (apical)
             mod_a = current_a[ms:me]
             mod_vip_drive = torch.relu(mod_a).mean() if mod_a.numel() > 0 else torch.tensor(0.0, device=current_b.device)
-            vip_activity_mod[m] = torch.sigmoid(mod_vip_drive * 5.0 - 2.0)
+            vip_activity_mod[m] = torch.sigmoid(mod_vip_drive * 8.0 - 1.0)
             
             # SST: slow, target apical
             mod_s_sst = current_s[ms:me][is_sst[ms:me]]
@@ -394,8 +405,8 @@ def jit_solve_dynamics_imex(
         # Apical processing (feedback / top-down) - Split E and I
         apical_E = torch.mv(w_apical_intra_E, rho_unmyelinated) + torch.mv(w_apical_inter_E, rho_myelinated)
         apical_I = torch.mv(w_apical_intra_I, rho_unmyelinated) + torch.mv(w_apical_inter_I, rho_myelinated)
-        # Add SST dendritic inhibition to apical conductances
-        apical_I = apical_I - sst_drive * current_inh_d * 5.0
+        # SST dendritic inhibition: reduced from 2.0→0.5 to permit BAC firing
+        apical_I = apical_I - sst_drive * current_inh_d * 0.5
 
         # Conductance-Based Integration (Item 1)
         # We treat synaptic inputs as conductances. 
@@ -503,17 +514,18 @@ def jit_solve_dynamics_imex(
         current_a = current_a + current_dt * dv_apical # NMDA-like slow apical
         current_a = current_a.clamp(-1.5, 1.5)
 
-        # BAC Firing CaHVA Plateau Update: Supralinear Regenerative Current (Item 2)
-        # coincidence = somatic spike + apical input
-        soma_spike = torch.sigmoid(current_b * 12.0 - 6.0)
-        coincidence = soma_spike * torch.sigmoid(current_a * 10.0 - 5.0)
-        nmda_plateau = torch.where(current_a > 0.7, torch.ones_like(current_a) * 1.0, torch.zeros_like(current_a))
+        # BAC Firing CaHVA Plateau Update — recalibrated per Hay 2011
+        soma_spike = torch.sigmoid(current_b * 10.0 - 2.5)
+        apical_sufficient = torch.sigmoid(current_a * 8.0 - 0.8)
+        coincidence = soma_spike * apical_sufficient
+        nmda_plateau = torch.where(current_a > 0.4, torch.ones_like(current_a) * 1.0, torch.zeros_like(current_a))
         burst_trigger = coincidence + nmda_plateau
         
         cahva_tau = torch.ones_like(cahva_states) * 30.0
-        cahva_tau[is_l56] = 100.0  # Biological: longer plateaus in L5 pyramidal
+        cahva_tau[is_l56] = 100.0
         cahva_tau[is_l23] = 20.0
-        cahva_states = cahva_states + current_dt * (burst_trigger * 5.0 - cahva_states) / cahva_tau
+        cahva_drive = torch.where(is_l56, burst_trigger * 8.0, burst_trigger * 5.0)
+        cahva_states = cahva_states + current_dt * (cahva_drive - cahva_states) / cahva_tau
         cahva_states = cahva_states.clamp(0.0, 3.0)
 
         # Spike-dependent threshold adaptation (Item 2)
@@ -537,6 +549,17 @@ def jit_solve_dynamics_imex(
         # Proposal 2: Hard-clamp input mask on soma if provided
         if input_mask is not None:
             current_s = current_s * (1.0 - input_mask) + input_vector * input_mask
+        
+        # --- Spiking Precision: Σ_l^t = α for l = L - t ---
+        # During the first L+1 iterations, boost precision at level L-step.
+        # Use a strong 3x boost (matching the specification's learning-rate-
+        # scaled precision) to ensure deep layers receive output-grade error.
+        max_level = node_levels.max().item()
+        if step_count <= max_level:
+            target_level = max_level - step_count
+            level_mask_sp = (node_levels == target_level)
+            # Strong precision boost: 3x at the target level
+            current_s[level_mask_sp] *= 3.0
         
         current_lifetime = 0.9999 * current_lifetime + 0.0001 * current_s.abs()
         diff = torch.norm(current_s - old_soma).item()
@@ -1941,17 +1964,23 @@ class PredictiveCodingEngine:
             # Use constant scaling to avoid dead zones where near-zero weights can never grow
             self.w_surface += learning_rate * self.eligibility_traces
 
-            # 2b. Structural Hebbian Plasticity for Output Projections
-            # Allows the output layer to "discover" and latch onto informative internal modules.
+            # 2b. Burst-Timing Dependent Plasticity (BTDP) for Output Projections
+            # FIX: Motor nodes (256-511) are NOT L5/6 neurons, so post_bursts was
+            # always zero. The biologically correct signal is the PRESYNAPTIC L5/6
+            # burst — when L5/6 pyramidal cells undergo BAC firing (apical-basal
+            # coincidence), the resulting burst propagates down the axon to the
+            # motor target. Synapse strengthens based on presynaptic burst gating
+            # a contrastive Hebbian signal (nudge - free) at the postsynaptic motor node.
             if self.output_edge_mask.any():
-                motor_bursts = self.compute_burst_coincidence() # [N]
-                pre_acts = torch.tanh(free_state[self.indices[0][self.output_edge_mask]])
-                post_bursts = motor_bursts[self.indices[1][self.output_edge_mask]]
+                bursts = self.compute_burst_coincidence()  # [N] — nonzero for L5/6 only
+                pre_bursts = bursts[self.indices[0][self.output_edge_mask]]  # L5/6 presynaptic burst
+                post_nudge = torch.tanh(nudge_state[self.indices[1][self.output_edge_mask]])
+                post_free = torch.tanh(free_state[self.indices[1][self.output_edge_mask]])
                 
-                # Neuromodulated Hebbian rule: delta_w = eta * burst_j * act_i
-                # Using a small learning rate for structural discovery
-                output_hebb_grad = pre_acts * post_bursts
-                self.w_surface[self.output_edge_mask] += learning_rate * 0.5 * output_hebb_grad
+                # Three-factor rule: burst-gated contrastive Hebbian (BTDP)
+                # ΔW = η * burst_pre * (post_nudge - post_free)
+                output_btdp_grad = pre_bursts * (post_nudge - post_free)
+                self.w_surface[self.output_edge_mask] += learning_rate * 0.5 * output_btdp_grad
 
             # 3. Dale's Law Enforcement
             src_inh = self.is_inhibitory[self.indices[0]]
@@ -1981,39 +2010,35 @@ class PredictiveCodingEngine:
                 # Global inhibitory decay to prevent suppression lock
                 self.w_surface[src_inh] -= 0.0001 * self.w_surface[src_inh]
 
-            # 6. Homeostatic Synaptic Scaling and Hard Clipping (Biological Stability)
-            # This prevents weights from exploding (observed reaching 200+)
-            # and maintains the spectral budget of the network.
+            # 6. Homeostatic Synaptic Scaling (Biological Stability)
+            # Each neuron monitors its total afferent weight and scales to maintain
+            # a per-neuron budget. Motor neurons get a higher budget to allow the
+            # output projections room to learn, but are no longer exempt from
+            # normalization (previous exemption caused runaway weight growth).
             with torch.no_grad():
                 dst_idx = self.indices[1]
                 neuron_w_sum = torch.zeros(self.num_nodes, device=self.device)
                 
-                # We scale the entire effective weight budget to prevent local hotspots
                 w_eff = (self._weight_values_raw.abs() + self.w_surface.abs() + 
                         self.w_mid.abs() + self.w_deep.abs())
                 neuron_w_sum.scatter_add_(0, dst_idx, w_eff)
                 
-                # target_per_neuron ensures manageable spectral properties (e.g. SR ~ 1)
-                # Raised from 2.0→5.0: give plastic weights sufficient room to grow
-                # beyond the base topology budget.
-                target_per_neuron = 5.0
-                scaling_factor = target_per_neuron / torch.clamp(neuron_w_sum, min=target_per_neuron)
+                # Dual-budget: cortical neurons get tight budget (SR control),
+                # motor neurons get looser budget (need headroom for output learning).
+                # Bio: motor neurons have larger dendritic trees with more synaptic
+                # capacity than cortical interneurons.
+                target_per_neuron = torch.full((self.num_nodes,), 5.0, device=self.device)
+                target_per_neuron[256:512] = 20.0  # Motor neurons: 4x budget
                 
-                # Scale components to maintain the budget
+                per_neuron_target = target_per_neuron[dst_idx]
+                per_neuron_sum = neuron_w_sum[dst_idx]
+                scaling_factor = per_neuron_target / torch.clamp(per_neuron_sum, min=per_neuron_target)
+                
+                # Apply to all neurons (motor included) — no exemptions
                 # BUG FIX: Do NOT scale _weight_values_raw — preserve SR-tuned base topology
-                # Fix 6: Exempt motor neurons (256-511) from aggressive scaling
-                motor_mask = (dst_idx >= 256) & (dst_idx < 512)
-                non_motor_mask = ~motor_mask
-                
-                # Apply scaling to non-motor neurons
-                self.w_surface[non_motor_mask] *= scaling_factor[dst_idx[non_motor_mask]]
-                self.w_mid[non_motor_mask] *= scaling_factor[dst_idx[non_motor_mask]]
-                self.w_deep[non_motor_mask] *= scaling_factor[dst_idx[non_motor_mask]]
-                
-                # Motor neurons get gentle weight decay only to prevent explosion
-                self.w_surface[motor_mask] *= 0.9999
-                self.w_mid[motor_mask] *= 0.9999
-                self.w_deep[motor_mask] *= 0.9999
+                self.w_surface *= scaling_factor
+                self.w_mid *= scaling_factor
+                self.w_deep *= scaling_factor
 
                 # Hard clip to prevent runaway synaptic growth
                 self._weight_values_raw.clamp_(-1.0, 1.0)
@@ -2322,31 +2347,17 @@ class PredictiveCodingEngine:
     def compute_burst_coincidence(self):
         """
         Compute burst probability for L5/6 neurons based on apical-basal coincidence.
-
-        In thick-tufted L5 pyramidal neurons, a Ca²⁺ spike is triggered when:
-        - Basal dendrites receive bottom-up excitation (sensory/lateral)
-        - Apical tufts receive top-down context (predictions)
-        - Both arrive within a narrow coincidence window
-
-        The burst transforms single spikes into doublets/triplets that
-        reliably activate downstream targets (the "output-potent" signal.
-
-        Uses |tanh| instead of relu to detect co-activity even with
-        negative membrane potentials (inhibitory-driven neurons).
-
-        Returns:
-            burst: [N] tensor of burst probabilities (0-1) for all nodes
-                   (non-L5/6 nodes are 0)
+        Recalibrated per De Kock & Sakmann 2008: target ~15% burst fraction.
         """
         with torch.no_grad():
             burst = torch.zeros(self.num_nodes, device=self.device)
             l56_mask = self.is_l56
-            # Coincidence = both compartments active (regardless of sign)
-            basal_act = torch.tanh(self.state_basal[l56_mask]).abs()
-            apical_act = torch.tanh(self.state_apical[l56_mask]).abs()
-            # Burst when both compartments show strong activity
+            basal_act = torch.relu(torch.tanh(self.state_basal[l56_mask]))
+            apical_act = torch.relu(torch.tanh(self.state_apical[l56_mask]))
             coincidence = basal_act * apical_act
-            burst[l56_mask] = torch.sigmoid(8.0 * (coincidence - 0.15))
+            cahva_boost = 1.0 + 2.0 * self.cahva_states[l56_mask]
+            boosted_coincidence = coincidence * cahva_boost
+            burst[l56_mask] = torch.sigmoid(20.0 * (boosted_coincidence - 0.015))
             return burst
 
     def get_bg_gate_confidence(self, threshold=0.3, sharpness=20.0):
