@@ -196,209 +196,117 @@ def add_thalamocortical_loop(graph, edge_index, edge_weight, biases, taus, num_n
 def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, device='cpu', 
                             thalamic_indices=None, broca_indices=None, wernicke_indices=None):
     """
-    Cerebellar output module: Granule Cell expansion + Purkinje readout.
-    
-    Selective Adaptive Learning (SAL) Partitioning:
-    Segregates sequential (Broca) and semantic (Wernicke) input streams into 
-    separate pools of granule cells to prevent interference.
-
-    Architecture:
-      L5/6 ──[fixed random sparse]──→ Granule Cells (2048)
-      Granule Cells ──[plastic, climbing fiber LTD]──→ Motor/Purkinje (256)
-
-    The granule cell expansion acts as a random kernel that makes the
-    L5/6 representation linearly separable (Cover's theorem). The Purkinje
-    readout is a single plastic layer trained by the inferior olive error.
-
-    Key biological constraints:
-    - Mossy fiber → Granule projections are FIXED (non-plastic)
-    - Granule cells have NO recurrent connections
-    - Each granule cell receives from ~4 mossy fibers (extreme convergence)
-    - Granule → Purkinje weights are the ONLY plastic pathway
-    - Climbing fiber (inferior olive) carries target - output error
-
-    Args:
-        n_granule: Number of granule cells (2048 recommended, ~8x output dim)
-        sparsity: Fraction of L5/6 nodes each granule cell samples from
-        thalamic_indices: Optional indices for thalamic relay smoothing
-    Returns:
-        cerebellum: dict with all cerebellar state
+    Cerebellar output module: Pontine compression + GC expansion + Purkinje readout.
     """
-    # Gather all L5/6 indices for reference
+    N_PONTINE = 128
+    N_INPUTS_PER_GC = 4
+
     all_l56 = []
     for mod in graph.modules:
         all_l56.extend(mod['l56_indices'].tolist())
     all_l56 = np.array(all_l56, dtype=np.int64)
+    n_l56 = len(all_l56)
 
-    # ALWAYS use L5/6 directly (pontine nucleus pathway)
-    input_indices = all_l56
-    n_input = len(input_indices)
+    # Pontine: mixed-sign random projection (fixed, no Oja)
+    pontine_weights = torch.randn(N_PONTINE, n_l56, device=device) * (1.0 / (n_l56 ** 0.5))
 
-    # --- Topographic Mossy Fiber Projections ---
-    # Fan-in ~1% of L5/6 population (~16-24 inputs per GC).
-    # 60% from assigned module (pontine topography),
-    # 40% global (conjunctive coding across modules).
-    n_inputs_per_granule = max(16, int(n_input * 0.01))
-    mossy_mask = torch.zeros(n_granule, n_input, dtype=torch.bool)
-
-    # Pre-map module indices for faster lookup
-    module_l56_maps = []
-    for mod in graph.modules:
-        mod_l56 = mod['l56_indices']
-        pool_indices = np.where(np.isin(input_indices, mod_l56))[0]
-        module_l56_maps.append(pool_indices)
-
-    num_modules = len(graph.modules)
+    # Sparse 4-input GC connectivity
+    mossy_mask = torch.zeros(n_granule, N_PONTINE, dtype=torch.bool, device=device)
     for g in range(n_granule):
-        assigned_module = g % num_modules
-        local_pool = module_l56_maps[assigned_module]
-        
-        # Change from 60% Topographic to 90% Topographic (SAL Partitioning)
-        n_local = int(n_inputs_per_granule * 0.90)
-        n_global = n_inputs_per_granule - n_local
-        
-        if len(local_pool) >= n_local:
-            local_sel = np.random.choice(local_pool, n_local, replace=False)
-        elif len(local_pool) > 0:
-            local_sel = np.random.choice(local_pool, len(local_pool), replace=False)
-            n_global += n_local - len(local_pool)
-        else:
-            local_sel = np.array([], dtype=np.int64)
-            n_global = n_inputs_per_granule
-
-        global_sel = np.random.choice(np.arange(n_input), n_global, replace=False)
-        all_sel = np.concatenate([local_sel, global_sel]).astype(np.int64)
-        mossy_mask[g, all_sel] = True
-
-    # Mixed-sign weights (models net mossy excitation minus Golgi inhibition)
-    mossy_weights = torch.randn(n_granule, n_input) * mossy_mask.float()
+        sel = np.random.choice(N_PONTINE, N_INPUTS_PER_GC, replace=False)
+        mossy_mask[g, sel] = True
+    mossy_weights = torch.randn(n_granule, N_PONTINE, device=device) * mossy_mask.float()
     row_norms = mossy_weights.norm(dim=1, keepdim=True).clamp(min=1e-6)
     mossy_weights = mossy_weights / row_norms
 
-    # --- Parallel Fiber → Purkinje Weights (PLASTIC via climbing fiber LTD) ---
-    # [256, n_granule] — each Purkinje cell (motor node) reads all granule cells
-    purkinje_weights = torch.randn(256, n_granule) / np.sqrt(n_granule)
-
-    # --- Granule Cell State ---
-    granule_state = torch.zeros(n_granule)
-
-    # --- Basal Ganglia Gate State ---
-    bg_gate_open = False
-    bg_confidence_threshold = 0.3   # settle_diff/sqrt(N) must be below this to open gate
-    bg_gate_sharpness = 20.0        # sigmoid sharpness for soft gating
+    # Signed PK weights (no non-negative constraint)
+    purkinje_weights = torch.randn(256, n_granule, device=device) * (1.0 / np.sqrt(n_granule))
 
     cerebellum = {
         'n_granule': n_granule,
-        'l56_indices': torch.tensor(all_l56, dtype=torch.long),
-        'thalamic_indices': torch.tensor(thalamic_indices, dtype=torch.long) if thalamic_indices is not None else None,
-        'mossy_weights': mossy_weights.to(device),
-        'granule_state': granule_state.to(device),
+        'n_pontine': N_PONTINE,
         'l56_indices': torch.tensor(all_l56, dtype=torch.long, device=device),
-        # FIX: Non-negative init — PF-PC synapses are excitatory
-        # Uniform [0, 0.1] instead of randn*0.01 (which was 50% negative → clamped to 0)
-        'purkinje_weights': torch.rand(256, n_granule, device=device) * 0.1,
-        'bg_confidence_threshold': 0.3,
-        'bg_gate_sharpness': 20.0,
-        
-        # BIO-ADAM MOMENTS
-        'm1_err': torch.zeros(256, device=device),
-        'm2_err': torch.ones(256, device=device) * 0.01,
-        
-        # STOCHASTIC IO GATE
-        'io_buffer': torch.zeros(256, device=device),
-        'io_threshold': 0.1,
-        
-        # TD ERROR TRACKING
-        'last_v_target': 0.0,
-
-        'gc_top_k': max(1, int(n_granule * 0.10)),
-        'climbing_fiber_lr': 0.15,
-        'granule_buffer': torch.zeros(6, n_granule, device=device),
-        'buffer_idx': 0,
-        'purkinje_bias': torch.zeros(256, device=device),
-        
-        # --- MOSSY FIBER SLOW PLASTICITY (D'Angelo 1999, Mapelli 2007) ---
-        'mossy_lr': 0.01,  # Raised from 0.001 — old rate was ~1e-5 effective (invisible)
+        'pontine_weights': pontine_weights,
+        'mossy_weights': mossy_weights,
         'mossy_weights_baseline_norm': mossy_weights.norm().item(),
-        'mossy_eligibility': torch.zeros_like(mossy_weights, device=device),
-        
-        # --- PURKINJE WEIGHT HOMEOSTASIS (Coesmans 2004, Piochon 2016) ---
-        # FIX: Weight bounds [0, 2.0] — was [0, 0.02] which killed all discrimination
-        # Biology: PF-PC excitatory synapses range from 0 (silent) to ~2x naive level
-        # The DCN sign inversion (logits = -PK@GC) handles the output sign
-        'purkinje_weights_baseline': 1.0,  # Was 0.01 → w_max was 0.02 (absurdly tight)
+        'purkinje_weights': purkinje_weights,
+        'purkinje_tonic_rate': 0.5,
+        'purkinje_intrinsic_excitability': torch.ones(256, device=device),
+        'lateral_weights': torch.zeros(256, 256, device=device),
+        'lateral_lr': 0.001,
+        'golgi_inhibition_ema': torch.zeros(1, device=device),
+        'golgi_alpha': 0.01,
+        'delta_lr': 0.01,
+        'gc_target_sparsity': 0.02,
         'calcium_threshold': torch.ones(256, device=device) * 0.5,
+        'gc_active_mask': torch.zeros(n_granule, device=device),
+        'error_ema': 0.0,
+        'last_climbing_fiber_error': torch.zeros(256, device=device),
         'mli_inhibition_scale': torch.ones(n_granule, device=device),
+        'purkinje_bias': torch.zeros(256, device=device),
     }
+    init_row_norms = cerebellum['purkinje_weights'].norm(dim=1)
+    cerebellum['pk_target_row_norm'] = init_row_norms.clone()
 
-    print(f"Cerebellum: {n_granule} granule cells (SAL partitioned), "
-          f"{n_inputs_per_granule} mossy fibers each, 256 Purkinje outputs")
+    print(f"Cerebellum: {n_granule} GCs ({N_INPUTS_PER_GC} mossy inputs each), "
+          f"{N_PONTINE} pontine neurons, 256 Purkinje outputs")
+    print(f"  delta_lr={cerebellum['delta_lr']}, gc_sparsity={cerebellum['gc_target_sparsity']}")
     return cerebellum
 
 
 def cerebellar_forward(engine, cerebellum):
-    """
-    Cerebellar forward pass with DCN sign inversion and MLI inhibition.
-    
-    CRITICAL FIX: Added Deep Cerebellar Nuclei (DCN) sign inversion.
-    Biology: Purkinje cells INHIBIT DCN neurons. DCN output drives behavior.
-    
-    Without this, the LTD learning rule (CF → depress PF-PC weight) pushes
-    the readout in the WRONG direction — depressing the correct class 
-    instead of boosting it. The DCN inversion flips the sign:
-      LTD → less PK firing → less DCN inhibition → HIGHER output ✓
-    
-    Result: logits = -(purkinje_weights @ granule_acts)
-    """
+    """Cerebellar forward: L5/6 → Pontine → GC (divisive Golgi + kWTA) → PK → logits."""
     with torch.no_grad():
-        # 1. Extract L5/6 activations (pontine nucleus pathway)
-        input_idx = cerebellum['l56_indices']
-        input_acts = engine.state[input_idx]
+        l56_acts = engine.state[cerebellum['l56_indices']]
 
-        # 2. Mossy fiber → Granule cell pre-activation
-        granule_pre = cerebellum['mossy_weights'] @ input_acts
+        # Pontine compression + normalize
+        pontine_raw_relu = torch.relu(cerebellum['pontine_weights'] @ l56_acts)
+        pontine_norm = pontine_raw_relu.norm()
+        if pontine_norm > 1e-8:
+            pontine_acts = pontine_raw_relu / pontine_norm
+        else:
+            pontine_acts = torch.relu(torch.randn_like(pontine_raw_relu) * 0.01)
 
-        # 3. Golgi cell competitive inhibition (k-winner-take-all)
-        k_winners = int(granule_pre.size(0) * 0.025)
-        topk_vals, topk_indices = torch.topk(granule_pre, k_winners)
-        granule_acts = torch.zeros_like(granule_pre)
-        granule_acts.scatter_(0, topk_indices, torch.relu(topk_vals))
-        
-        # 4. Molecular layer normalization
-        target_norm = 5.0
+        # Mossy fiber → GC
+        granule_pre = cerebellum['mossy_weights'] @ pontine_acts
+
+        # Divisive Golgi inhibition
+        population_input = torch.relu(granule_pre).mean()
+        cerebellum['golgi_inhibition_ema'] = (
+            (1 - cerebellum['golgi_alpha']) * cerebellum['golgi_inhibition_ema']
+            + cerebellum['golgi_alpha'] * population_input
+        )
+        g_golgi = cerebellum['golgi_inhibition_ema'] * 5.0
+        granule_acts_raw = torch.relu(granule_pre) / (1.0 + g_golgi)
+
+        # kWTA sparsity
+        k_winners = max(1, int(granule_pre.size(0) * cerebellum['gc_target_sparsity']))
+        if k_winners < granule_acts_raw.size(0):
+            topk_vals, topk_indices = torch.topk(granule_acts_raw, k_winners)
+            granule_acts = torch.zeros_like(granule_acts_raw)
+            granule_acts.scatter_(0, topk_indices, topk_vals)
+        else:
+            granule_acts = granule_acts_raw
+
+        # Normalize GC vector
         gc_norm = granule_acts.norm()
         if gc_norm > 1e-6:
-            granule_acts = granule_acts * (target_norm / gc_norm)
+            granule_acts = granule_acts * (5.0 / gc_norm)
 
-        # 5. MLI Feedforward Inhibition (Wulff 2009)
-        # Stellate/basket cells scale inhibition proportional to PF excitation
-        mli_inhibition = cerebellum['mli_inhibition_scale'] * granule_acts
-        gc_for_purkinje = torch.relu(granule_acts - 0.3 * mli_inhibition)
-
-        # 6. Parallel fiber → Purkinje → DCN readout
-        # CRITICAL: Purkinje cells INHIBIT DCN. DCN output = -PK_activity.
-        # Without this negation, LTD pushes weights in the wrong direction.
-        purkinje_output = cerebellum['purkinje_weights'] @ gc_for_purkinje
-        logits = -purkinje_output  # DCN sign inversion
-        
-        # 7. Population centering
+        # Purkinje readout with tonic baseline
+        purkinje_output = cerebellum['purkinje_weights'] @ granule_acts
+        logits = cerebellum['purkinje_tonic_rate'] - purkinje_output
         logits = logits - logits.mean()
 
-        # 8. Store state for learning
+        # Store for learning
         cerebellum['gc_active_mask'] = (granule_acts > 0).float()
-        cerebellum['_last_granule_acts_raw'] = granule_acts
-        cerebellum['_last_gc_for_purkinje'] = gc_for_purkinje
-        
-        # 9. PRECISION-WEIGHTED CONTINUOUS BG GATING
-        probs = torch.softmax(logits, dim=0)
-        entropy = -torch.sum(probs * torch.log(probs + 1e-9))
-        
-        go_signal = torch.max(logits)
-        stop_signal = (entropy - 1.0) * 2.0
-        gate_value = torch.sigmoid(go_signal - stop_signal)
-        gated_logits = logits * gate_value
+        cerebellum['_last_gc_for_purkinje'] = granule_acts
+        cerebellum['_last_pontine_acts'] = pontine_acts
+        cerebellum['_last_pontine_acts_raw'] = pontine_raw_relu
 
-        return gated_logits, granule_acts, gate_value
+        # Gate for diagnostics only
+        gate_value = torch.tensor(1.0, device=logits.device)
+        return logits, granule_acts, gate_value
 
 
 def prune_and_rewire_output(engine, prune_ratio=0.05):
@@ -448,156 +356,63 @@ def prune_and_rewire_output(engine, prune_ratio=0.05):
 
 
 def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, engine, settle_diff=0.0):
-    """
-    Cerebellar learning with DCN-correct sign convention.
-    
-    CRITICAL FIX: With DCN sign inversion (logits = -PK@GC):
-      CF fires → LTD at PF-PC → PK weight ↓ → PK output ↓ → DCN inhibition ↓ → logit ↑
-    
-    This means the LTD rule (Δw = -η * CF * GC) produces the CORRECT gradient
-    direction through the DCN inversion, equivalent to standard gradient descent
-    on the cross-entropy loss.
-    
-    For correct class: CF positive → weight ↓ → logit ↑ ✓
-    For incorrect class: CF negative → weight ↑ → logit ↓ ✓
-    
-    Also implements:
-    - Inverse BCM sliding threshold (Piochon 2016)
-    - Weight bounds [0, 2.0] (Isope & Barbour 2002: silent → 2x naive)
-    - Reciprocal MLI plasticity (Jörntell & Ekerot 2002)
-    - Mossy fiber slow plasticity (D'Angelo 1999)
-    """
-    lr_purkinje = 0.02
-    beta2 = 0.99
-    epsilon = 1e-8
-    gamma = 0.95
-    
+    """Online cross-entropy delta rule. No temperature, no sparse update."""
     device = logits.device
-    n_granule = cerebellum['n_granule']
-    
-    # ========================================================================
-    # STEP 1: Climbing fiber error signal (inferior olive)
-    # ========================================================================
-    v_t = logits[target_byte].detach()
-    r = 1.0 if torch.argmax(logits) == target_byte else 0.0
-    td_error_scalar = r + gamma * v_t - cerebellum['last_v_target']
-    cerebellum['last_v_target'] = v_t
     
     target_one_hot = torch.zeros(256, device=device)
     target_one_hot[target_byte] = 1.0
-    raw_error = target_one_hot - torch.softmax(logits, dim=0)
-    cf_error = raw_error * (1.0 + td_error_scalar.abs())
-    
-    # Bio-Adam moment tracking
-    cerebellum['m2_err'] = beta2 * cerebellum['m2_err'] + (1 - beta2) * (cf_error ** 2)
-    
-    # Stochastic IO gate
-    cerebellum['io_buffer'] += cf_error
-    io_fire_mask = cerebellum['io_buffer'].abs() > cerebellum['io_threshold']
-    
-    gc_for_pk = cerebellum.get('_last_gc_for_purkinje', granule_acts)
-    
-    if not io_fire_mask.any():
-        # PF-alone → baseline LTP at PF-PC (Coesmans 2004)
-        # LTP increases PK weight → through DCN inversion → logit decreases
-        # This is biological: PF-alone potentiates the inhibitory pathway,
-        # acting as natural forgetting/regression-to-mean
-        baseline_ltp = 0.0005 * gc_for_pk.unsqueeze(0).expand(256, -1)
-        cerebellum['purkinje_weights'] += baseline_ltp
-        w_max = 2.0 * cerebellum['purkinje_weights_baseline']
-        cerebellum['purkinje_weights'].clamp_(0.0, w_max)
-        return 0.0
-        
-    active_cf = cerebellum['io_buffer'] * io_fire_mask.float()
-    cerebellum['io_buffer'][io_fire_mask] = 0.0
-    
-    # ========================================================================
-    # STEP 2: LTD at PF-PC synapses (Coesmans 2004 inverse BCM)
-    # ========================================================================
-    norm_factor = 1.0 / (torch.sqrt(cerebellum['m2_err']) + epsilon)
-    cf_normalized = active_cf * norm_factor  # [256]
-    
-    # Sliding calcium threshold (Piochon 2016)
-    calcium_level = cf_normalized.abs()
-    theta_ca = cerebellum['calcium_threshold']
-    cerebellum['calcium_threshold'] = 0.999 * theta_ca + 0.001 * calcium_level
-    
-    # LTD: CF-driven depression. Δw = -η * CF * GC
-    # With DCN inversion: weight ↓ → PK output ↓ → logit ↑ (correct gradient!)
-    ltd_update = -cf_normalized.unsqueeze(1) * gc_for_pk.unsqueeze(0)
-    
-    # LTP: baseline potentiation for PCs with low calcium (no CF firing)
-    ltp_mask = (calcium_level < theta_ca).float()
-    ltp_update = 0.001 * ltp_mask.unsqueeze(1) * gc_for_pk.unsqueeze(0)
-    
-    weight_delta = lr_purkinje * ltd_update + ltp_update
-    cerebellum['purkinje_weights'] += weight_delta
-    
-    # ========================================================================
-    # STEP 3: Weight bounds [0, 2.0] (Isope & Barbour 2002)
-    # ========================================================================
-    w_max = 2.0 * cerebellum['purkinje_weights_baseline']
-    cerebellum['purkinje_weights'].clamp_(0.0, w_max)
-    
-    # ========================================================================
-    # STEP 4: Reciprocal MLI plasticity (Jörntell & Ekerot 2002)
-    # ========================================================================
-    cf_fired_gc = (gc_for_pk > 0).float() * (io_fire_mask.float().sum() / 256.0)
-    cerebellum['mli_inhibition_scale'] += 0.01 * cf_fired_gc
-    cerebellum['mli_inhibition_scale'] -= 0.001
-    cerebellum['mli_inhibition_scale'].clamp_(0.1, 3.0)
-    
-    # ========================================================================
-    # STEP 5: Mossy fiber slow plasticity (D'Angelo 1999)
-    # ========================================================================
-    input_idx = cerebellum['l56_indices']
-    input_acts = engine.state[input_idx]
-    
-    gc_active = (granule_acts > 0).float()
-    hebbian_corr = gc_active.unsqueeze(1) * input_acts.unsqueeze(0)
-    
-    # Faster eligibility accumulation (was 0.01, raised to 0.05)
-    cerebellum['mossy_eligibility'] = 0.95 * cerebellum['mossy_eligibility'] + 0.05 * hebbian_corr
-    
-    # Center-surround plasticity (Mapelli 2007)
-    center_mask = gc_active.unsqueeze(1)
-    surround_mask = 1.0 - center_mask
-    
-    mossy_delta = cerebellum['mossy_lr'] * (
-        center_mask * cerebellum['mossy_eligibility'] * 1.0
-        - surround_mask * cerebellum['mossy_eligibility'] * 0.3
-    )
-    
-    mossy_mask = (cerebellum['mossy_weights'] != 0)
-    cerebellum['mossy_weights'] += mossy_delta * mossy_mask.float()
-    
-    # Bound mossy fiber gain to 3x range
-    row_norms = cerebellum['mossy_weights'].norm(dim=1, keepdim=True).clamp(min=1e-6)
-    baseline_norm = cerebellum['mossy_weights_baseline_norm'] / cerebellum['n_granule'] ** 0.5
-    max_row_norm = 3.0 * max(baseline_norm, 0.1)
-    scale = torch.clamp(max_row_norm / row_norms, max=1.0)
-    cerebellum['mossy_weights'] *= scale
-    
-    # ========================================================================
-    # DIAGNOSTICS
-    # ========================================================================
-    cerebellum['last_climbing_fiber_error'] = active_cf
-    cerebellum['error_ema'] = 0.99 * cerebellum.get('error_ema', 0.0) + 0.01 * active_cf.abs().mean().item()
+    probs = torch.softmax(logits, dim=0)
+    cf_error = target_one_hot - probs
 
-    return active_cf.abs().mean().item()
+    gc_acts = cerebellum.get('_last_gc_for_purkinje', granule_acts)
+    
+    # Full delta rule: Δw = -lr * error ⊗ gc_acts
+    delta_lr = cerebellum['delta_lr']
+    ltd_update = -delta_lr * cf_error.unsqueeze(1) * gc_acts.unsqueeze(0)
+    cerebellum['purkinje_weights'] += ltd_update
+
+    # No non-negative clamp (signed weights for anti-correlation)
+    # No default-to-LTP (delta rule handles all plasticity)
+
+    # Soft 2% row normalization
+    _apply_pk_row_normalization(cerebellum)
+
+    # Anti-Hebbian laterals (corrected sign: co-fire → increase inhibition)
+    with torch.no_grad():
+        y = torch.relu(logits)
+        y_norm = y / (y.norm() + 1e-8)
+        co_fire = cerebellum['lateral_lr'] * y_norm.unsqueeze(1) * y_norm.unsqueeze(0)
+        co_fire.fill_diagonal_(0.0)
+        cerebellum['lateral_weights'] += co_fire
+        cerebellum['lateral_weights'] *= 0.999
+        cerebellum['lateral_weights'].clamp_(min=0.0, max=0.1)
+
+    cerebellum['last_climbing_fiber_error'] = cf_error
+    cerebellum['error_ema'] = (
+        0.99 * cerebellum.get('error_ema', 0.0)
+        + 0.01 * cf_error.abs().mean().item()
+    )
+    return cf_error.abs().mean().item()
+
+
+def _apply_pk_row_normalization(cerebellum):
+    """Soft 2% exponential pull-back toward initial row norms."""
+    with torch.no_grad():
+        w = cerebellum['purkinje_weights']
+        target_norms = cerebellum['pk_target_row_norm']
+        current_norms = w.norm(dim=1).clamp(min=1e-6)
+        scale = 0.98 + 0.02 * (target_norms / current_norms)
+        cerebellum['purkinje_weights'] *= scale.unsqueeze(1)
 
 
 def compute_cerebellar_cortical_feedback(cerebellum, output_error):
-    """
-    Cerebello-thalamo-cortical feedback with DCN-consistent backward pass.
-    Uses MLI-modulated GC activations for correct gradient computation.
-    """
+    """Feedback through pontine: output_error → PK^T → GC → Mossy^T → Pontine^T → L5/6."""
     with torch.no_grad():
         gc_error = cerebellum['purkinje_weights'].T @ output_error
-        gc_mask = cerebellum.get('_last_gc_for_purkinje', 
-                                  cerebellum['gc_active_mask'])
+        gc_mask = cerebellum.get('_last_gc_for_purkinje', cerebellum['gc_active_mask'])
         gc_error_masked = gc_error * (gc_mask > 0).float()
-        l56_gradient = cerebellum['mossy_weights'].T @ gc_error_masked
+        pontine_error = cerebellum['mossy_weights'].T @ gc_error_masked
+        l56_gradient = cerebellum['pontine_weights'].T @ pontine_error
         return l56_gradient
 
 
@@ -994,11 +809,7 @@ def main():
             wernicke_indices.extend(mod['l56_indices'].tolist())
     
     cerebellum = add_cerebellar_module(
-        graph, num_nodes, n_granule=1024, device=device, 
-        thalamic_indices=thal_indices,
-        broca_indices=np.array(broca_indices),
-        wernicke_indices=np.array(wernicke_indices)
-    )
+        graph, num_nodes, n_granule=1024, device=device)
 
     # =====================================================================
     # ARCHITECTURAL ENHANCEMENT 3: Direct Feedback Alignment matrices
@@ -1021,7 +832,7 @@ def main():
     input_mask[:256] = 1.0
 
     # =================================================================
-    # Hyperparameters (Round 4 — DCN inversion + Cerebellar homeostasis)
+    # Hyperparameters (Round 5 — homeostatic PK + DCN inversion)
     # =================================================================
     FREE_STEPS = 40
     NUDGE_STEPS = 12
@@ -1030,9 +841,9 @@ def main():
     sigma_noise_free = 0.01
     sigma_noise_nudge = 0.01
     LEAK_FACTOR = 0.95
-    ALPHA_PFA = 0.15         # PFA feedback strength (all hidden layers)
-    ALPHA_CEREBELLAR = 0.05  # Raised — mossy fibers now plastic, can handle stronger feedback
-    BURST_APICAL_GAIN = 2.0  # Raised — BAC thresholds now lower (matched to literature)
+    ALPHA_PFA = 0.15
+    ALPHA_CEREBELLAR = 0.05
+    BURST_APICAL_GAIN = 2.0
 
     for phase_info in phases:
         phase_name = phase_info["name"]
@@ -1181,7 +992,6 @@ def main():
                 nudge_vec[level_mask] += ALPHA_PFA * pfa_signal
 
             # ENHANCEMENT 3c: Cerebello-thalamo-cortical co-adaptation
-            # FIX: every 50 steps (was 500). Mossy fibers absorb alignment.
             if (i + 1) % 50 == 0:
                 l56_grad = compute_cerebellar_cortical_feedback(cerebellum, output_error)
                 nudge_vec[cerebellum['l56_indices']] += ALPHA_CEREBELLAR * l56_grad
@@ -1287,7 +1097,7 @@ def main():
                     f"GC_spars: {gc_sparsity:.2%}"
                 )
                 print(
-                    f"  Logit range: {logit_range:.1f} | "
+                    f"  Logit range: {logit_range:.4f} | "
                     f"CF_err: {cf_error:.4f} | "
                     f"Settle: {engine.last_settle_diff:.4f}"
                 )
@@ -1316,18 +1126,47 @@ def main():
                 )
                 
                 # Cerebellar homeostasis diagnostics
-                pk_silent = (cerebellum['purkinje_weights'] < 1e-6).float().mean().item()
+                pk_silent = (cerebellum['purkinje_weights'].abs() < 1e-6).float().mean().item()
                 mossy_norm = cerebellum['mossy_weights'].norm().item()
                 mossy_baseline = cerebellum['mossy_weights_baseline_norm']
                 mossy_ratio = mossy_norm / max(mossy_baseline, 1e-6)
                 mli_mean = cerebellum['mli_inhibition_scale'].mean().item()
                 ca_thresh_mean = cerebellum['calcium_threshold'].mean().item()
+                pk_row_ratio = (cerebellum['purkinje_weights'].norm(dim=1) / 
+                               cerebellum['pk_target_row_norm'].clamp(min=1e-6)).mean().item()
                 
                 print(
                     f"  PK_silent: {pk_silent:.1%} | "
                     f"MF_gain: {mossy_ratio:.2f}x | "
                     f"MLI: {mli_mean:.3f} | "
-                    f"Ca_θ: {ca_thresh_mean:.4f}"
+                    f"Ca_θ: {ca_thresh_mean:.4f} | "
+                    f"PK_row_ratio: {pk_row_ratio:.3f}"
+                )
+                
+                # GC pattern discriminability: overlap between current and previous GC pattern
+                # If centering works, overlap should be <100% (different GCs for different inputs)
+                gc_mask_now = cerebellum.get('gc_active_mask', torch.zeros(cerebellum['n_granule'], device=device))
+                gc_prev = cerebellum.get('_prev_gc_mask', gc_mask_now)
+                if gc_mask_now.sum() > 0 and gc_prev.sum() > 0:
+                    intersection = (gc_mask_now * gc_prev).sum().item()
+                    union = ((gc_mask_now + gc_prev) > 0).float().sum().item()
+                    gc_jaccard = intersection / max(union, 1.0)
+                else:
+                    gc_jaccard = 1.0
+                cerebellum['_prev_gc_mask'] = gc_mask_now.clone()
+                
+                # Pontine compression diagnostics
+                if '_last_pontine_acts' in cerebellum:
+                    pontine_acts = cerebellum['_last_pontine_acts']
+                    pontine_range = (pontine_acts.max() - pontine_acts.min()).item()
+                    pontine_sparsity = (pontine_acts > 0).float().mean().item()
+                else:
+                    pontine_range = 0.0
+                    pontine_sparsity = 0.0
+                
+                print(
+                    f"  GC_overlap: {gc_jaccard:.2%} | "
+                    f"Pontine: range={pontine_range:.3f} spars={pontine_sparsity:.1%}"
                 )
 
 

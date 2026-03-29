@@ -32,24 +32,18 @@ def get_soma(v_m: torch.Tensor, i_exc: torch.Tensor, i_inh: torch.Tensor, a: tor
     nmda_drive_scale = (1.0 - nmda_ratio) + nmda_ratio * mg_block
     base_drive = torch.tanh(i_soma_base) * nmda_drive_scale
     
-    # Proposal 3: Two-Compartment Coincidence Logic (BAC Firing)
-    # FIX: Recalibrated per Larkum 1999 / Hay 2011 / De Kock & Sakmann 2008.
-    # Target: ~15% of L5/6 spikes should be bursts.
-    somatic_spike_detected = torch.sigmoid(base_drive * 10.0 - 2.5)
-    
-    # Apical gate: Opens at a ≈ 0.1 (lowered from 0.4)
-    # Removed XOR upper gate: SST handles suppression biologically
-    apical_gate = torch.sigmoid(a * 8.0 - 0.8)
-    
-    # Coincidence detection: AND gate for Ca²⁺ spike initiation
+    # BAC Firing — recalibrated per Larkum 1999 / Hay 2011
+    # FIX 5: Lower detection thresholds for biologically realistic burst fractions (10-35%).
+    # The Ca²⁺ hotzone at the apical bifurcation has ~100× higher LVA and ~10× higher HVA
+    # channel density (Hay et al. 2011), making coincidence detection far more sensitive
+    # than the previous thresholds allowed. The ~5-30ms coincidence window means even
+    # modest apical depolarization should gate bursts when somatic spikes are present.
+    somatic_spike_detected = torch.sigmoid(base_drive * 8.0 - 1.5)   # was *10 - 2.5; lower threshold
+    apical_gate = torch.sigmoid(a * 5.0 - 0.3)                       # was *8 - 0.8; wider window
     bac_burst_trigger = somatic_spike_detected * apical_gate
-    
-    # L5-specific CaHVA hot zone enrichment (Hay et al. 2011)
-    cahva_l5_boost = torch.where(is_neg_pe | (~is_pv & ~is_sst),
-                                 cahva * 3.0,
-                                 cahva)
-    
-    burst_amp = 1.0 + 2.0 * bac_burst_trigger * (1.0 + cahva_l5_boost)
+    # 100× LVA density → stronger CaHVA contribution for L5 pyramidal neurons
+    cahva_l5_boost = torch.where(is_neg_pe | (~is_pv & ~is_sst), cahva * 5.0, cahva)
+    burst_amp = 1.0 + 3.0 * bac_burst_trigger * (1.0 + cahva_l5_boost)
     
     # Omission signaling (PE-)
     omission_diff = torch.clamp(a - i_exc, min=0.0)
@@ -405,8 +399,12 @@ def jit_solve_dynamics_imex(
         # Apical processing (feedback / top-down) - Split E and I
         apical_E = torch.mv(w_apical_intra_E, rho_unmyelinated) + torch.mv(w_apical_inter_E, rho_myelinated)
         apical_I = torch.mv(w_apical_intra_I, rho_unmyelinated) + torch.mv(w_apical_inter_I, rho_myelinated)
-        # SST dendritic inhibition: reduced from 2.0→0.5 to permit BAC firing
-        apical_I = apical_I - sst_drive * current_inh_d * 0.5
+        # SST dendritic inhibition — reduced from 2.0→0.5→0.25 to permit BAC firing
+        # Per Larkum (2013): SST/Martinotti interneurons provide "disamplification"
+        # (suppression of bursting without blocking somatic spiking), but the previous
+        # 0.5 coefficient was still preventing sufficient apical depolarization for
+        # the coincidence detector to fire at biological rates (10-35%).
+        apical_I = apical_I - sst_drive * current_inh_d * 0.25
 
         # Conductance-Based Integration (Item 1)
         # We treat synaptic inputs as conductances. 
@@ -514,17 +512,18 @@ def jit_solve_dynamics_imex(
         current_a = current_a + current_dt * dv_apical # NMDA-like slow apical
         current_a = current_a.clamp(-1.5, 1.5)
 
-        # BAC Firing CaHVA Plateau Update — recalibrated per Hay 2011
-        soma_spike = torch.sigmoid(current_b * 10.0 - 2.5)
-        apical_sufficient = torch.sigmoid(current_a * 8.0 - 0.8)
+        # BAC Firing CaHVA Plateau — recalibrated per Hay 2011
+        # FIX 5: Match lowered detection thresholds from get_soma
+        soma_spike = torch.sigmoid(current_b * 8.0 - 1.5)      # was *10 - 2.5
+        apical_sufficient = torch.sigmoid(current_a * 5.0 - 0.3) # was *8 - 0.8
         coincidence = soma_spike * apical_sufficient
-        nmda_plateau = torch.where(current_a > 0.4, torch.ones_like(current_a) * 1.0, torch.zeros_like(current_a))
+        nmda_plateau = torch.where(current_a > 0.3, torch.ones_like(current_a) * 1.0, torch.zeros_like(current_a))  # was 0.4
         burst_trigger = coincidence + nmda_plateau
-        
         cahva_tau = torch.ones_like(cahva_states) * 30.0
         cahva_tau[is_l56] = 100.0
         cahva_tau[is_l23] = 20.0
-        cahva_drive = torch.where(is_l56, burst_trigger * 8.0, burst_trigger * 5.0)
+        # Increased drive: 100× LVA density at apical bifurcation
+        cahva_drive = torch.where(is_l56, burst_trigger * 12.0, burst_trigger * 5.0)  # was 8.0 for L5/6
         cahva_states = cahva_states + current_dt * (cahva_drive - cahva_states) / cahva_tau
         cahva_states = cahva_states.clamp(0.0, 3.0)
 
@@ -2345,9 +2344,12 @@ class PredictiveCodingEngine:
             self.state_apical[l56_mask] += strength * apical_drive
 
     def compute_burst_coincidence(self):
-        """
-        Compute burst probability for L5/6 neurons based on apical-basal coincidence.
-        Recalibrated per De Kock & Sakmann 2008: target ~15% burst fraction.
+        """Burst probability for L5/6 — target ~15% (De Kock & Sakmann 2008).
+        
+        FIX 5: Lowered threshold from 0.015 to 0.005 and reduced sigmoid gain
+        from 20 to 12 to widen the transition zone. With the matched lower
+        thresholds in get_soma and CaHVA drive, this should produce 10-20%
+        burst fraction instead of the previous <1%.
         """
         with torch.no_grad():
             burst = torch.zeros(self.num_nodes, device=self.device)
@@ -2355,9 +2357,9 @@ class PredictiveCodingEngine:
             basal_act = torch.relu(torch.tanh(self.state_basal[l56_mask]))
             apical_act = torch.relu(torch.tanh(self.state_apical[l56_mask]))
             coincidence = basal_act * apical_act
-            cahva_boost = 1.0 + 2.0 * self.cahva_states[l56_mask]
-            boosted_coincidence = coincidence * cahva_boost
-            burst[l56_mask] = torch.sigmoid(20.0 * (boosted_coincidence - 0.015))
+            cahva_boost = 1.0 + 3.0 * self.cahva_states[l56_mask]  # was 2.0
+            boosted = coincidence * cahva_boost
+            burst[l56_mask] = torch.sigmoid(12.0 * (boosted - 0.005))  # was 20.0 * (x - 0.015)
             return burst
 
     def get_bg_gate_confidence(self, threshold=0.3, sharpness=20.0):
