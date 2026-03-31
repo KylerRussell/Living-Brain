@@ -503,11 +503,15 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, 
     ltd_update = ltd_update * row_soft_scale.unsqueeze(1)  # Per-row soft bound
     cerebellum['purkinje_weights'] += ltd_update
 
-    # Multiplicative homeostatic decay (Tononi & Cirelli SHY)
-    # Slightly stronger decay (0.9998) to counteract residual weight growth
-    cerebellum['purkinje_weights'] *= 0.9998
+    # NO continuous multiplicative decay during learning.
+    # Tononi & Cirelli's SHY operates during sleep, not waking.
+    # During waking, PF→PC synapses follow (Coesmans 2004):
+    #   - Active PF + CF → LTD (handled by the delta rule above)
+    #   - Active PF without CF → spontaneous LTP (handled by bidirectional normalization below)
+    #   - Inactive PF → stable (no decay)
+    # Weight homeostasis is maintained entirely by the bidirectional row normalization.
 
-    # Soft normalization: gentle pull toward target norm (not hard clamp)
+    # Bidirectional row normalization: gentle pull toward target norm
     _apply_pk_row_normalization(cerebellum)
 
     # Anti-Hebbian laterals (corrected sign: co-fire → increase inhibition)
@@ -532,26 +536,44 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, 
 
 
 def _apply_pk_row_normalization(cerebellum):
-    """Fix 3: Proportional restoring force toward target row norm.
+    """Bidirectional proportional restoring force toward target row norm.
     
-    Replaces the weak 1%/step spring with a proportional restoring force:
-    scale = 1 / (1 + α*(ratio - 1)) for ratio > 1
+    Implements two biological mechanisms:
     
-    This is biologically motivated by the cerebellar-olivary feedback loop
-    (Kenyon, Medina & Mauk 1998): the IO self-regulates to maintain an
-    equilibrium where expected net weight change is zero. Excess PK weights
-    increase DCN inhibition → decrease IO firing → less LTD → net LTP shifts
-    weights back down. The restoring force is proportional to the excess.
+    1. ABOVE target (ratio > 1): Cerebellar-olivary feedback loop
+       (Kenyon, Medina & Mauk 1998). Excess PK weights → stronger DCN
+       inhibition → reduced IO firing → less LTD → net LTP drifts weights
+       back. Implemented as gentle multiplicative shrinkage.
+    
+    2. BELOW target (ratio < 1): Spontaneous parallel fiber LTP
+       (Coesmans et al. 2004). In the absence of climbing fiber activation,
+       active parallel fiber synapses undergo slow LTP at ~1/36 the rate
+       of CF-triggered LTD. This prevents weight erosion and maintains
+       the synaptic baseline. Implemented as gentle multiplicative growth.
+    
+    The restoring force is proportional to the deviation from target,
+    ensuring stable equilibrium at the target norm.
     """
     with torch.no_grad():
         w = cerebellum['purkinje_weights']
-        target_norms = cerebellum['pk_target_row_norm']
+        target_norms = cerebellum['pk_target_row_norm'].clamp(min=1e-6)
         current_norms = w.norm(dim=1).clamp(min=1e-6)
-        ratio = current_norms / target_norms.clamp(min=1e-6)
-        # Proportional restoring: stronger pull the further from target
-        # α=0.05: at ratio=2.0, scale=1/(1+0.05)=0.952; at ratio=3.0, scale=0.909
-        excess = (ratio - 1.0).clamp(min=0.0)
-        scale = 1.0 / (1.0 + 0.05 * excess)
+        ratio = current_norms / target_norms
+        
+        # Bidirectional restoring force: pull toward ratio = 1.0
+        # α controls restoring strength:
+        #   ratio=2.0 → scale = 1/(1+0.05*1) = 0.952 (shrink 4.8%)
+        #   ratio=3.0 → scale = 1/(1+0.05*2) = 0.909 (shrink 9.1%)
+        #   ratio=0.5 → scale = 1/(1-0.02*0.5) = 1.010 (grow 1.0%)
+        #   ratio=0.3 → scale = 1/(1-0.02*0.7) = 1.014 (grow 1.4%)
+        # Growth rate is deliberately slower than shrinkage (asymmetric,
+        # matching the ~36:1 LTD:LTP magnitude ratio in Medina & Mauk 2000)
+        deviation = ratio - 1.0
+        scale = torch.where(
+            deviation > 0,
+            1.0 / (1.0 + 0.05 * deviation),        # Shrink above-target rows
+            1.0 / (1.0 - 0.02 * deviation.abs()),   # Grow below-target rows (gentler)
+        )
         cerebellum['purkinje_weights'] *= scale.unsqueeze(1)
 
 
