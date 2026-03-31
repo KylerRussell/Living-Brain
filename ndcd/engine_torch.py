@@ -172,7 +172,7 @@ def jit_solve_dynamics_imex(
     # Δθ_i = η_IP * ( (ν_i - ν_target) + κ * Σ (ν_j - ν_target) )
     with torch.no_grad():
         eta_ip = 0.015 # η_IP
-        kappa = 0.4    # κ (diffusive term)
+        kappa = 0.15   # κ (diffusive term) — reduced for tighter modular homeostasis
         for m in range(module_starts.size(0)):
             ms = module_starts[m].item()
             me = module_ends[m].item()
@@ -184,6 +184,13 @@ def jit_solve_dynamics_imex(
             
             # Update firing threshold θ_i
             d_theta = eta_ip * (individual_error + kappa * local_avg_error)
+            
+            # Calcium-driven IP: Dead-neuron rescue
+            # Neurons firing below 10% of target sparsity get thresholds lowered
+            # to rescue them from being permanently inactive
+            dead_mask = activation_ema[ms:me] < (sparsity_alpha * 0.1)
+            d_theta[dead_mask] -= eta_ip * 0.5  # Lower threshold to rescue dead neurons
+            
             current_threshold[ms:me] = torch.clamp(current_threshold[ms:me] + d_theta, 0.5, 5.0)
             
             # Proposal 5: Structural Heterogeneity (LTS Units)
@@ -642,6 +649,8 @@ class PredictiveCodingEngine:
         # Parameters
         self.taus = torch.tensor(taus, dtype=torch.float32, device=device)
         self.biases = torch.tensor(biases, dtype=torch.float32, device=device)
+        # Intervention 6: IP Momentum buffer for stable threshold adaptation
+        self.theta_momentum = torch.zeros(num_nodes, dtype=torch.float32, device=device)
 
         # State
         self.state_basal = torch.zeros(num_nodes, dtype=torch.float32, device=device)
@@ -1987,13 +1996,19 @@ class PredictiveCodingEngine:
             eff_clamped = torch.where(src_inh, eff.clamp(max=0.0), eff.clamp(min=0.0))
             self.w_surface = eff_clamped - self.w_mid - self.w_deep - self._weight_values_raw
 
-            # 4. Intrinsic Plasticity (Homeostatic Biases) — DISABLED
-            # The IP here accumulated massive bias (norm→70) before firing 
-            # rates caught up to target, saturating most neurons.
-            # With Bug 1 fixed (effective_weights visible to solver), firing
-            # rates self-correct via the dynamics without explicit bias push.
-            # The KL-divergence IP in update_weights_predictive is more
-            # principled if IP is needed in a future training path.
+            # 4. Intrinsic Plasticity (Homeostatic Biases) — RE-ENABLED with Momentum
+            # Intervention 6: Uses momentum to prevent oscillation while allowing
+            # gradual threshold adjustment. The momentum term (0.9) smooths out
+            # rapid fluctuations, while the small eta_IP (0.001) prevents runaway.
+            eta_IP = 0.001
+            target_sparsity = 0.02  # Target 2% activation rate
+            delta_theta = self.lifetime_firing - target_sparsity
+            self.theta_momentum = 0.9 * self.theta_momentum + 0.1 * delta_theta
+            self.biases -= eta_IP * self.theta_momentum
+            # Cap bias norm growth to prevent runaway accumulation
+            bias_norm = self.biases.norm()
+            if bias_norm > 5.0:
+                self.biases *= 5.0 / bias_norm
 
             # 5. Inhibitory Plasticity (Balance inhibition)
             # Rule: Δw_inh = eta_inh * pre * (post - target)
@@ -2357,9 +2372,10 @@ class PredictiveCodingEngine:
             basal_act = torch.relu(torch.tanh(self.state_basal[l56_mask]))
             apical_act = torch.relu(torch.tanh(self.state_apical[l56_mask]))
             coincidence = basal_act * apical_act
-            cahva_boost = 1.0 + 3.0 * self.cahva_states[l56_mask]  # was 2.0
+            # Hay et al. (2011): Ca²⁺ hotzone has ~100× channel density → sensitive coincidence detection
+            cahva_boost = 1.0 + 5.0 * self.cahva_states[l56_mask]  # was 3.0
             boosted = coincidence * cahva_boost
-            burst[l56_mask] = torch.sigmoid(12.0 * (boosted - 0.005))  # was 20.0 * (x - 0.015)
+            burst[l56_mask] = torch.sigmoid(8.0 * (boosted - 0.001))  # was 12.0 * (x - 0.005)
             return burst
 
     def get_bg_gate_confidence(self, threshold=0.3, sharpness=20.0):
