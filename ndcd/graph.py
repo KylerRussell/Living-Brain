@@ -264,7 +264,9 @@ class DynamicGraph:
                 # Standard Neocortical Microcircuitry
                 # L4 -> L2/3
                 if len(l4) > 0 and len(l23) > 0:
-                    target_conns = max(10, int(len(l23) * 0.3))
+                    # Broca modules: +10% L4 density for faster sensory throughput
+                    l4_density = 0.33 if mod['id'] in getattr(self, 'broca_modules', set()) else 0.3
+                    target_conns = max(10, int(len(l23) * l4_density))
                     n_edges = int(len(l4) * target_conns)
                     src = np.random.choice(l4, n_edges, replace=True)
                     dst = np.random.choice(l23, n_edges, replace=True)
@@ -285,6 +287,10 @@ class DynamicGraph:
                     depth_factor = mod['level'] / max(1, self.num_levels - 1)
                     # Level 3 gets ultra-dense recurrent excitation (up to 80%)
                     recurrent_density = 0.1 + 0.70 * depth_factor
+                    # Wernicke modules: boost L5/6 recurrence to 50% base for
+                    # enhanced semantic persistence (was 40% = 0.1 + 0.70*0)
+                    if mod['id'] in getattr(self, 'wernicke_modules', set()):
+                        recurrent_density = max(recurrent_density, 0.50)
                     target_conns = max(10, int(len(l56) * recurrent_density))
                     n_edges = int(len(l56) * target_conns)
                     src = np.random.choice(l56, n_edges, replace=True)

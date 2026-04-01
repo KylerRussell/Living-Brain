@@ -52,11 +52,61 @@ def create_training_graph(
 def boost_output_connectivity(graph, edge_index, edge_weight, num_nodes):
     """
     Add additional output projections from ALL modules' L5/6 to motor nodes.
-    The original graph only projects from Level 0 L5/6 → motor. This adds
-    projections from ALL levels, giving the output nodes broader visibility.
+    
+    Uses Effective Resistance Rewiring (ERR): computes effective resistance
+    between L5/6 association nodes and motor nodes via the graph Laplacian
+    pseudoinverse. The 20% of projections are targeted at "high-resistance"
+    bottleneck nodes — those with the weakest existing pathways to motor
+    output — to clear structural over-squashing.
     """
+    import scipy.sparse as sp
+    
     n_sensory = 256
     n_motor = 256
+
+    # --- Compute Effective Resistance to motor nodes ---
+    # Build adjacency from current edge_index/edge_weight
+    ei_np = edge_index.numpy()
+    ew_np = edge_weight.numpy()
+    adj = sp.csr_matrix(
+        (np.abs(ew_np), (ei_np[0], ei_np[1])),
+        shape=(num_nodes, num_nodes)
+    )
+    # Symmetrize for Laplacian
+    adj_sym = adj + adj.T
+    degree = np.array(adj_sym.sum(axis=1)).ravel()
+    degree[degree == 0] = 1e-6  # avoid division by zero
+    L = sp.diags(degree) - adj_sym
+
+    # Truncated pseudoinverse via top-k eigenvectors of L
+    # (full pinv is O(N^3), truncated is tractable)
+    try:
+        from scipy.sparse.linalg import eigsh
+        k_eig = min(50, num_nodes - 2)
+        eigenvalues, eigenvectors = eigsh(L.astype(np.float64), k=k_eig, which='SM')
+        # Skip the zero eigenvalue (connected component)
+        valid = eigenvalues > 1e-8
+        eigenvalues = eigenvalues[valid]
+        eigenvectors = eigenvectors[:, valid]
+        # L^+ ≈ V * diag(1/λ) * V^T
+        # Effective resistance R(i,j) = L^+_ii + L^+_jj - 2*L^+_ij
+        # We only need the diagonal of L^+ and L^+[i, motor_centroid]
+        L_pinv_diag = np.sum(eigenvectors**2 / eigenvalues[None, :], axis=1)
+        
+        # Motor centroid: average L^+ column over motor nodes
+        motor_nodes = np.arange(n_sensory, n_sensory + n_motor)
+        L_pinv_motor_cols = eigenvectors[motor_nodes, :] / eigenvalues[None, :]  # [n_motor, k]
+        L_pinv_to_motor = eigenvectors @ L_pinv_motor_cols.mean(axis=0)  # [N] avg L^+[i, motor_centroid]
+        L_pinv_motor_diag = L_pinv_diag[motor_nodes].mean()
+        
+        # R_eff(i, motor_centroid) = L^+_ii + L^+_motor - 2*L^+_i_motor
+        eff_resistance = L_pinv_diag + L_pinv_motor_diag - 2.0 * L_pinv_to_motor
+        err_computed = True
+        print(f"ERR: Computed effective resistance for {num_nodes} nodes (k={len(eigenvalues)} eigenvectors)")
+    except Exception as e:
+        print(f"ERR computation failed ({e}), falling back to random projections")
+        eff_resistance = None
+        err_computed = False
 
     new_rows = []
     new_cols = []
@@ -68,12 +118,21 @@ def boost_output_connectivity(graph, edge_index, edge_weight, num_nodes):
         idx = mod['l56_indices']
         if len(idx) == 0:
             continue
-        # Sparse projection: 20% of L5/6 nodes per output (was 10%)
-        # Increased for broader visibility of abstract features
+        # 20% of L5/6 nodes per output motor neuron
         n_proj = max(1, len(idx) // 5)
+        
         for m in range(n_motor):
-            sources = np.random.choice(idx, n_proj, replace=True)
             motor_node = n_sensory + m
+            if err_computed and eff_resistance is not None:
+                # ERR-targeted: sample proportional to effective resistance
+                # High resistance = structurally disconnected = most benefit from new edge
+                node_resistance = eff_resistance[idx]
+                # Shift to positive and normalize
+                node_resistance = node_resistance - node_resistance.min() + 1e-8
+                probs = node_resistance / node_resistance.sum()
+                sources = np.random.choice(idx, n_proj, replace=True, p=probs)
+            else:
+                sources = np.random.choice(idx, n_proj, replace=True)
             new_rows.extend(sources.tolist())
             new_cols.extend([motor_node] * n_proj)
 
@@ -101,7 +160,8 @@ def boost_output_connectivity(graph, edge_index, edge_weight, num_nodes):
 
         edge_index = torch.tensor(np.stack([merged_rows, merged_cols]), dtype=torch.long)
         edge_weight = torch.tensor(merged_weights, dtype=torch.float32)
-        print(f"Output boost: added {len(new_rows)} new output projections from higher-level modules")
+        mode_str = "ERR-targeted" if err_computed else "random"
+        print(f"Output boost: added {len(new_rows)} new {mode_str} output projections from higher-level modules")
 
     return edge_index, edge_weight
 
@@ -202,7 +262,7 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
     
     Biologically-constrained architecture:
     - Dual pontine pathway (positive + sign-inverted) for bidirectional encoding
-    - K=4 mossy fiber inputs per GC (Billings 2014, Litwin-Kumar 2017)
+    - K=4 mossy fiber inputs per GC: 2 local + 2 global (Level 3) for conjunctive coding
     - Soft-bounded Purkinje weights (no hard cap)
     """
     N_PONTINE = 512
@@ -219,12 +279,62 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
     # Pontine: random projection (same weights used for both pos and neg pathways)
     pontine_weights = torch.randn(N_PONTINE, n_l56, device=device) * (1.0 / (n_l56 ** 0.5))
 
-    # Fix 2: K=4 mossy fiber inputs per GC (biologically conserved)
-    # Each GC randomly selects exactly K_MOSSY inputs from 1024 pontine neurons
-    # This enables conjunctive coding: GC fires only when all 4 inputs are active
+    # --- Conjunctive Coding Optimization: Local Mossy Selection ---
+    # Instead of fully random K=4 selection, each GC picks:
+    #   2 inputs from its assigned local module's pontine relay
+    #   2 inputs from global (Level 3) relay
+    # This ensures GCs integrate both local sequential and global semantic features.
+    
+    # Partition pontine neurons into per-module ranges proportional to L5/6 count
+    module_l56_counts = [len(mod['l56_indices']) for mod in graph.modules]
+    total_l56 = sum(module_l56_counts)
+    # Allocate pontine neurons proportionally to each module
+    pontine_per_module = []
+    pontine_offset = 0
+    for count in module_l56_counts:
+        n_allocated = max(1, int(N_PONTINE * count / max(total_l56, 1)))
+        pontine_per_module.append((pontine_offset, pontine_offset + n_allocated))
+        pontine_offset = min(pontine_offset + n_allocated, N_PONTINE)
+    # Fix last module to cover remaining
+    if pontine_per_module:
+        last_start = pontine_per_module[-1][0]
+        pontine_per_module[-1] = (last_start, N_PONTINE)
+    
+    # Identify Level 3 (global/semantic) pontine ranges
+    global_pontine_indices = []
+    for mod_idx, mod in enumerate(graph.modules):
+        if mod['level'] == graph.num_levels - 1:  # Highest level = global
+            p_start, p_end = pontine_per_module[mod_idx]
+            global_pontine_indices.extend(range(p_start, p_end))
+    if not global_pontine_indices:
+        # Fallback: use last 25% of pontine neurons as "global"
+        global_pontine_indices = list(range(N_PONTINE * 3 // 4, N_PONTINE))
+    global_pontine_indices = np.array(global_pontine_indices, dtype=np.int64)
+    
+    # Build dual-pathway versions of the index ranges
+    # Positive pathway: indices [0, N_PONTINE)
+    # Negative pathway: indices [N_PONTINE, N_PONTINE_TOTAL)
+    global_dual = np.concatenate([global_pontine_indices, global_pontine_indices + N_PONTINE])
+    
+    # Assign each GC to a module (round-robin)
+    n_modules = len(graph.modules)
+    
     mossy_weights = torch.zeros(n_granule, N_PONTINE_TOTAL, device=device)
     for g in range(n_granule):
-        sel = np.random.choice(N_PONTINE_TOTAL, K_MOSSY, replace=False)
+        assigned_mod = g % n_modules
+        p_start, p_end = pontine_per_module[assigned_mod]
+        local_range = np.arange(p_start, p_end)
+        # Dual pathway: local includes both positive and negative
+        local_dual = np.concatenate([local_range, local_range + N_PONTINE])
+        
+        # Pick 2 local + 2 global (with fallback if ranges too small)
+        n_local = min(2, len(local_dual))
+        n_global = K_MOSSY - n_local
+        
+        sel_local = np.random.choice(local_dual, n_local, replace=False)
+        sel_global = np.random.choice(global_dual, n_global, replace=False)
+        sel = np.concatenate([sel_local, sel_global])
+        
         mossy_weights[g, sel] = 1.0 / np.sqrt(K_MOSSY)  # Normalized excitatory
 
     # Signed PK weights (no non-negative constraint)
@@ -245,7 +355,7 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
         'lateral_weights': torch.zeros(256, 256, device=device),
         'lateral_lr': 0.001,
         'golgi_inhibition_ema': torch.zeros(1, device=device),
-        'golgi_alpha': 0.01,
+        'golgi_alpha': 0.005,   # Softened from 0.01 for broader early feature discovery
         'delta_lr': 0.005,  # Lower LR for sparse CF (was 0.02 — caused logit explosion)
         'gc_target_sparsity': 0.02,
         'calcium_threshold': torch.ones(256, device=device) * 0.5,
@@ -258,10 +368,12 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
     init_row_norms = cerebellum['purkinje_weights'].norm(dim=1)
     cerebellum['pk_target_row_norm'] = init_row_norms.clone()
 
-    print(f"Cerebellum: {n_granule} GCs (K={K_MOSSY} mossy inputs each, biological), "
+    print(f"Cerebellum: {n_granule} GCs (K={K_MOSSY} mossy: 2 local + 2 global), "
           f"{N_PONTINE}×2 dual pontine neurons, 256 Purkinje outputs")
-    print(f"  delta_lr={cerebellum['delta_lr']}, gc_sparsity={cerebellum['gc_target_sparsity']}")
+    print(f"  delta_lr={cerebellum['delta_lr']}, gc_sparsity={cerebellum['gc_target_sparsity']}, "
+          f"golgi_alpha={cerebellum['golgi_alpha']}")
     print(f"  Compression ratio: {n_l56}:{N_PONTINE} = {n_l56/N_PONTINE:.1f}:1 (×2 with sign-inversion)")
+    print(f"  Global pontine pool: {len(global_pontine_indices)} neurons (Level {graph.num_levels - 1})")
     return cerebellum
 
 
@@ -482,7 +594,17 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, 
 
     gc_acts = gc_acts_for_learn
     
-    delta_lr = cerebellum['delta_lr']
+    # Adaptive Purkinje Learning Rate: scale by logit confidence ratio
+    # delta_lr = base_lr * (logit_range / init_logit_range)
+    # When logit range (confidence) is high, the Purkinje layer can adapt faster,
+    # preventing the plateau observed at high confidence / low accuracy.
+    logit_range = (logits.max() - logits.min()).item()
+    if 'init_logit_range' not in cerebellum:
+        cerebellum['init_logit_range'] = max(logit_range, 1e-6)
+    init_logit_range = cerebellum['init_logit_range']
+    lr_scale = logit_range / max(init_logit_range, 1e-6)
+    lr_scale = max(0.5, min(lr_scale, 3.0))  # Clamp for stability
+    delta_lr = cerebellum['delta_lr'] * lr_scale
     
     # Fix 3: Per-ROW soft-bounded weight update (inverse BCM)
     # The biologically relevant constraint is on the total synaptic drive per PK cell
@@ -1297,6 +1419,11 @@ def main():
             if (i + 1) % 1000 == 0:
                 n_pruned = prune_and_rewire_output(engine, prune_ratio=0.03)
                 print(f"\n  [STRUCTURAL] Pruned and rewired {n_pruned} weak output projections.")
+
+            # Dynamic Apical Gain (β) update every 100 steps
+            # Adjusts per-module apical sensitivity based on NPE/PPE ratio
+            if (i + 1) % 100 == 0:
+                engine.update_apical_beta()
 
             # Logging and periodic tasks
             if (i + 1) % 10 == 0:

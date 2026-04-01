@@ -7,18 +7,26 @@ from torch.utils.checkpoint import checkpoint
 # @torch.jit.script
 def get_soma(v_m: torch.Tensor, i_exc: torch.Tensor, i_inh: torch.Tensor, a: torch.Tensor, cahva: torch.Tensor, 
              is_neg_pe: torch.Tensor, threshold: torch.Tensor, is_sst: torch.Tensor, is_pv: torch.Tensor, 
-             is_dg: torch.Tensor, ip_gain: torch.Tensor, ip_bias: torch.Tensor, nmda_ratio: torch.Tensor) -> torch.Tensor:
+             is_dg: torch.Tensor, ip_gain: torch.Tensor, ip_bias: torch.Tensor, nmda_ratio: torch.Tensor,
+             apical_beta: torch.Tensor = None) -> torch.Tensor:
     # Solution 2: State-Locked NMDAR Bistability
     # Ties magnesium block to current membrane potential (v_m)
     v_m_scaled = v_m * 100.0
-    # Soften the NMDA Magnesium Block via reduced voltage dependence (decay exponent -0.062 -> -0.03)
-    mg_block = 1.0 / (1.0 + (1.2 / 3.57) * torch.exp(-0.03 * v_m_scaled))
+    # Refined Magnesium Block Kinetics: PEON neurons use -0.02 decay exponent
+    # to allow error signals to persist longer in the apical dendrite
+    decay_exp = torch.where(is_neg_pe, torch.tensor(-0.02, device=v_m.device), torch.tensor(-0.03, device=v_m.device))
+    mg_block = 1.0 / (1.0 + (1.2 / 3.57) * torch.exp(decay_exp * v_m_scaled))
     
     # Fast AIS kinetics for PV interneurons (lower threshold)
     effective_threshold = torch.where(is_pv, threshold * 0.7, threshold)
     
+    # Dynamic Apical Gain (β): per-node gain modulated by prediction error
+    # Updated every 100 training steps based on modular NPE/PPE ratio
+    if apical_beta is None:
+        apical_beta = torch.tensor(5.0, device=v_m.device)
+    
     # Local Disinhibition Motifs: Apical input actively suppresses shunting inhibition
-    apical_disinhibition = torch.sigmoid(a * 5.0)
+    apical_disinhibition = torch.sigmoid(a * apical_beta)
     i_inh = i_inh / (1.0 + apical_disinhibition * 2.0)
     
     # Proposal 2: Shunting Inhibition (Divisive Gain Control)
@@ -39,7 +47,7 @@ def get_soma(v_m: torch.Tensor, i_exc: torch.Tensor, i_inh: torch.Tensor, a: tor
     # than the previous thresholds allowed. The ~5-30ms coincidence window means even
     # modest apical depolarization should gate bursts when somatic spikes are present.
     somatic_spike_detected = torch.sigmoid(base_drive * 8.0 - 1.5)   # was *10 - 2.5; lower threshold
-    apical_gate = torch.sigmoid(a * 5.0 - 0.3)                       # was *8 - 0.8; wider window
+    apical_gate = torch.sigmoid(a * apical_beta - 0.3)               # Dynamic β; was hardcoded *5 - 0.3
     bac_burst_trigger = somatic_spike_detected * apical_gate
     # 100× LVA density → stronger CaHVA contribution for L5 pyramidal neurons
     cahva_l5_boost = torch.where(is_neg_pe | (~is_pv & ~is_sst), cahva * 5.0, cahva)
@@ -126,6 +134,7 @@ def jit_solve_dynamics_imex(
     apical_bandpass_state1: torch.Tensor,
     apical_bandpass_state2: torch.Tensor,
     lifetime_firing: torch.Tensor,
+    apical_beta: torch.Tensor,
     g_gap: float = 0.5,
     damping: float = 0.15,
     implicit_damping: float = 1.2,
@@ -182,8 +191,14 @@ def jit_solve_dynamics_imex(
             # neighborhood term: module average error
             local_avg_error = individual_error.mean()
             
+            # Hierarchical IP dampening: Level 0 adapts fastest, Level 3 slowest
+            # to preserve abstract representations at higher levels.
+            # level_dampening = 1/(1 + level), so L0=1.0, L1=0.5, L2=0.33, L3=0.25
+            mod_level = node_levels[ms].item()
+            level_dampening = 1.0 / (1.0 + max(0, mod_level))
+            
             # Update firing threshold θ_i
-            d_theta = eta_ip * (individual_error + kappa * local_avg_error)
+            d_theta = eta_ip * level_dampening * (individual_error + kappa * local_avg_error)
             
             # Calcium-driven IP: Dead-neuron rescue
             # Neurons firing below 10% of target sparsity get thresholds lowered
@@ -274,7 +289,7 @@ def jit_solve_dynamics_imex(
     i_exc = torch.zeros_like(current_b)
     i_inh = torch.zeros_like(current_b)
     
-    current_s = get_soma(current_b, i_exc, i_inh, current_a, cahva_states, is_neg_pe, current_threshold, is_sst, is_pv, is_dg, current_ip_gain, current_ip_bias, nmda_ratio)
+    current_s = get_soma(current_b, i_exc, i_inh, current_a, cahva_states, is_neg_pe, current_threshold, is_sst, is_pv, is_dg, current_ip_gain, current_ip_bias, nmda_ratio, apical_beta)
 
     while step_count < max_steps and diff > tolerance:
         # 1. Module-Specific Interneuron Dynamics (Local Disinhibition)
@@ -320,13 +335,13 @@ def jit_solve_dynamics_imex(
         # Hard clamp input nodes
         if input_mask is not None:
             current_b = current_b * (1.0 - input_mask) + input_vector * input_mask
-            current_s = get_soma(current_b, i_exc, i_inh, current_a, cahva_states, is_neg_pe, current_threshold, is_sst, is_pv, is_dg, current_ip_gain, current_ip_bias, nmda_ratio)
+            current_s = get_soma(current_b, i_exc, i_inh, current_a, cahva_states, is_neg_pe, current_threshold, is_sst, is_pv, is_dg, current_ip_gain, current_ip_bias, nmda_ratio, apical_beta)
 
 
         old_soma = current_s.clone()
 
         # Proposal 2: Shunting Inhibition in Activation Function
-        rho = get_soma(current_b, i_exc, i_inh, current_a, cahva_states, is_neg_pe, current_threshold, is_sst, is_pv, is_dg, current_ip_gain, current_ip_bias, nmda_ratio)
+        rho = get_soma(current_b, i_exc, i_inh, current_a, cahva_states, is_neg_pe, current_threshold, is_sst, is_pv, is_dg, current_ip_gain, current_ip_bias, nmda_ratio, apical_beta)
         
         # Add fluctuation-driven noise (reduced for stability)
         threshold_gap = (current_threshold - rho.abs()).clamp(min=0.05)
@@ -522,7 +537,7 @@ def jit_solve_dynamics_imex(
         # BAC Firing CaHVA Plateau — recalibrated per Hay 2011
         # FIX 5: Match lowered detection thresholds from get_soma
         soma_spike = torch.sigmoid(current_b * 8.0 - 1.5)      # was *10 - 2.5
-        apical_sufficient = torch.sigmoid(current_a * 5.0 - 0.3) # was *8 - 0.8
+        apical_sufficient = torch.sigmoid(current_a * apical_beta - 0.3) # Dynamic β (was hardcoded *5 - 0.3)
         coincidence = soma_spike * apical_sufficient
         nmda_plateau = torch.where(current_a > 0.3, torch.ones_like(current_a) * 1.0, torch.zeros_like(current_a))  # was 0.4
         burst_trigger = coincidence + nmda_plateau
@@ -677,6 +692,11 @@ class PredictiveCodingEngine:
         self.w_deep = torch.zeros(self.num_edges, dtype=torch.float32, device=device)
         self.activation_var = torch.ones(num_nodes, dtype=torch.float32, device=device)
         self.burst_ema = torch.zeros(num_nodes, dtype=torch.float32, device=device)
+        
+        # Dynamic Apical Gain (β): modulated per-module every 100 training steps
+        # based on NPE/PPE ratio. High prediction errors → increase β to amplify
+        # top-down corrective signals. Initialized to 5.0 (previous hardcoded value).
+        self.apical_beta = torch.ones(num_nodes, dtype=torch.float32, device=device) * 5.0
         
         # Bandpass Filter States for Apical (Item 3)
         self.apical_bp1 = torch.zeros(num_nodes, dtype=torch.float32, device=device)
@@ -1289,6 +1309,7 @@ class PredictiveCodingEngine:
             ee_mask,
             self.gap_junction_indices, self.gap_junction_weights,
             self.apical_bp1, self.apical_bp2, self.lifetime_firing,
+            self.apical_beta,
             damping=damping, implicit_damping=implicit_damping,
             sigma_noise=sigma_noise
         )
@@ -2323,6 +2344,44 @@ class PredictiveCodingEngine:
                             'std': vals.std().item(),
                         }
             return stats
+
+    def update_apical_beta(self):
+        """
+        Dynamic Apical Gain (β): updated every 100 training steps.
+        
+        Per-module, computes the NPE/PPE ratio from L2/3 neurons.
+        High prediction errors → increase β to amplify top-down corrective signals.
+        Low prediction errors → decrease β toward baseline (predictions dominate).
+        
+        Equation: apical_beta_module = 5.0 * (1.0 + npe_ppe_ratio)
+        Clamped to [2.0, 12.0] for stability.
+        """
+        with torch.no_grad():
+            for mod_idx, (start, end) in enumerate(self.module_ranges):
+                mod_mask_l23 = self.is_l23[start:end]
+                mod_neg_pe = self.is_neg_pe[start:end]
+                
+                if not mod_mask_l23.any():
+                    continue
+                
+                # NPE magnitude: average activation of negative PE neurons
+                npe_neurons = mod_neg_pe & mod_mask_l23
+                ppe_neurons = (~mod_neg_pe) & mod_mask_l23
+                
+                npe_act = self.state[start:end][npe_neurons].abs().mean().item() if npe_neurons.any() else 0.0
+                ppe_act = self.state[start:end][ppe_neurons].abs().mean().item() if ppe_neurons.any() else 0.0
+                
+                # Ratio: high NPE relative to PPE means large prediction errors
+                npe_ppe_ratio = npe_act / max(ppe_act, 1e-6)
+                
+                # Update β for all nodes in this module
+                new_beta = 5.0 * (1.0 + min(npe_ppe_ratio, 1.5))
+                new_beta = max(2.0, min(new_beta, 12.0))
+                
+                # Smooth update (EMA)
+                self.apical_beta[start:end] = (
+                    0.9 * self.apical_beta[start:end] + 0.1 * new_beta
+                )
 
     def inject_apical_nudge(self, target_256, strength=2.0):
         """
