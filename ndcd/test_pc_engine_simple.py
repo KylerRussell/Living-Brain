@@ -184,10 +184,13 @@ def add_thalamocortical_loop(graph, edge_index, edge_weight, biases, taus, num_n
     thal_start = num_nodes
     new_num_nodes = num_nodes + n_thalamic
 
-    # Extend biases: TONIC INHIBITION (basal ganglia default state)
-    # Relay neurons are silent by default, only fire when gate opens.
-    # We bypass the loop for sequence generation by setting deep tonic inhibition (-50.0).
-    thal_biases = torch.ones(n_thalamic, dtype=torch.float32) * -50.0  # Deep tonic inhibition
+    # Extend biases: MODERATE TONIC INHIBITION (basal ganglia default state)
+    # SNr provides tonic inhibition at -3.0, which can be overcome by learned
+    # "Go" signals from the striatal direct pathway. This replaces the previous
+    # -50.0 which permanently silenced thalamic relay neurons.
+    # With -3.0: gate fully closed → neuron needs >3.0 excitatory drive to fire
+    #            gate open (Go=3-5) → neuron can relay with normal cortical drive
+    thal_biases = torch.ones(n_thalamic, dtype=torch.float32) * -3.0
     thal_taus = torch.ones(n_thalamic, dtype=torch.float32) * 5.0     # Fast relay
 
     biases = torch.cat([biases, thal_biases])
@@ -253,6 +256,88 @@ def add_thalamocortical_loop(graph, edge_index, edge_weight, biases, taus, num_n
     print(f"Thalamocortical loop: {n_thalamic} relay neurons (stabilization only, no motor output)")
     thalamic_indices = np.arange(thal_start, thal_start + n_thalamic, dtype=np.int64)
     return edge_index, edge_weight, biases, taus, new_num_nodes, thalamic_indices
+
+
+def create_bg_gate(engine, thalamic_indices, device='cpu'):
+    """
+    Basal ganglia gating circuit for thalamocortical loop.
+
+    Implements the direct pathway of the BG (Frank, Loughry & O'Reilly 2001):
+      Cortex L5/6 → Striatum (Go neurons) → SNr (inhibit) → Thalamus (disinhibit)
+
+    SNr provides tonic inhibition (built into thalamic biases at -3.0).
+    Striatal "Go" neurons learn which cortical patterns should open the gate,
+    injecting excitatory drive into thalamic basal compartments to overcome
+    the SNr inhibition.
+
+    The Go signal is a learned linear projection from L5/6 activity.
+    Learning uses a three-factor rule gated by prediction error (dopamine proxy):
+      ΔW_go = η * dopamine * thal_activity * l56_activity^T - decay * W
+
+    This allows the gate to learn context-dependent temporal windows:
+    open the loop when the cortical representation is worth sustaining,
+    keep it closed during input transitions.
+    """
+    l56_indices = torch.where(engine.is_l56)[0]
+    n_l56 = l56_indices.shape[0]
+    n_thal = len(thalamic_indices)
+    thal_t = torch.tensor(thalamic_indices, dtype=torch.long, device=device)
+
+    # Go weights: small random init, scaled by 1/sqrt(n_l56)
+    # Each thalamic neuron has its own striatal Go input pattern
+    go_weights = torch.randn(n_thal, n_l56, device=device) * (0.1 / (n_l56 ** 0.5))
+
+    bg_gate = {
+        'go_weights': go_weights,
+        'l56_indices': l56_indices,
+        'thal_indices': thal_t,
+        'go_lr': 0.005,       # Striatal learning rate
+        'go_decay': 0.001,    # Weight decay (prevents runaway)
+    }
+
+    print(f"BG Gate: {n_thal} thalamic neurons, {n_l56} L5/6 inputs, "
+          f"lr={bg_gate['go_lr']}, decay={bg_gate['go_decay']}")
+    return bg_gate
+
+
+def apply_bg_gate(engine, bg_gate):
+    """
+    Apply BG-like gating before settle: compute Go signal and inject into
+    thalamic basal compartments.
+
+    The Go signal = ReLU(go_weights @ l56_acts) provides excitatory drive
+    that can overcome the -3.0 SNr tonic inhibition in the thalamic biases.
+    ReLU ensures the gate can only open (excite), never add more inhibition.
+
+    Called before every engine.settle() in both training and eval.
+    """
+    with torch.no_grad():
+        l56_acts = torch.tanh(engine.state[bg_gate['l56_indices']])
+        go_signal = torch.relu(bg_gate['go_weights'] @ l56_acts)
+        engine.state_basal[bg_gate['thal_indices']] += go_signal
+
+
+def update_bg_gate(engine, bg_gate, dopamine):
+    """
+    Update Go weights using three-factor dopamine-gated Hebbian rule.
+
+    ΔW = η * dopamine * thal_activity ⊗ l56_activity^T - decay * W
+
+    dopamine: scalar proxy for reward prediction error (typically
+              the climbing fiber error magnitude from cerebellar learning).
+              High error → high dopamine → strengthen gate patterns that
+              preceded the prediction attempt.
+    """
+    with torch.no_grad():
+        thal_acts = torch.tanh(engine.state[bg_gate['thal_indices']])
+        l56_acts = torch.tanh(engine.state[bg_gate['l56_indices']])
+
+        # Three-factor outer product: dopamine-gated Hebbian
+        delta_go = bg_gate['go_lr'] * dopamine * thal_acts.unsqueeze(1) * l56_acts.unsqueeze(0)
+
+        # Weight decay + clamp
+        bg_gate['go_weights'] += delta_go - bg_gate['go_decay'] * bg_gate['go_weights']
+        bg_gate['go_weights'].clamp_(-1.0, 1.0)
 
 
 def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, device='cpu', 
@@ -846,7 +931,7 @@ def run_linear_probe(engine, data, batch_size=200, free_steps=100, device='cpu',
 
 
 def run_eval(engine, cerebellum, eval_data, free_steps=100, n_samples=500, 
-             leak_factor=0.95, device='cpu'):
+             leak_factor=0.95, device='cpu', bg_gate=None):
     """
     Run the cerebellar readout on held-out eval data (no learning).
     Processes data SEQUENTIALLY with LEAK_FACTOR to replicate training dynamics.
@@ -888,6 +973,8 @@ def run_eval(engine, cerebellum, eval_data, free_steps=100, n_samples=500,
             engine.state *= leak_factor
             engine.state_basal *= leak_factor
             engine.state_apical *= leak_factor
+            if bg_gate is not None:
+                apply_bg_gate(engine, bg_gate)
             
             input_vec = torch.zeros(engine.num_nodes, device=device)
             input_vec[curr_byte] = 10.0
@@ -932,7 +1019,7 @@ def run_eval(engine, cerebellum, eval_data, free_steps=100, n_samples=500,
 
 
 def show_readout(engine, cerebellum, data, current_pos=0, free_steps=100, n_chars=80, 
-                 leak_factor=0.95, device='cpu'):
+                 leak_factor=0.95, device='cpu', bg_gate=None):
     """
     Display model predictions from the CURRENT training position using 
     the CURRENT engine state. No zeroing, no warmup — shows what the 
@@ -961,6 +1048,8 @@ def show_readout(engine, cerebellum, data, current_pos=0, free_steps=100, n_char
             engine.state *= leak_factor
             engine.state_basal *= leak_factor
             engine.state_apical *= leak_factor
+            if bg_gate is not None:
+                apply_bg_gate(engine, bg_gate)
             
             input_vec = torch.zeros(engine.num_nodes, device=device)
             input_vec[curr_byte] = 10.0
@@ -1127,6 +1216,11 @@ def main():
     )
 
     # =====================================================================
+    # ARCHITECTURAL ENHANCEMENT: BG-like gating for thalamocortical loop
+    # =====================================================================
+    bg_gate = create_bg_gate(engine, thalamic_indices, device=device)
+
+    # =====================================================================
     # ARCHITECTURAL ENHANCEMENT 3: Direct Feedback Alignment matrices
     # =====================================================================
     pfa_matrices = create_pfa_matrices(engine, n_output=256, n_hidden_pfa=128, device=device)
@@ -1199,7 +1293,7 @@ def main():
         print(f"  Steps: Free={FREE_STEPS}, Nudge={NUDGE_STEPS}")
         print(f"  Learning rate: {lr}, Nudge strength: {nudge_strength}")
         print(f"  PFA alpha: {ALPHA_PFA}, CB alpha: {ALPHA_CEREBELLAR}, Apical gain: dynamic (beta={BETA_GAIN})")
-        print(f"  Thalamocortical loop: {N_THALAMIC} neurons")
+        print(f"  Thalamocortical loop: {N_THALAMIC} neurons (BG-gated, tonic=-3.0)")
         print(f"  Cerebellum: {cerebellum['n_granule']} granule cells")
         print(f"  PFA plasticity: eta={ETA_PFA_PLASTIC}, lambda={LAMBDA_PFA_DECAY}")
 
@@ -1234,11 +1328,11 @@ def main():
             engine.state_basal *= LEAK_FACTOR
             engine.state_apical *= LEAK_FACTOR
             
-            # Target 5: Thalamocortical Gating - rapidly reset thalamic state at each sequence token
-            if getattr(graph, 'thalamic_indices', None) is not None:
-                engine.state[graph.thalamic_indices] = 0.0
-                engine.state_basal[graph.thalamic_indices] = 0.0
-                engine.state_apical[graph.thalamic_indices] = 0.0
+            # BG-like gating: compute Go signal from L5/6 and inject into
+            # thalamic basal compartments. Replaces hard thalamic zeroing.
+            # The -3.0 tonic bias (SNr inhibition) keeps thalamus silent
+            # unless the learned Go signal provides sufficient drive.
+            apply_bg_gate(engine, bg_gate)
                 
             engine.previous_state = engine.state.clone()
 
@@ -1304,6 +1398,11 @@ def main():
             cf_error = cerebellar_learn(cerebellum, logits, granule_acts, next_byte, gate_value,
                                         engine=engine, settle_diff=engine.last_settle_diff,
                                         probe_model=cached_probe_model)
+
+            # BG gate learning: dopamine-gated Hebbian update of Go weights.
+            # cf_error (climbing fiber magnitude) serves as dopamine proxy —
+            # high prediction error → strengthen gate patterns that were active.
+            update_bg_gate(engine, bg_gate, dopamine=cf_error)
 
             # Prediction errors
             spatial_err = engine.compute_prediction_errors()
@@ -1560,7 +1659,7 @@ def main():
                         print(f"  [!] NOTE: Representation ({probe_acc:.1%}) ~= Readout ({avg_acc:.1%}). Hebbian learning is the bottleneck.")
                     
                     # Show what the model is actually outputting
-                    show_readout(engine, cerebellum, data, current_pos=i+1, free_steps=FREE_STEPS, n_chars=80, leak_factor=LEAK_FACTOR, device=device)
+                    show_readout(engine, cerebellum, data, current_pos=i+1, free_steps=FREE_STEPS, n_chars=80, leak_factor=LEAK_FACTOR, device=device, bg_gate=bg_gate)
                     
                     # Prediction diversity check (class collapse detector)
                     # Sample 100 chars and count unique predictions
@@ -1574,6 +1673,7 @@ def main():
                             cb = int(data[di])
                             iv = torch.zeros(num_nodes, device=device)
                             iv[cb] = 10.0
+                            apply_bg_gate(engine, bg_gate)
                             engine.settle(iv, input_mask=input_mask, max_steps=FREE_STEPS, tol=0.0, sigma_noise=0.0, damping=0.8)
                             lg, _, _ = cerebellar_forward(engine, cerebellum)
                             pred_counts[torch.argmax(lg)] += 1
@@ -1592,7 +1692,8 @@ def main():
                 if (i + 1) % 2500 == 0 and eval_data is not None:
                     eval_acc, eval_cs, eval_cc, eval_sc = run_eval(
                         engine, cerebellum, eval_data,
-                        free_steps=FREE_STEPS, n_samples=300, leak_factor=LEAK_FACTOR, device=device
+                        free_steps=FREE_STEPS, n_samples=300, leak_factor=LEAK_FACTOR, device=device,
+                        bg_gate=bg_gate
                     )
                     print(f"  >>> EVAL (held-out): {eval_acc:.2%} | C->S: {eval_cs:.2%} | C->C: {eval_cc:.2%} | S->C: {eval_sc:.2%}")
 
