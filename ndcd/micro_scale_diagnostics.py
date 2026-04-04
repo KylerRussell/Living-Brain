@@ -150,12 +150,18 @@ class MicroScaleDiagnosticSuite:
     """
     Executes the 8 diagnostic testing suites directly informed by neurobiological benchmarks.
     """
-    def __init__(self):
+    def __init__(self, num_nodes=500, device='cpu'):
         self.results = {}
+        self.num_nodes = num_nodes
+        self.device = device
         
     def log(self, test_name, status, details=""):
         print(f"[{status}] {test_name}: {details}")
-        self.results[test_name] = {'status': status, 'details': details}
+        self.results[test_name] = {
+            'status': status, 
+            'details': details,
+            'pass': status == "PASS"
+        }
 
     # =========================================================================
     # Test I: Individual Neuron Dynamics
@@ -226,7 +232,7 @@ class MicroScaleDiagnosticSuite:
         from engine_torch import get_soma
         
         zero_inh = torch.zeros_like(engine.state_basal)
-        soma_basal = get_soma(engine.state_basal, engine.state_basal, zero_inh, engine.state_apical, engine.cahva_states, engine.is_neg_pe, engine.threshold_adaptation, engine.is_sst, engine.is_pv, engine.is_dg, engine.ip_gain, engine.ip_bias, engine.nmda_ratio)[target_node].item()
+        soma_basal = get_soma(engine.state_basal, engine.state_basal, zero_inh, engine.state_apical, engine.cahva_states, engine.is_neg_pe, engine.threshold_adaptation, engine.is_sst, engine.is_pv, engine.is_dg, engine.ip_gain, engine.ip_bias, engine.nmda_ratio, engine.apical_beta)[target_node].item()
 
         
         # Apical only stimulation
@@ -234,7 +240,7 @@ class MicroScaleDiagnosticSuite:
         engine.state_apical.zero_()
         engine.state_basal[target_node] = 0.0
         engine.state_apical[target_node] = 1.0
-        soma_apical = get_soma(engine.state_basal, engine.state_basal, zero_inh, engine.state_apical, engine.cahva_states, engine.is_neg_pe, engine.threshold_adaptation, engine.is_sst, engine.is_pv, engine.is_dg, engine.ip_gain, engine.ip_bias, engine.nmda_ratio)[target_node].item()
+        soma_apical = get_soma(engine.state_basal, engine.state_basal, zero_inh, engine.state_apical, engine.cahva_states, engine.is_neg_pe, engine.threshold_adaptation, engine.is_sst, engine.is_pv, engine.is_dg, engine.ip_gain, engine.ip_bias, engine.nmda_ratio, engine.apical_beta)[target_node].item()
 
         
         # Coincident stimulation
@@ -242,7 +248,7 @@ class MicroScaleDiagnosticSuite:
         engine.state_apical.zero_()
         engine.state_basal[target_node] = 1.0
         engine.state_apical[target_node] = 1.0
-        soma_coincident = get_soma(engine.state_basal, engine.state_basal, zero_inh, engine.state_apical, engine.cahva_states, engine.is_neg_pe, engine.threshold_adaptation, engine.is_sst, engine.is_pv, engine.is_dg, engine.ip_gain, engine.ip_bias, engine.nmda_ratio)[target_node].item()
+        soma_coincident = get_soma(engine.state_basal, engine.state_basal, zero_inh, engine.state_apical, engine.cahva_states, engine.is_neg_pe, engine.threshold_adaptation, engine.is_sst, engine.is_pv, engine.is_dg, engine.ip_gain, engine.ip_bias, engine.nmda_ratio, engine.apical_beta)[target_node].item()
 
         
         # Linear expectation
@@ -273,7 +279,7 @@ class MicroScaleDiagnosticSuite:
             inp = torch.randn(engine.num_nodes) * 5.0
             state = engine.settle(inp, max_steps=5)
             # Use the internal IP update logic
-            engine.update_weights_predictive(state, state)
+            engine.update_weights_phase2(state, state)
             # The internal IP logic (KL-Divergence) adjusts ip_bias and ip_gain
             # This should rescue the dead neurons
             
@@ -650,7 +656,7 @@ class MicroScaleDiagnosticSuite:
         
         for _ in range(10):
             state = engine.settle(inp, max_steps=5)
-            engine.update_weights_predictive(state, state)
+            engine.update_weights_phase2(state, state)
             
         post_weights = engine.effective_weights.clone()
         
@@ -703,7 +709,7 @@ class MicroScaleDiagnosticSuite:
             inp = torch.zeros(engine.num_nodes)
             inp[stim_node] = 5.0
             state = engine.settle(inp, max_steps=5)
-            engine.update_weights_predictive(state, state)
+            engine.update_weights_phase2(state, state)
             if i > 5: # Skip initial untrained
                 baseline_neg_errs.append(state[neg_pe_nodes].abs().mean().item())
                 baseline_pos_errs.append(state[pos_pe_nodes].abs().mean().item())
@@ -728,7 +734,7 @@ class MicroScaleDiagnosticSuite:
         inp_pos = torch.zeros(engine.num_nodes)
         inp_pos[stim_node] = 10.0 # Double expectation
         state = engine.settle(inp_pos, max_steps=20)
-        engine.update_weights_predictive(state, state)
+        engine.update_weights_phase2(state, state)
         
         positive_pos_err = state[pos_pe_nodes].abs().mean().item()
         z_score_positive = (positive_pos_err - base_pos_mean) / base_pos_std
@@ -752,7 +758,7 @@ class MicroScaleDiagnosticSuite:
         zero_all()
         state = engine.settle(torch.zeros(engine.num_nodes), max_steps=5)
         state[engine.modules[1]['l56_indices']] = 5.0
-        engine.update_weights_predictive(state, state)
+        engine.update_weights_phase2(state, state)
         severed_neg_err = state[neg_pe_nodes].abs().mean().item()
         
         # Restore TD for safety
@@ -807,7 +813,7 @@ class MicroScaleDiagnosticSuite:
             nudge = state.clone()
             nudge[target_nodes] = 5.0
             nudge[distractor_nodes] = -5.0
-            engine.update_weights_predictive(state, nudge)
+            engine.update_weights_phase2(state, nudge)
             engine.consolidate_importance() # Accumulate omega
             
         # Test pre-sleep classification confidence
@@ -909,7 +915,7 @@ class MicroScaleDiagnosticSuite:
         inp = torch.randn(engine.num_nodes) * 5.0
         for _ in range(20):
             state = engine.settle(inp, max_steps=5)
-            engine.update_weights_predictive(state, state)
+            engine.update_weights_phase2(state, state)
             engine.consolidate_importance()
             
         # Function to approximate FIM trace
@@ -957,6 +963,14 @@ class MicroScaleDiagnosticSuite:
         self.log(test_name, "PASS" if passed else "FAIL", " | ".join(details))
 
     def run_all(self):
+        self.run_suite()
+        
+        passed = sum(1 for res in self.results.values() if res['status'] == 'PASS')
+        total = len(self.results)
+        print("========================================================")
+        print(f"Diagnostics Complete: {passed}/{total} Benchmark Suites Passed.")
+
+    def run_suite(self):
         print("====== Executing Micro-Scale Diagnostic Framework ======")
         self.test_fi_curve_and_sfa()
         self.test_burst_coincidence_detection()
@@ -974,11 +988,7 @@ class MicroScaleDiagnosticSuite:
         self.test_sleep_and_synaptic_scaling()
         self.test_fisher_information()
         self.test_structural_pruning_fisher()
-        
-        passed = sum(1 for res in self.results.values() if res['status'] == 'PASS')
-        total = len(self.results)
-        print("========================================================")
-        print(f"Diagnostics Complete: {passed}/{total} Benchmark Suites Passed.")
+        return list(self.results.values())
 
 if __name__ == "__main__":
     suite = MicroScaleDiagnosticSuite()

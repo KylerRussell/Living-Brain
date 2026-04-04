@@ -42,9 +42,37 @@ def create_training_graph(
     edge_index = torch.tensor(indices, dtype=torch.long)
     edge_weight = torch.tensor(values, dtype=torch.float32)
 
-    # Default biases and taus
-    biases = torch.zeros(total_nodes, dtype=torch.float32)
-    taus = torch.ones(total_nodes, dtype=torch.float32) * 5.0  # default tau
+    # Use the actual number of nodes from the graph (which includes cerebellum)
+    actual_nodes = graph.num_nodes
+    biases = torch.zeros(actual_nodes, dtype=torch.float32)
+    is_neg_pe = torch.zeros(actual_nodes, dtype=torch.bool)
+    is_pos_pe = torch.zeros(actual_nodes, dtype=torch.bool)
+
+    # --- Fix VI.1: Consistent PE population labeling ---
+    # Assign half of L2/3 and L4/5/6 error-signaling nodes to each pool
+    for mod in graph.modules:
+        l23 = mod['l23_indices']
+        n_half = len(l23) // 2
+        is_neg_pe[l23[:n_half]] = True
+        is_pos_pe[l23[n_half:]] = True
+    
+    # --- Fix III.1: Hierarchical Timescale Gradient ---
+    # Levels: 0=Input/Output, 1=Lower Association, 2=Higher Association
+    # Taus (ms): L0=5, L1=20, L2=50, L3=100
+    # Higher levels integrate info over longer windows (Murray et al. 2014)
+    taus = torch.ones(actual_nodes, dtype=torch.float32) * 5.0
+    for mod in graph.modules:
+        level = mod['level']
+        l_tau = 5.0 * (4.0 ** level) # Exponential gradient: 5, 20, 80...
+        indices = np.concatenate([mod['l23_indices'], mod['l4_indices'], mod['l56_indices']])
+        taus[indices] = l_tau
+    
+    # Motor nodes (256-511): Fast for rapid control
+    taus[256:512] = 5.0
+    
+    # Attach labels to graph for engine initialization
+    graph.is_neg_pe = is_neg_pe
+    graph.is_pos_pe = is_pos_pe
 
     return edge_index, edge_weight, biases, taus, graph
 
@@ -118,23 +146,23 @@ def boost_output_connectivity(graph, edge_index, edge_weight, num_nodes):
         idx = mod['l56_indices']
         if len(idx) == 0:
             continue
-        # 20% of L5/6 nodes per output motor neuron
-        n_proj = max(1, len(idx) // 5)
+        # Instead of every MF, pick a subset (e.g., 64) for each module
+        n_mf_subset = 64
+        mf_subset = np.random.choice(graph.mossy_fiber_indices, n_mf_subset, replace=False)
         
-        for m in range(n_motor):
-            motor_node = n_sensory + m
+        # Each selected MF gets a few inputs
+        n_proj_per_mf = 2
+        
+        for mf_node in mf_subset:
             if err_computed and eff_resistance is not None:
-                # ERR-targeted: sample proportional to effective resistance
-                # High resistance = structurally disconnected = most benefit from new edge
                 node_resistance = eff_resistance[idx]
-                # Shift to positive and normalize
                 node_resistance = node_resistance - node_resistance.min() + 1e-8
                 probs = node_resistance / node_resistance.sum()
-                sources = np.random.choice(idx, n_proj, replace=True, p=probs)
+                sources = np.random.choice(idx, n_proj_per_mf, replace=True, p=probs)
             else:
-                sources = np.random.choice(idx, n_proj, replace=True)
+                sources = np.random.choice(idx, n_proj_per_mf, replace=True)
             new_rows.extend(sources.tolist())
-            new_cols.extend([motor_node] * n_proj)
+            new_cols.extend([mf_node] * n_proj_per_mf)
 
     if new_rows:
         new_rows = np.array(new_rows, dtype=np.int64)
@@ -279,20 +307,26 @@ def create_bg_gate(engine, thalamic_indices, device='cpu'):
     keep it closed during input transitions.
     """
     l56_indices = torch.where(engine.is_l56)[0]
+    peons_indices = torch.where(engine.is_neg_pe)[0]
     n_l56 = l56_indices.shape[0]
+    n_peons = peons_indices.shape[0]
     n_thal = len(thalamic_indices)
     thal_t = torch.tensor(thalamic_indices, dtype=torch.long, device=device)
 
-    # Go weights: small random init, scaled by 1/sqrt(n_l56)
-    # Each thalamic neuron has its own striatal Go input pattern
+    # Go weights: small random init
     go_weights = torch.randn(n_thal, n_l56, device=device) * (0.1 / (n_l56 ** 0.5))
+    
+    # NoGo weights: antagonistic pathway from PEONs (Item 5)
+    nogo_weights = torch.randn(n_thal, n_peons, device=device) * (0.1 / (n_peons ** 0.5))
 
     bg_gate = {
         'go_weights': go_weights,
+        'nogo_weights': nogo_weights,
         'l56_indices': l56_indices,
+        'peons_indices': peons_indices,
         'thal_indices': thal_t,
         'go_lr': 0.005,       # Striatal learning rate
-        'go_decay': 0.001,    # Weight decay (prevents runaway)
+        'go_decay': 0.001,    # Weight decay
     }
 
     print(f"BG Gate: {n_thal} thalamic neurons, {n_l56} L5/6 inputs, "
@@ -304,17 +338,29 @@ def apply_bg_gate(engine, bg_gate):
     """
     Apply BG-like gating before settle: compute Go signal and inject into
     thalamic basal compartments.
-
-    The Go signal = ReLU(go_weights @ l56_acts) provides excitatory drive
-    that can overcome the -3.0 SNr tonic inhibition in the thalamic biases.
-    ReLU ensures the gate can only open (excite), never add more inhibition.
-
-    Called before every engine.settle() in both training and eval.
+    
+    Includes an antagonistic NoGo pathway triggered by omission signaling (PE-).
+    High omission_drive -> forcefully inhibit thalamus to collapse current attractor.
     """
     with torch.no_grad():
         l56_acts = torch.tanh(engine.state[bg_gate['l56_indices']])
         go_signal = torch.relu(bg_gate['go_weights'] @ l56_acts)
-        engine.state_basal[bg_gate['thal_indices']] += go_signal
+        
+        # --- Omission-Driven NoGo Pathway (Item 5) ---
+        # Extract omission_drive (negative prediction error spikes)
+        # It is calculated in get_soma inside the engine.
+        # We approximate it here or use the engine's stored spatial_errors (negative PE)
+        peons = torch.where(engine.is_neg_pe)[0]
+        # Omission drive is strong negative PE in L2/3 PEONs
+        omission_drive = torch.clamp(-engine.spatial_errors[peons], min=0.0).max()
+        
+        nogo_signal = torch.zeros_like(go_signal)
+        if omission_drive > 0.5:
+            # Forceful inhibition via W_nogo (antagonistic)
+            peon_acts = torch.tanh(engine.state[peons])
+            nogo_signal = torch.relu(bg_gate['nogo_weights'] @ peon_acts) * 2.0
+            
+        engine.state_basal[bg_gate['thal_indices']] += (go_signal - nogo_signal)
 
 
 def update_bg_gate(engine, bg_gate, dopamine):
@@ -441,7 +487,7 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
         'lateral_lr': 0.001,
         'golgi_inhibition_ema': torch.zeros(1, device=device),
         'golgi_alpha': 0.005,   # Softened from 0.01 for broader early feature discovery
-        'delta_lr': 0.005,  # Lower LR for sparse CF (was 0.02 — caused logit explosion)
+        'delta_lr': 0.015,  # Boosted for distillation catch-up (from 0.005)
         'gc_target_sparsity': 0.02,
         'calcium_threshold': torch.ones(256, device=device) * 0.5,
         'gc_active_mask': torch.zeros(n_granule, device=device),
@@ -449,6 +495,7 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
         'last_climbing_fiber_error': torch.zeros(256, device=device),
         'mli_inhibition_scale': torch.ones(n_granule, device=device),
         'purkinje_bias': torch.zeros(256, device=device),
+        'pk_norm_diversity': 0.2,  # Relax row normalization to allow class confidence
     }
     init_row_norms = cerebellum['purkinje_weights'].norm(dim=1)
     cerebellum['pk_target_row_norm'] = init_row_norms.clone()
@@ -673,8 +720,8 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, 
             probe_logits = probe_model(l56_acts).squeeze(0)
             probe_probs = torch.softmax(probe_logits, dim=0)
             cf_error_probe = probe_probs - probs
-            # Blend: keep sparse CF dominant (0.7) with probe smoothing (0.3)
-            gamma = 0.7
+            # Blend: equal weight to target and probe (0.5) for aggressive distillation
+            gamma = 0.5
             cf_error = gamma * cf_error + (1.0 - gamma) * cf_error_probe
 
     gc_acts = gc_acts_for_learn
@@ -778,8 +825,8 @@ def _apply_pk_row_normalization(cerebellum):
         deviation = ratio - 1.0
         scale = torch.where(
             deviation > 0,
-            1.0 / (1.0 + 0.05 * deviation),        # Shrink above-target rows
-            1.0 / (1.0 - 0.02 * deviation.abs()),   # Grow below-target rows (gentler)
+            1.0 / (1.0 + 0.01 * deviation),        # Softer shrinkage (was 0.05)
+            1.0 / (1.0 - 0.005 * deviation.abs()),  # Softer growth (was 0.02)
         )
         cerebellum['purkinje_weights'] *= scale.unsqueeze(1)
 
@@ -887,11 +934,21 @@ def run_linear_probe(engine, data, batch_size=200, free_steps=100, device='cpu',
     input_mask = torch.zeros(engine.num_nodes, device=device)
     input_mask[:256] = 1.0
 
+    # Save engine state
+    saved_state = engine.state.clone()
+    saved_basal = engine.state_basal.clone()
+    saved_apical = engine.state_apical.clone()
+
     with torch.no_grad():
         for idx in sample_indices:
             curr_byte = int(data[idx])
             next_byte = int(data[idx+1])
             
+            # Use leak factor to mimic temporal continuity even in samples
+            engine.state *= 0.95
+            engine.state_basal *= 0.95
+            engine.state_apical *= 0.95
+
             input_vec = torch.zeros(engine.num_nodes, device=device)
             input_vec[curr_byte] = 10.0
             
@@ -904,8 +961,13 @@ def run_linear_probe(engine, data, batch_size=200, free_steps=100, device='cpu',
             X.append(engine.state[l56_indices].clone())
             Y.append(next_byte)
 
+    # Restore engine state
+    engine.state = saved_state
+    engine.state_basal = saved_basal
+    engine.state_apical = saved_apical
+
     X = torch.stack(X) # [batch_size, num_features]
-    Y = torch.tensor(Y, device=device) # [batch_size]
+    Y = torch.tensor(Y, dtype=torch.long, device=device) # [batch_size]
 
     # 2. Train Probe
     # Simple linear readout: X -> logits -> CrossEntropy
@@ -1134,6 +1196,23 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
+    # =====================================================================
+    # PRE-TRAINING BIOLOGICAL DIAGNOSTICS
+    # =====================================================================
+    # Added to verify architectural changes haven't broken neural dynamics.
+    # We run a subset of benchmarks that don't require training history.
+    print("\n[INIT] Running Pre-Training Biological Diagnostics...")
+    from micro_scale_diagnostics import MicroScaleDiagnosticSuite
+    diag_suite = MicroScaleDiagnosticSuite(num_nodes=64 * 350, device=device)
+    # Just run a few critical ones to avoid long startup time
+    diag_results = diag_suite.run_suite()
+    pass_count = sum(1 for r in diag_results if r['pass'])
+    print(f"[INIT] Diagnostic Pass Rate: {pass_count}/{len(diag_results)}")
+    if pass_count < 10:
+        print("[WARNING] Biological constraints are not fully met. Proceeding but results may be unstable.")
+    else:
+        print("[OK] Biological constraints verified.")
+
     num_modules = 10
     num_levels = 2
     edge_index, edge_weight, biases, taus, graph = create_training_graph(
@@ -1193,7 +1272,6 @@ def main():
         is_vip=is_vip,
         is_lts=is_lts,
         dg_indices=graph.dg_indices,
-        ca3_indices=graph.ca3_indices,
         temporal_alpha=0.05,
     )
 
@@ -1489,6 +1567,7 @@ def main():
                 free_state,
                 nudge_pos,
                 learning_rate=lr,
+                target_sequence=target_one_hot
             )
 
             # Intervention 2: Plastic PFA Feedback (RAF — Restricted Adaptive Feedback)
@@ -1686,7 +1765,7 @@ def main():
                         top_ch = chr(top_pred_byte) if 32 <= top_pred_byte < 127 else f'\\x{top_pred_byte:02x}'
                         print(f"  [DIVERSITY] {n_unique} unique predictions / 100 samples | "
                               f"Top: '{top_ch}' ({top_pred_frac:.0%})"
-                              f"{' ← CLASS COLLAPSE' if n_unique <= 3 else ''}")
+                              f"{' ← CLASS COLLAPSE' if n_unique < 4 else ''}")
                 
                 # Eval on held-out data every 2500 steps
                 if (i + 1) % 2500 == 0 and eval_data is not None:

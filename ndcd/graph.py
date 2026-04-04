@@ -37,12 +37,32 @@ class DynamicGraph:
         # --- Node Classification ---
         # 256 input + 256 output nodes, rest are association nodes in modules
         n_sensory = 256
+        n_io_base = 512
+        
+        # Cerebellar microcircuitry expansion (Item 5)
+        self.n_mossy_fibers = 1024
+        self.n_granule_cells = 16384
+        self.n_purkinje = 256
+        self.n_dcn = 256
+        n_cerebellum = self.n_mossy_fibers + self.n_granule_cells + self.n_purkinje + self.n_dcn
+        
+        # Expand total nodes to include cerebellum
+        num_nodes += n_cerebellum
+        self.num_nodes = num_nodes
+        
         n_motor = 256
-        n_io = n_sensory + n_motor
-        n_association = num_nodes - n_io
+        n_io = n_io_base + n_cerebellum
+        n_association = num_nodes - n_io  # Reverts to requested association capacity
 
         self.sensory_indices = np.arange(0, n_sensory)
-        self.motor_indices = np.arange(n_sensory, n_io)
+        self.motor_indices = np.arange(n_sensory, n_sensory + n_motor)
+        
+        # Cerebellar indices
+        self.mossy_fiber_indices = np.arange(n_io_base, n_io_base + self.n_mossy_fibers)
+        self.granule_cell_indices = np.arange(self.mossy_fiber_indices[-1] + 1, self.mossy_fiber_indices[-1] + 1 + self.n_granule_cells)
+        self.purkinje_indices = np.arange(self.granule_cell_indices[-1] + 1, self.granule_cell_indices[-1] + 1 + self.n_purkinje)
+        self.dcn_indices = np.arange(self.purkinje_indices[-1] + 1, self.purkinje_indices[-1] + 1 + self.n_dcn)
+        
         self.association_indices = np.arange(n_io, num_nodes)
 
         # --- Assign modules to hierarchical levels ---
@@ -74,7 +94,7 @@ class DynamicGraph:
         self.hippocampal_modules = set()
         self.neocortical_modules = set()
 
-        # Build node-to-module lookup (pre-allocate)
+        # Build node-to-module lookup (pre-allocate) using expanded num_nodes
         self.node_to_module = np.full(num_nodes, -1, dtype=np.int64)
 
         self.dg_indices = []
@@ -393,7 +413,6 @@ class DynamicGraph:
                         edge_cols.extend(dst.tolist())
 
         # 4. Input projections: sensory nodes -> level-0 modules AND Hippo DG
-        # Item 4: Input (EC) projects to expansion layer (DG) with 1:5 ratio (1280 nodes)
         target_input_mods = set(self.level_modules[0])
         if hippo_module_id != -1:
             target_input_mods.add(hippo_module_id)
@@ -414,19 +433,78 @@ class DynamicGraph:
                 edge_rows.extend(targets.tolist())
                 edge_cols.extend([s] * n_proj)
 
-        # 5. Output projections: level-0 modules (L5/6) -> motor nodes
-        for mod_id in self.level_modules[0]:
+        # 5. Cerebellar Route: Broca modules (L5/6) -> Mossy Fibers
+        # Severing direct cortical-motor paths for Broca (seq) modules
+        for mod_id in self.broca_modules:
+            mod = self.modules[mod_id]
+            idx = mod['l56_indices']
+            if len(idx) == 0: continue
+            
+            # MF receive sparse random projection from Broca L5/6
+            # Each MF gets a few inputs (e.g. 4) to form a unique temporal marker
+            n_mf = len(self.mossy_fiber_indices)
+            n_inputs_per_mf = 4 
+            for mf_idx in self.mossy_fiber_indices:
+                sources = np.random.choice(idx, n_inputs_per_mf, replace=True)
+                edge_rows.extend(sources.tolist())
+                edge_cols.extend([mf_idx] * n_inputs_per_mf)
+
+        # 6. Cerebellar Microcircuitry (temporal basis set construction)
+        # MF -> GC (K=4), GC recurrent (Golgi), GC -> PK (Parallel Fibers), PK -> DCN, DCN -> Motor
+        
+        # MF -> GC (Sparse divergence, K=4 mossy fiber inputs per GC)
+        for gc_idx in self.granule_cell_indices:
+            mf_sources = np.random.choice(self.mossy_fiber_indices, 4, replace=False)
+            edge_rows.extend(mf_sources.tolist())
+            edge_cols.extend([gc_idx] * 4)
+            
+        # GC Recurrent Golgi Inhibition (2% density)
+        n_gc = len(self.granule_cell_indices)
+        n_golgi = max(2, int(n_gc * 0.02))
+        for gc_idx in self.granule_cell_indices:
+            inhibitors = np.random.choice(self.granule_cell_indices, n_golgi, replace=True)
+            edge_rows.extend(inhibitors.tolist())
+            edge_cols.extend([gc_idx] * n_golgi)
+            # Mark these sources as inhibitory
+            self.is_inhibitory[inhibitors] = True
+            
+        # GC -> PK (Parallel Fibers, 2% density)
+        n_pk_proj = max(1, int(n_gc * 0.02))
+        for pk_idx in self.purkinje_indices:
+            parallel_fibers = np.random.choice(self.granule_cell_indices, n_pk_proj, replace=False)
+            edge_rows.extend(parallel_fibers.tolist())
+            edge_cols.extend([pk_idx] * n_pk_proj)
+            
+        # PK -> DCN (Tonic inhibition, 1:1 or sparse convergent)
+        # Purkinje cells are inhibitory
+        self.is_inhibitory[self.purkinje_indices] = True
+        for i in range(len(self.purkinje_indices)):
+            pk_node = self.purkinje_indices[i]
+            dcn_node = self.dcn_indices[i % len(self.dcn_indices)]
+            edge_rows.append(pk_node)
+            edge_cols.append(dcn_node)
+            
+        # DCN -> Motor (Execution triggering, 1:1)
+        for i in range(len(self.dcn_indices)):
+            dcn_node = self.dcn_indices[i]
+            motor_node = self.motor_indices[i % len(self.motor_indices)]
+            edge_rows.append(dcn_node)
+            edge_cols.append(motor_node)
+
+        # 7. Output projections: Level-0 NON-BROCA modules (L5/6) -> motor nodes
+        non_broca_l0 = [m_id for m_id in self.level_modules[0] if m_id not in self.broca_modules]
+        for mod_id in non_broca_l0:
             mod = self.modules[mod_id]
             idx = mod['l56_indices']  # Output comes from L5/6
             if len(idx) == 0: continue
             n_proj = max(1, len(idx) // 4)
             for m in range(n_motor):
                 sources = np.random.choice(idx, n_proj, replace=False)
-                motor_node = n_sensory + m
+                motor_node = self.motor_indices[m]
                 edge_rows.extend(sources.tolist())
                 edge_cols.extend([motor_node] * n_proj)
                 
-        # 6. DKP-PC: Direct feedback from output (motor) to ALL hidden modules
+        # 8. DKP-PC: Direct feedback from output (motor) to ALL hidden modules
         # This allows O(1) error propagation from output to deep layers.
         dkp_feedback_density = 0.05
         for mod in self.modules:
