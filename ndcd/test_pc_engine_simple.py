@@ -258,7 +258,19 @@ def add_thalamocortical_loop(graph, edge_index, edge_weight, biases, taus, num_n
             new_cols.append(tgt)
             new_weights.append(np.random.normal(0.05, 0.02))
 
-    # NO thalamic → motor projections (that's the cerebellum's job now)
+    # 3. Thalamic → Motor (Execution triggering, sparse)
+    # Replaces direct cortical-motor paths with gated subcortical pathways.
+    n_motor = 256
+    motor_indices = np.arange(256, 512)
+    n_proj_to_motor = max(2, n_motor // 16)
+    for t in range(n_thalamic):
+        thal_node = thal_start + t
+        targets = np.random.choice(motor_indices, n_proj_to_motor, replace=False)
+        for tgt in targets:
+            new_rows.append(thal_node)
+            new_cols.append(tgt)
+            new_weights.append(np.random.normal(0.25, 0.1))
+
     # NO thalamic ↔ thalamic recurrence (biological constraint)
 
     new_rows = np.array(new_rows, dtype=np.int64)
@@ -281,7 +293,7 @@ def add_thalamocortical_loop(graph, edge_index, edge_weight, biases, taus, num_n
     edge_index = torch.tensor(np.stack([merged_rows, merged_cols]), dtype=torch.long)
     edge_weight = torch.tensor(merged_weights, dtype=torch.float32)
 
-    print(f"Thalamocortical loop: {n_thalamic} relay neurons (stabilization only, no motor output)")
+    print(f"Thalamocortical loop: {n_thalamic} relay neurons (gated motor output enabled)")
     thalamic_indices = np.arange(thal_start, thal_start + n_thalamic, dtype=np.int64)
     return edge_index, edge_weight, biases, taus, new_num_nodes, thalamic_indices
 
@@ -306,7 +318,9 @@ def create_bg_gate(engine, thalamic_indices, device='cpu'):
     open the loop when the cortical representation is worth sustaining,
     keep it closed during input transitions.
     """
-    l56_indices = torch.where(engine.is_l56)[0]
+    # Only Level 1 and Level 2 L5/6 nodes serve as striatal inputs (Phase 1 Rerouting)
+    l12_mask = (engine.node_to_level == 1) | (engine.node_to_level == 2)
+    l56_indices = torch.where(engine.is_l56 & l12_mask)[0]
     peons_indices = torch.where(engine.is_neg_pe)[0]
     n_l56 = l56_indices.shape[0]
     n_peons = peons_indices.shape[0]
@@ -354,13 +368,19 @@ def apply_bg_gate(engine, bg_gate):
         # Omission drive is strong negative PE in L2/3 PEONs
         omission_drive = torch.clamp(-engine.spatial_errors[peons], min=0.0).max()
         
-        nogo_signal = torch.zeros_like(go_signal)
-        if omission_drive > 0.5:
-            # Forceful inhibition via W_nogo (antagonistic)
-            peon_acts = torch.tanh(engine.state[peons])
-            nogo_signal = torch.relu(bg_gate['nogo_weights'] @ peon_acts) * 2.0
-            
-        engine.state_basal[bg_gate['thal_indices']] += (go_signal - nogo_signal)
+        # --- Pause-then-Cancel Gating Logic ---
+        # Disinhibition Trigger: only 'Go' when prediction error is resolved (PEONs silent)
+        # Omission drive represents the presence of error.
+        disinhibition_gate = torch.exp(-3.0 * omission_drive) # 1.0 when silent, ~0.0 when error
+        
+        # NoGo signal: forceful inhibition if error is high
+        peons = bg_gate['peons_indices']
+        peon_acts = torch.tanh(engine.state[peons])
+        nogo_signal = torch.relu(bg_gate['nogo_weights'] @ peon_acts) * 2.0
+        
+        # Apply disinhibition: offset the -3.0 tonic inhibition by adding Go signal
+        # Target: drive membrane potential toward 0.0 to allow relay
+        engine.state_basal[bg_gate['thal_indices']] += 3.0 * disinhibition_gate * go_signal - nogo_signal
 
 
 def update_bg_gate(engine, bg_gate, dopamine):
@@ -387,7 +407,8 @@ def update_bg_gate(engine, bg_gate, dopamine):
 
 
 def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, device='cpu', 
-                            thalamic_indices=None, broca_indices=None, wernicke_indices=None):
+                            thalamic_indices=None, broca_indices=None, wernicke_indices=None,
+                            n_pos_dims=32, golgi_density=0.02, golgi_spectral_radius=0.95):
     """
     Cerebellar output module: Pontine compression + GC expansion + Purkinje readout.
     
@@ -395,9 +416,18 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
     - Dual pontine pathway (positive + sign-inverted) for bidirectional encoding
     - K=4 mossy fiber inputs per GC: 2 local + 2 global (Level 3) for conjunctive coding
     - Soft-bounded Purkinje weights (no hard cap)
+    
+    Fix 1 (Positional Encoding): Sinusoidal theta-phase-like positional embeddings
+    are concatenated with L5/6 activations before pontine projection, enabling
+    identity x position conjunctive coding (Lisman & Jensen 2013, Neuron).
+    
+    Fix 2 (Temporal Reservoir): Recurrent Golgi cell feedback converts the granule
+    layer from a static expansion into a liquid state machine (Yamazaki & Tanaka 2007).
+    Different GC subpopulations have log-distributed time constants (1-100ms),
+    creating a temporal basis set analogous to UBC delay lines (Guo et al. 2021).
     """
     N_PONTINE = 512
-    # Fix 4: Dual pontine → 1024 effective mossy fiber sources
+    # Fix 4: Dual pontine -> 1024 effective mossy fiber sources
     N_PONTINE_TOTAL = N_PONTINE * 2  # Positive + sign-inverted pathways
     K_MOSSY = 4  # Biologically conserved dendrite count (Cayco-Gajic 2017)
 
@@ -407,8 +437,13 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
     all_l56 = np.array(all_l56, dtype=np.int64)
     n_l56 = len(all_l56)
 
-    # Pontine: random projection (same weights used for both pos and neg pathways)
-    pontine_weights = torch.randn(N_PONTINE, n_l56, device=device) * (1.0 / (n_l56 ** 0.5))
+    # =========================================================================
+    # FIX 1: Positional Encoding — expand pontine input dimension
+    # =========================================================================
+    # Pontine receives [L5/6 activations; sinusoidal position encoding]
+    # Total input dim = n_l56 + n_pos_dims
+    pontine_input_dim = n_l56 + n_pos_dims
+    pontine_weights = torch.randn(N_PONTINE, pontine_input_dim, device=device) * (1.0 / (pontine_input_dim ** 0.5))
 
     # --- Conjunctive Coding Optimization: Local Mossy Selection ---
     # Instead of fully random K=4 selection, each GC picks:
@@ -468,6 +503,59 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
         
         mossy_weights[g, sel] = 1.0 / np.sqrt(K_MOSSY)  # Normalized excitatory
 
+    # =========================================================================
+    # FIX 2: Temporal Reservoir — Golgi recurrent weights + diverse time constants
+    # =========================================================================
+    # Reservoir state persists across timesteps (not reset per token)
+    reservoir_state = torch.zeros(n_granule, device=device)
+    
+    # Sparse Golgi recurrent connections (~2% density)
+    # Each GC receives inhibitory feedback from a random subset of other GCs
+    # via Golgi interneurons (modeled as direct inhibitory recurrence)
+    n_golgi_per_gc = max(1, int(n_granule * golgi_density))
+    golgi_src = []
+    golgi_dst = []
+    for g in range(n_granule):
+        sources = np.random.choice(n_granule, n_golgi_per_gc, replace=False)
+        golgi_src.extend(sources.tolist())
+        golgi_dst.extend([g] * n_golgi_per_gc)
+    
+    golgi_indices = torch.tensor(
+        np.stack([golgi_src, golgi_dst]), dtype=torch.long, device=device
+    )
+    # Initialize with small negative weights (Golgi cells are inhibitory)
+    golgi_values = -torch.abs(torch.randn(len(golgi_src), device=device)) * (1.0 / np.sqrt(n_golgi_per_gc))
+    
+    # Tune spectral radius to ~0.95 (edge of chaos) via power iteration
+    # Build sparse matrix for spectral radius estimation
+    golgi_sparse = torch.sparse_coo_tensor(
+        golgi_indices, golgi_values, (n_granule, n_granule)
+    )
+    # Power iteration (10 steps) to estimate dominant eigenvalue
+    v = torch.randn(n_granule, device=device)
+    v = v / v.norm()
+    for _ in range(10):
+        v_next = torch.mv(golgi_sparse, v)
+        v_norm = v_next.norm()
+        if v_norm > 1e-8:
+            v = v_next / v_norm
+    Wv = torch.mv(golgi_sparse, v)
+    current_sr = torch.abs(torch.dot(v, Wv)).item()
+    if current_sr > 1e-6:
+        sr_scale = golgi_spectral_radius / current_sr
+        golgi_values = golgi_values * sr_scale
+    print(f"  Golgi reservoir: SR {current_sr:.3f} -> {golgi_spectral_radius} "
+          f"(scale={sr_scale:.3f} if tuned, {n_golgi_per_gc} inputs/GC)")
+    
+    # Log-uniformly distributed time constants (1ms to 100ms)
+    # Creates a natural temporal basis set: fast GCs track rapid transitions,
+    # slow GCs integrate over longer windows (analogous to UBC delay lines)
+    gc_time_constants = torch.exp(
+        torch.linspace(np.log(1.0), np.log(100.0), n_granule, device=device)
+    )
+    # Shuffle so time constants are not spatially ordered
+    gc_time_constants = gc_time_constants[torch.randperm(n_granule, device=device)]
+
     # Signed PK weights (no non-negative constraint)
     purkinje_weights = torch.randn(256, n_granule, device=device) * (1.0 / np.sqrt(n_granule))
 
@@ -488,7 +576,7 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
         'golgi_inhibition_ema': torch.zeros(1, device=device),
         'golgi_alpha': 0.005,   # Softened from 0.01 for broader early feature discovery
         'delta_lr': 0.015,  # Boosted for distillation catch-up (from 0.005)
-        'gc_target_sparsity': 0.02,
+        'gc_target_sparsity': 0.15,
         'calcium_threshold': torch.ones(256, device=device) * 0.5,
         'gc_active_mask': torch.zeros(n_granule, device=device),
         'error_ema': 0.0,
@@ -496,40 +584,93 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
         'mli_inhibition_scale': torch.ones(n_granule, device=device),
         'purkinje_bias': torch.zeros(256, device=device),
         'pk_norm_diversity': 0.2,  # Relax row normalization to allow class confidence
+        # --- Fix 1: Positional encoding state ---
+        'n_pos_dims': n_pos_dims,
+        'position_counter': 0,  # Monotonic counter incremented each forward pass
+        # --- Fix 2: Temporal reservoir state ---
+        'reservoir_state': reservoir_state,
+        'golgi_indices': golgi_indices,
+        'golgi_values': golgi_values,
+        'gc_time_constants': gc_time_constants,
     }
     init_row_norms = cerebellum['purkinje_weights'].norm(dim=1)
     cerebellum['pk_target_row_norm'] = init_row_norms.clone()
 
     print(f"Cerebellum: {n_granule} GCs (K={K_MOSSY} mossy: 2 local + 2 global), "
-          f"{N_PONTINE}×2 dual pontine neurons, 256 Purkinje outputs")
+          f"{N_PONTINE}x2 dual pontine neurons, 256 Purkinje outputs")
     print(f"  delta_lr={cerebellum['delta_lr']}, gc_sparsity={cerebellum['gc_target_sparsity']}, "
           f"golgi_alpha={cerebellum['golgi_alpha']}")
-    print(f"  Compression ratio: {n_l56}:{N_PONTINE} = {n_l56/N_PONTINE:.1f}:1 (×2 with sign-inversion)")
+    print(f"  Compression ratio: {n_l56}:{N_PONTINE} = {n_l56/N_PONTINE:.1f}:1 (x2 with sign-inversion)")
     print(f"  Global pontine pool: {len(global_pontine_indices)} neurons (Level {graph.num_levels - 1})")
+    print(f"  Fix 1: Positional encoding: {n_pos_dims} dims (pontine input: {pontine_input_dim})")
+    print(f"  Fix 2: Temporal reservoir: {n_granule} GCs, tau=[1-100ms], "
+          f"Golgi density={golgi_density:.0%}, SR={golgi_spectral_radius}")
     return cerebellum
 
 
 def cerebellar_forward(engine, cerebellum):
-    """Cerebellar forward: L5/6 → Dual Pontine → GC (K=4, Golgi kWTA) → PK → logits."""
+    """Cerebellar forward: L5/6 + PosEnc -> Dual Pontine -> GC (K=4, Golgi+Reservoir) -> PK -> logits.
+    
+    Fix 1: Sinusoidal positional encoding is concatenated with L5/6 activations
+    before pontine projection, binding character identity to ordinal position.
+    
+    Fix 2: Recurrent Golgi feedback and leaky reservoir state convert the granule
+    layer into a temporal reservoir (liquid state machine). The same input at
+    different sequence positions activates different GC subpopulations because
+    the reservoir state has evolved differently.
+    """
     with torch.no_grad():
         l56_acts = engine.state[cerebellum['l56_indices']]
 
-        # Fix 4: Dual pontine pathway — positive and sign-inverted
+        # ==================================================================
+        # FIX 1: Generate sinusoidal positional encoding (theta-phase analog)
+        # ==================================================================
+        n_pos_dims = cerebellum['n_pos_dims']
+        position = cerebellum['position_counter']
+        cerebellum['position_counter'] = position + 1  # Monotonic increment
+        
+        # Sinusoidal encoding: sin/cos at geometrically spaced frequencies
+        # Analogous to theta-gamma phase coding (Lisman & Jensen 2013)
+        n_freqs = n_pos_dims // 2
+        pos_encoding = torch.zeros(n_pos_dims, device=l56_acts.device)
+        for k in range(n_freqs):
+            freq = 1.0 / (10000.0 ** (2.0 * k / n_pos_dims))
+            pos_encoding[2 * k] = math.sin(position * freq)
+            pos_encoding[2 * k + 1] = math.cos(position * freq)
+        
+        # Concatenate: [L5/6 activations; positional encoding]
+        pontine_input = torch.cat([l56_acts, pos_encoding], dim=0)
+
+        # Fix 4: Dual pontine pathway -- positive and sign-inverted
         # Positive pathway: captures features encoded as positive deviations
-        pontine_raw = cerebellum['pontine_weights'] @ l56_acts
+        pontine_raw = cerebellum['pontine_weights'] @ pontine_input
         pontine_pos = torch.relu(pontine_raw)
         # Sign-inverted pathway: captures features encoded as negative deviations
         # Biologically: mesodiencephalic junction provides sign-inverted cortical input
         pontine_neg = torch.relu(-pontine_raw)
-        # Concatenate: [pos; neg] → 1024-dim representation
+        # Concatenate: [pos; neg] -> 1024-dim representation
         pontine_full = torch.cat([pontine_pos, pontine_neg], dim=0)
 
         # Divisive normalization (Carandini & Heeger, 2012)
         sigma_sq = pontine_full.pow(2).mean() + 0.01
         pontine_acts = pontine_full / (sigma_sq.sqrt() + 0.1)
 
-        # Fix 2: Mossy fiber → GC with K=4 biological connectivity
+        # ==================================================================
+        # FIX 2: Temporal reservoir — Golgi recurrent feedback before GC activation
+        # ==================================================================
+        # Mossy fiber -> GC with K=4 biological connectivity
         granule_pre = cerebellum['mossy_weights'] @ pontine_acts
+        
+        # Add recurrent Golgi feedback from reservoir state
+        # Golgi cells provide inhibitory feedback based on recent GC population activity
+        # This is the key mechanism that makes the granule layer state-dependent
+        golgi_sparse = torch.sparse_coo_tensor(
+            cerebellum['golgi_indices'],
+            cerebellum['golgi_values'],
+            (cerebellum['n_granule'], cerebellum['n_granule'])
+        )
+        golgi_feedback = torch.mv(golgi_sparse, cerebellum['reservoir_state'])
+        granule_pre = granule_pre + golgi_feedback
 
         # Divisive Golgi inhibition (stronger gain for K=4 sparse inputs)
         population_input = torch.relu(granule_pre).mean()
@@ -544,7 +685,7 @@ def cerebellar_forward(engine, cerebellum):
         # kWTA sparsity: fixed at 2% for biological pattern separation
         # With K=4 conjunctive coding, natural sparsity is already low;
         # kWTA enforces the hard ceiling
-        k_percent = 0.02
+        k_percent = 0.15
         k_winners = max(1, int(granule_pre.size(0) * k_percent))
         if k_winners < granule_acts_raw.size(0):
             topk_vals, topk_indices = torch.topk(granule_acts_raw, k_winners)
@@ -552,6 +693,20 @@ def cerebellar_forward(engine, cerebellum):
             granule_acts.scatter_(0, topk_indices, topk_vals)
         else:
             granule_acts = granule_acts_raw
+
+        # ==================================================================
+        # FIX 2 (continued): Update reservoir state with leaky integration
+        # ==================================================================
+        # Per-GC time constants create a natural temporal basis set:
+        # Fast GCs (tau~1ms) track rapid character transitions
+        # Slow GCs (tau~100ms) integrate over word/phrase timescales
+        # dt=1.0 corresponds to one token processing step
+        dt_reservoir = 1.0
+        alpha = dt_reservoir / cerebellum['gc_time_constants']
+        alpha = alpha.clamp(max=1.0)  # Ensure stability
+        cerebellum['reservoir_state'] = (
+            (1.0 - alpha) * cerebellum['reservoir_state'] + alpha * granule_acts
+        )
 
         # Normalize GC vector — RMS scaling
         gc_active = granule_acts[granule_acts > 0]
@@ -577,6 +732,16 @@ def cerebellar_forward(engine, cerebellum):
         logits = logits_raw - lateral_inhib
 
         logits = logits - logits.mean()
+
+        # ==================================================================
+        # FIX 6: Final temperature normalization AFTER lateral inhibition
+        # ==================================================================
+        # The pre-lateral normalization (target_logit_std=3.0) can be undone
+        # by lateral inhibition, causing logit ranges to explode to 60+.
+        # This final clamp ensures softmax never saturates regardless.
+        final_logit_std = logits.std().clamp(min=0.1)
+        if final_logit_std > 4.0:
+            logits = logits * (4.0 / final_logit_std)
 
         # Store for learning
         cerebellum['gc_active_mask'] = (granule_acts > 0).float()
@@ -706,6 +871,53 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, 
     if pred_byte != target_byte:
         cf_error[pred_byte] = -probs[pred_byte]
     
+    # ==================================================================
+    # FIX 3: Asymmetric STDP -- temporal error signal enhancement
+    # ==================================================================
+    # Climbing fibers carry a temporally extended error shaped by the
+    # previous timestep's prediction error. This is equivalent to error
+    # momentum: the PK weights respond to the trajectory of errors, not
+    # just point errors, breaking the symmetry that causes class collapse.
+    prev_probs = cerebellum.get('_prev_probs', None)
+    if prev_probs is not None:
+        stdp_asymmetry = 0.3  # Temporal error coupling coefficient
+        temporal_gradient = probs - prev_probs  # Direction of probability change
+        cf_error = cf_error + stdp_asymmetry * temporal_gradient
+    cerebellum['_prev_probs'] = probs.detach().clone()
+    
+    # ==================================================================
+    # FIX 4: Competitive queuing -- anti-monopoly suppression
+    # ==================================================================
+    # When any single class dominates predictions (>40% probability),
+    # actively push it down. This prevents winner-take-all collapse
+    # where the most frequent class grabs all PK weight mass.
+    max_prob, max_idx = probs.max(dim=0)
+    anti_monopoly_threshold = 0.4
+    if max_prob.item() > anti_monopoly_threshold:
+        # Negative CF error for dominant class -> PK weight increase -> more inhibition -> logit drops
+        monopoly_penalty = -(max_prob.item() - anti_monopoly_threshold)
+        cf_error[max_idx.item()] += monopoly_penalty
+    
+    # ==================================================================
+    # FIX 5: Homeostatic entropy regularization
+    # ==================================================================
+    # When the output distribution collapses (low entropy), add an
+    # entropy-increasing gradient. This directly fights class collapse
+    # by penalizing peaked distributions.
+    # Entropy of current distribution
+    entropy = -(probs * torch.log(probs + 1e-8)).sum().item()
+    # Maximum entropy for 256 classes = log(256) = 5.55
+    # Target: at least half-max entropy (2.77) to maintain diversity
+    max_entropy = math.log(256.0)
+    min_entropy_target = max_entropy * 0.3  # ~1.66 nats minimum
+    if entropy < min_entropy_target:
+        # Add entropy-increasing gradient: push probability toward uniform
+        # Gradient of entropy w.r.t. logits points toward uniform distribution
+        uniform = torch.ones_like(probs) / 256.0
+        entropy_gradient = (probs - uniform)  # Push away from peaked, toward uniform
+        entropy_scale = 0.3 * (min_entropy_target - entropy) / min_entropy_target
+        cf_error = cf_error - entropy_scale * entropy_gradient  # Negative -> increase those logits
+    
     # Scale by 1/sqrt(n_active_GC) to normalize row-level gradient energy
     gc_acts_for_learn = cerebellum.get('_last_gc_for_purkinje', granule_acts)
     n_active_gc = (gc_acts_for_learn > 0).sum().item()
@@ -769,14 +981,16 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, 
     _apply_pk_row_normalization(cerebellum)
 
     # Anti-Hebbian laterals (corrected sign: co-fire → increase inhibition)
+    # Fix 4 (continued): Boosted lateral inhibition for stronger competitive dynamics
     with torch.no_grad():
         y = torch.relu(logits)
         y_norm = y / (y.norm() + 1e-8)
-        co_fire = cerebellum['lateral_lr'] * y_norm.unsqueeze(1) * y_norm.unsqueeze(0)
+        lateral_lr = 0.005  # Boosted from 0.001 for stronger competition
+        co_fire = lateral_lr * y_norm.unsqueeze(1) * y_norm.unsqueeze(0)
         co_fire.fill_diagonal_(0.0)
         cerebellum['lateral_weights'] += co_fire
         cerebellum['lateral_weights'] *= 0.998
-        cerebellum['lateral_weights'].clamp_(min=0.0, max=0.5)
+        cerebellum['lateral_weights'].clamp_(min=0.0, max=1.0)  # Raised cap from 0.5 -> 1.0
 
     cerebellum['last_climbing_fiber_error'] = cf_error
     # Track EMA of the non-zero CF signals only (sparse signal → larger per-cell values)
@@ -832,7 +1046,12 @@ def _apply_pk_row_normalization(cerebellum):
 
 
 def compute_cerebellar_cortical_feedback(cerebellum, output_error):
-    """Feedback through dual pontine: output_error → PK^T → GC → Mossy^T → Pontine^T → L5/6."""
+    """Feedback through dual pontine: output_error -> PK^T -> GC -> Mossy^T -> Pontine^T -> L5/6.
+    
+    Fix 1 compatibility: pontine_weights are now [N_PONTINE, n_l56 + n_pos_dims].
+    The transpose product yields a gradient of size n_l56 + n_pos_dims; we discard
+    the positional encoding gradient (not backprop-able) and return only L5/6.
+    """
     with torch.no_grad():
         gc_error = cerebellum['purkinje_weights'].T @ output_error
         gc_mask = cerebellum.get('_last_gc_for_purkinje', cerebellum['gc_active_mask'])
@@ -845,7 +1064,10 @@ def compute_cerebellar_cortical_feedback(cerebellum, output_error):
         pontine_error_neg = pontine_error_full[n_pontine:]
         # Combine: positive pathway gradient + inverted negative pathway gradient
         pontine_error_combined = pontine_error_pos - pontine_error_neg
-        l56_gradient = cerebellum['pontine_weights'].T @ pontine_error_combined
+        full_gradient = cerebellum['pontine_weights'].T @ pontine_error_combined
+        # Fix 1: Only return L5/6 portion, discard positional encoding gradient
+        n_l56 = len(cerebellum['l56_indices'])
+        l56_gradient = full_gradient[:n_l56]
         return l56_gradient
 
 
@@ -1223,9 +1445,10 @@ def main():
     # =====================================================================
     # ARCHITECTURAL ENHANCEMENT 1: Boost output connectivity
     # =====================================================================
-    edge_index, edge_weight = boost_output_connectivity(
-        graph, edge_index, edge_weight, num_nodes
-    )
+    # [DISABLED] Legacy ERR-based output boost (Direct cortical-motor bypass)
+    # edge_index, edge_weight = boost_output_connectivity(
+    #     graph, edge_index, edge_weight, num_nodes
+    # )
 
     # Thalamocortical stabilization loop (no motor output)
     # Re-enabled: provides stable attractor basins for temporal smoothing of
@@ -1273,6 +1496,8 @@ def main():
         is_lts=is_lts,
         dg_indices=graph.dg_indices,
         temporal_alpha=0.05,
+        gc_indices=graph.granule_cell_indices,
+        purkinje_indices=graph.purkinje_indices,
     )
 
     # Cerebellar output module (replaces FRNL + lateral inhibition + terminal Adam optimizer)
@@ -1395,6 +1620,12 @@ def main():
 
         # Reset weights for the tuned run to ensure no stale associations
         engine.reset_plastic_weights()
+
+        # Fix 1+2: Reset cerebellar temporal dynamics at phase boundaries
+        cerebellum['position_counter'] = 0
+        cerebellum['reservoir_state'].zero_()
+        # Fix 3: Reset STDP temporal error state
+        cerebellum.pop('_prev_probs', None)
 
         start_time = time.time()
         for i in range(seq_len - 1):
@@ -1691,7 +1922,7 @@ def main():
                     f"  PK_silent: {pk_silent:.1%} | "
                     f"MF_gain: {mossy_ratio:.2f}x | "
                     f"MLI: {mli_mean:.3f} | "
-                    f"Ca_θ: {ca_thresh_mean:.4f} | "
+                    f"Ca_th: {ca_thresh_mean:.4f} | "
                     f"PK_row_ratio: {pk_row_ratio:.3f}"
                 )
                 
@@ -1765,7 +1996,7 @@ def main():
                         top_ch = chr(top_pred_byte) if 32 <= top_pred_byte < 127 else f'\\x{top_pred_byte:02x}'
                         print(f"  [DIVERSITY] {n_unique} unique predictions / 100 samples | "
                               f"Top: '{top_ch}' ({top_pred_frac:.0%})"
-                              f"{' ← CLASS COLLAPSE' if n_unique < 4 else ''}")
+                              f"{' <- CLASS COLLAPSE' if n_unique < 4 else ''}")
                 
                 # Eval on held-out data every 2500 steps
                 if (i + 1) % 2500 == 0 and eval_data is not None:

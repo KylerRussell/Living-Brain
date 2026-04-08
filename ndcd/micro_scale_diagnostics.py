@@ -141,7 +141,7 @@ def create_micro_circuit(num_active_nodes, hierarchy_levels=1, e_i_ratio=0.8,
     )
     
     # Enforce low population sparseness for orthogonality tests
-    engine.sparsity_alpha = 0.15
+    engine.sparsity_alpha.fill_(0.15)
     
     engine.modules = modules
     return engine, np.arange(IO_OFFSET, total_nodes)
@@ -353,7 +353,7 @@ class MicroScaleDiagnosticSuite:
         inp[node_B] = 4.5
         
         # Ensure sparsity is active and very strict
-        engine.sparsity_alpha = 0.01
+        engine.sparsity_alpha.fill_(0.01)
         
         engine.state_basal.zero_()
         engine.state_apical.zero_()
@@ -517,7 +517,7 @@ class MicroScaleDiagnosticSuite:
         peripheral_nodes = np.setdiff1d(active_nodes, central_nodes)
         
         # Turn off sparsity so peripheral nodes are not hard-suppressed
-        engine.sparsity_alpha = 1.0
+        engine.sparsity_alpha.fill_(1.0)
         
         # Partial cue: stimulate only the top central nodes
         inp = torch.zeros(engine.num_nodes)
@@ -622,7 +622,7 @@ class MicroScaleDiagnosticSuite:
         inpAB[apical_node_B] = 10.0
         
         rep_nodes = engine.modules[1]['l23_indices'] # Larger representation space for mathematically orthogonal patterns
-        engine.sparsity_alpha = 0.2  # Moderate competition
+        engine.sparsity_alpha.fill_(0.2)  # Moderate competition
         
         zero_all()
         repA = engine.settle(inpA, max_steps=20)[rep_nodes].abs().cpu().numpy()

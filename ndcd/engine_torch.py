@@ -102,7 +102,7 @@ def jit_solve_dynamics_imex(
     ip_gain: torch.Tensor,
     ip_bias: torch.Tensor,
     node_levels: torch.Tensor,
-    sparsity_alpha: float,
+    sparsity_alpha: torch.Tensor,
     sfa_states: torch.Tensor,
     cahva_states: torch.Tensor,
     rho_slow_states: torch.Tensor,
@@ -127,7 +127,9 @@ def jit_solve_dynamics_imex(
     implicit_damping: float = 1.2,
     sigma_noise: float = 0.05,
     apical_beta: torch.Tensor = torch.ones(1), # Default to scalar 1.0 if not provided
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, float, int, float, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    calcium_store: torch.Tensor = torch.zeros(1),
+    purkinje_mask: torch.Tensor = torch.zeros(1, dtype=torch.bool),
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, float, int, float, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Semi-implicit (IMEX) dynamics solver for Multi-Compartment Predictive Coding.
 
@@ -166,20 +168,20 @@ def jit_solve_dynamics_imex(
     current_lifetime = lifetime_firing.clone()
 
     # Proposal 1: Dynamic Thresholds with Diffusive IP
-    # Δθ_i = η_IP * ( (ν_i - ν_target) + κ * Σ (ν_j - ν_target) )
+    # deltatheta_i = eta_IP * ( (nu_i - nu_target) + kappa * sum (nu_j - nu_target) )
     with torch.no_grad():
-        eta_ip = 0.015 # η_IP
-        kappa = 0.4    # κ (diffusive term)
+        eta_ip = 0.015 # eta_IP
+        kappa = 0.4    # kappa (diffusive term)
         for m in range(module_starts.size(0)):
             ms = module_starts[m].item()
             me = module_ends[m].item()
             
-            # ν_i - ν_target
-            individual_error = activation_ema[ms:me] - sparsity_alpha
+            # nu_i - nu_target
+            individual_error = activation_ema[ms:me] - sparsity_alpha[ms:me]
             # neighborhood term: module average error
             local_avg_error = individual_error.mean()
             
-            # Update firing threshold θ_i
+            # Update firing threshold theta_i
             d_theta = eta_ip * (individual_error + kappa * local_avg_error)
             current_threshold[ms:me] = torch.clamp(current_threshold[ms:me] + d_theta, 0.5, 5.0)
             
@@ -298,7 +300,7 @@ def jit_solve_dynamics_imex(
         rho = rho + sigma_noise * threshold_gap * torch.randn_like(rho)
 
         
-        # Proposal 2: Soft Recurrent Competition (E→PV→E feedback loop)
+        # Proposal 2: Soft Recurrent Competition (E->PV->E feedback loop)
         # Instead of hard Top-K, we rely on the power-law PV+ activation
         # and conductance-based inhibition calculated later in the loop.
         # This allows for truly emergent stochastic competition.
@@ -306,7 +308,8 @@ def jit_solve_dynamics_imex(
             ms = module_starts[m].item()
             me = module_ends[m].item()
             mod_rho = rho[ms:me]
-            target_k = max(1, int((me - ms) * sparsity_alpha))
+            # Use mean sparsity for the module since k-WTA is a population constraint
+            target_k = max(1, int(torch.mean(sparsity_alpha[ms:me]).item() * (me - ms)))
             if target_k < mod_rho.size(0):
                 top_acts, _ = torch.topk(mod_rho.abs(), target_k)
                 soft_threshold = top_acts[-1] * 0.9  # Soft margin sharper
@@ -515,6 +518,24 @@ def jit_solve_dynamics_imex(
         if input_mask is not None:
             current_s = current_s * (1.0 - input_mask) + input_vector * input_mask
         
+        # --- Item 4: Intrinsic Purkinje Timing (mGluR7 simulation) ---
+        # Purkinje cells integrate excitatory input into a calcium store.
+        # When a threshold is crossed, the neuron "pauses" (shunting inhibition).
+        if purkinje_mask.any():
+            # Accumulate calcium based on excitatory input (i_exc)
+            # Purkinje cells receive very high frequency input (up to 200Hz)
+            # mGluR7 has a slow activation/decay constant (~50-100ms)
+            d_calcium = (i_exc - calcium_store) / 20.0 # tau = 10ms for faster dynamics 
+            calcium_store = torch.where(purkinje_mask, calcium_store + current_dt * d_calcium, calcium_store)
+            
+            # Pause Trigger: shunting inhibition if calcium > threshold
+            pause_mask = purkinje_mask & (calcium_store > 1.8)
+            # Apply shunting inhibition: drive potential toward -1.0 (pause state)
+            current_b[pause_mask] = current_b[pause_mask] * 0.5 - 1.0
+            
+            # Reset calcium store during pause (refractory period)
+            calcium_store[pause_mask] *= 0.8
+            
         current_lifetime = 0.9999 * current_lifetime + 0.0001 * current_s.abs()
         diff = torch.norm(current_s - old_soma).item()
 
@@ -535,7 +556,7 @@ def jit_solve_dynamics_imex(
     return (current_b, current_a, current_s, diff, step_count, current_dt, 
             sfa_states, cahva_states, rho_slow_states, 
             current_threshold, current_ais, current_inh_s, current_inh_d, current_u, current_x,
-            current_ip_gain, current_ip_bias, current_bp1, current_bp2, current_lifetime, nmda_ratio)
+            current_ip_gain, current_ip_bias, current_bp1, current_bp2, current_lifetime, nmda_ratio, calcium_store)
 
 
 class PredictiveCodingEngine:
@@ -561,7 +582,9 @@ class PredictiveCodingEngine:
                  is_sst: Optional[np.ndarray] = None,
                  is_vip: Optional[np.ndarray] = None,
                  is_lts: Optional[np.ndarray] = None,
-                 dg_indices: Optional[np.ndarray] = None):
+                 dg_indices: Optional[np.ndarray] = None,
+                 gc_indices: Optional[np.ndarray] = None,
+                 purkinje_indices: Optional[np.ndarray] = None):
         """
         Args:
             num_nodes: Total number of nodes.
@@ -580,7 +603,13 @@ class PredictiveCodingEngine:
         self.dt = dt
         self.device = device
         self.num_nodes = num_nodes
-        self.temporal_alpha = temporal_alpha
+        self._initial_temporal_alpha = temporal_alpha # Store for tensorization later in __init__
+        
+        # Sparsity alpha: 10-15% for GCs (temporal basis) else 2% (Bio-Adam)
+        self.sparsity_alpha = torch.ones(num_nodes, dtype=torch.float32, device=device) * 0.02
+        if gc_indices is not None:
+            gc_t = torch.tensor(gc_indices, dtype=torch.long, device=device)
+            self.sparsity_alpha[gc_t] = 0.15 # Relaxed sparsity for temporal basis set
 
         # Spatial positions
         if positions is not None:
@@ -599,6 +628,14 @@ class PredictiveCodingEngine:
         # Parameters
         self.taus = torch.tensor(taus, dtype=torch.float32, device=device)
         self.biases = torch.tensor(biases, dtype=torch.float32, device=device)
+        self.initial_biases = self.biases.clone()
+        
+        # Phase 3: Intrinsic Purkinje cell timing (mGluR7)
+        self.calcium_store = torch.zeros(num_nodes, dtype=torch.float32, device=device)
+        self.purkinje_mask = torch.zeros(num_nodes, dtype=torch.bool, device=device)
+        if purkinje_indices is not None:
+             purk_t = torch.tensor(purkinje_indices, dtype=torch.long, device=device)
+             self.purkinje_mask[purk_t] = True
 
         # State
         self.state_basal = torch.zeros(num_nodes, dtype=torch.float32, device=device)
@@ -639,7 +676,7 @@ class PredictiveCodingEngine:
         # Fisher Information Matrix (Diagonal Approximation) for Pruning
         self.fisher_diag = torch.ones(self.num_edges, dtype=torch.float32, device=device)
         self.w_max = 5.0 # For Log-STDP
-        self.sparsity_alpha = 0.05 # Default sparsity target
+
 
         # Synaptic Correlation Stats for Sleep/Pruning (Item 4)
         self.corr_ema = torch.zeros(self.num_edges, dtype=torch.float32, device=device)
@@ -710,8 +747,8 @@ class PredictiveCodingEngine:
 
         # --- Top-down edge mask for proper predictive coding ---
         # In hierarchical predictive coding, the spatial prediction error at
-        # level ℓ = x_ℓ − f(W_topdown * x_{ℓ+1})
-        # We must isolate top-down edges (higher→lower level) from the full
+        # level l = x_l - f(W_topdown * x_{l+1})
+        # We must isolate top-down edges (higher->lower level) from the full
         # weight matrix. Using all synaptic input (intra-module, lateral,
         # bottom-up) gives the dynamics residual, not a prediction error.
         self.node_to_level = torch.zeros(num_nodes, dtype=torch.long, device=device)
@@ -719,9 +756,15 @@ class PredictiveCodingEngine:
         for mod_idx, (start, end) in enumerate(self.module_ranges):
             self.node_to_level[start:end] = self.module_levels[mod_idx]
         self.max_level = int(self.node_to_level.max().item())
+        
+        # Phase 4: Hippocampal Preordering (temporal_alpha boost)
+        self.temporal_alpha = torch.ones(num_nodes, dtype=torch.float32, device=device) * self._initial_temporal_alpha
+        # Level 2 (Hippocampal CA3/CA1) get high temporal weighting for preordering
+        hippo_mask = (self.node_to_level == 2)
+        self.temporal_alpha[hippo_mask] = 0.85
 
         # Hierarchical Temporal Gradients (Murray 2014, Chaudhuri 2015)
-        # τ_E = 20 ms, τ_I = 10 ms (Standard AI regime)
+        # tau_E = 20 ms, tau_I = 10 ms (Standard AI regime)
         self.taus = torch.where(self.is_inhibitory, torch.tensor(10.0, device=device), torch.tensor(20.0, device=device))
         
         # Scaling INTs across hierarchy: L0 -> (Murray MT 70ms), L3 -> (Murray ACC 350ms)
@@ -792,7 +835,7 @@ class PredictiveCodingEngine:
         # ~39% of edges. Including them in spectral radius estimation
         # inflates the measured SR from ~0.57 (free edges) to ~29 (full
         # matrix), causing enforce_spectral_radius to multiply all learned
-        # weights by 0.95/29 ≈ 0.033 every 100 steps — zeroing them out.
+        # weights by 0.95/29 approx 0.033 every 100 steps -- zeroing them out.
         # This mask matches graph.py's initialization, which tunes SR on
         # free edges only.
         self.free_edge_mask = (self.indices[0] >= 512) & (self.indices[1] >= 512)
@@ -802,9 +845,9 @@ class PredictiveCodingEngine:
         # Previous state buffer per module (for temporal prediction errors)
         self.previous_state = torch.zeros(num_nodes, dtype=torch.float32, device=device)
 
-        # Temporal transition matrices A_ℓ per module
+        # Temporal transition matrices A_l per module
         # Stored as diagonal approximation for efficiency:
-        # A_ℓ is a vector of size module_size (diagonal of the full matrix)
+        # A_l is a vector of size module_size (diagonal of the full matrix)
         # Full matrix would be module_size x module_size but too expensive
         self.temporal_A = []
         for start, end in self.module_ranges:
@@ -816,13 +859,13 @@ class PredictiveCodingEngine:
 
         # --- Metaplastic cascade: 3 timescales per synapse ---
         # Surface: fast, updated every step
-        # Mid: medium, τ ≈ 100 steps
-        # Deep: slow, τ ≈ 10000 steps
+        # Mid: medium, tau approx 100 steps
+        # Deep: slow, tau approx 10000 steps
         self.w_deep = torch.zeros_like(self.weight_values)
         self.w_surface = torch.zeros_like(self.weight_values)
         self.w_mid = torch.zeros_like(self.weight_values)
 
-        # Cascade transfer rates — significantly increased to allow transient
+        # Cascade transfer rates -- significantly increased to allow transient
         # syntactic rules to meaningfully accumulate in surface weights.
         self.tau_surface_to_mid = 2000.0   # was 1000.0; slower drain lets surface accumulate
         
@@ -832,7 +875,7 @@ class PredictiveCodingEngine:
 
         # Metaplastic scaling: how much accumulated deep weight
         # reduces surface learning rate. Reduced from 1.0 to 0.1 because
-        # w_deep ≈ 0.83 after chars was causing 1.83x LR reduction (with
+        # w_deep approx 0.83 after chars was causing 1.83x LR reduction (with
         # omega adding another ~10x). At 0.1, the cascade inertia of
         # w_deep already protects important weights without also killing
         # the effective learning rate.
@@ -846,8 +889,8 @@ class PredictiveCodingEngine:
 
         # --- Synaptic intelligence (Zenke et al., 2017) ---
         self.omega = torch.zeros_like(self.weight_values)       # accumulated importance
-        self.prev_weights = self.effective_weights.clone()       # for computing Δw per step
-        self.si_baseline_weights = self.effective_weights.clone() # for computing total Δw over epoch
+        self.prev_weights = self.effective_weights.clone()       # for computing deltaw per step
+        self.si_baseline_weights = self.effective_weights.clone() # for computing total deltaw over epoch
         self.running_contribution = torch.zeros_like(self.weight_values)  # path integral
         self.si_damping = 0.1  # prevents omega from growing unboundedly
 
@@ -856,8 +899,8 @@ class PredictiveCodingEngine:
         # These operate on the ms-to-seconds timescale for activity-silent memory.
         self.u_facilitation = torch.ones_like(self.weight_values) * 0.2
         self.x_depression = torch.ones_like(self.weight_values)
-        self.tau_facil = 1500.0   # τ_F ≈ 1500ms
-        self.tau_depress = 200.0  # τ_D ≈ 200ms
+        self.tau_facil = 1500.0   # tau_F approx 1500ms
+        self.tau_depress = 200.0  # tau_D approx 200ms
         self.U0 = 0.2             # Inherent release probability
 
         # Store latest prediction errors for weight updates
@@ -868,10 +911,6 @@ class PredictiveCodingEngine:
         self.last_settle_diff = 0.0
         self.topdown_pred_var = 0.0
 
-        # FIX 3: Sparsity parameter (controllable from trainer)
-        # Enforce low population sparseness for high memory capacity
-        self.sparsity_alpha = 0.12 # Target ~12% activity
-        
         # Thalamic Gate tracking
         self.surprise_ema = 0.0
 
@@ -926,7 +965,7 @@ class PredictiveCodingEngine:
         """Call periodically (every ~500 steps) after weight update.
 
         Transfers weight magnitude downward through the cascade:
-        surface → mid (above floor) and optionally mid → deep (gated).
+        surface -> mid (above floor) and optionally mid -> deep (gated).
 
         The surface floor ensures that fast transient weights always retain
         a minimum magnitude for hierarchical signal propagation. Without
@@ -934,10 +973,10 @@ class PredictiveCodingEngine:
         to zero, making higher levels input-invariant.
 
         Args:
-            include_deep: If False, only surface→mid transfer occurs.
+            include_deep: If False, only surface->mid transfer occurs.
             surface_floor: Minimum surface magnitude to retain (default 0.003).
         """
-        # Surface → Mid: Transfer only excess above floor
+        # Surface -> Mid: Transfer only excess above floor
         surface_abs = self.w_surface.abs()
         excess_mask = surface_abs > surface_floor
         if excess_mask.any():
@@ -948,7 +987,7 @@ class PredictiveCodingEngine:
             self.w_mid += transfer_sm
             self.w_surface -= transfer_sm
 
-        # Mid → Deep: Continuous leaky integration if enabled
+        # Mid -> Deep: Continuous leaky integration if enabled
         if include_deep:
             gate_mask = self.w_mid.abs() > 0.005  # lowered from 0.02
             transfer_md = torch.zeros_like(self.w_mid)
@@ -1026,7 +1065,7 @@ class PredictiveCodingEngine:
 
     def offline_renormalization(self, num_replay_cycles=20, lambd=0.8, theta_memory=0.1):
         """
-        Simulates slow-wave sleep (0.5–4 Hz) for Synaptic Homeostasis (SHY).
+        Simulates slow-wave sleep (0.5?4 Hz) for Synaptic Homeostasis (SHY).
         
         Phase 1: Spontaneous Reactivation & Relative Potentiation tracking.
         Phase 2: Multiplicative Downscaling with Protection Threshold.
@@ -1051,16 +1090,16 @@ class PredictiveCodingEngine:
                 co_activity /= co_activity.max()
             
             # Phase 5: Multiplicative Scaling with Importance Protection (SHY)
-            # α ≈ 0.85
+            # alpha approx 0.85
             alpha = 0.85
-            # Protection factor κ * ω: High-importance synapses are protected
+            # Protection factor kappa * omega: High-importance synapses are protected
             protection = torch.sigmoid(self.omega)
             
             # Replay-based protection (Bartram et al. 2017)
             # Synapses that were co-active during replay are spared
             replay_safe = (co_activity > 0.1).float()
             
-            # Effective scaling factor per synapse: w_new = w * [α + (1-α) * max(prot, replay)]
+            # Effective scaling factor per synapse: w_new = w * [alpha + (1-alpha) * max(prot, replay)]
             protective_mask = torch.max(protection, replay_safe)
             scaling_factor = alpha + (1.0 - alpha) * protective_mask
             
@@ -1270,12 +1309,7 @@ class PredictiveCodingEngine:
         dst_not_inh = (~self.is_inhibitory[self.indices[1]]).float()
         ee_mask = src_not_inh * dst_not_inh * self.intra_edge_mask.float()
 
-        (self.state_basal, self.state_apical, self.state, diff, steps, self.dt, 
-         self.sfa_states, self.cahva_states, self.rho_slow_states, 
-         self.threshold_adaptation, self.ais_distance, self.inh_depression_soma, self.inh_depression_dend, 
-         self.u_facilitation, self.x_depression,
-         self.ip_gain, self.ip_bias, self.apical_bp1, self.apical_bp2, 
-         self.lifetime_firing, _) = jit_solve_dynamics_imex(
+        res = jit_solve_dynamics_imex(
             self.state_basal, self.state_apical,
             self.weight_values, self.indices,
             self.basal_intra_mask, self.basal_inter_mask,
@@ -1295,8 +1329,18 @@ class PredictiveCodingEngine:
             ee_mask,
             self.gap_junction_indices, self.gap_junction_weights,
             self.apical_bp1, self.apical_bp2, self.lifetime_firing,
-            0.5, damping, implicit_damping, sigma_noise, self.apical_beta
+            0.5, damping, implicit_damping, sigma_noise, self.apical_beta,
+            self.calcium_store, self.purkinje_mask
         )
+        
+        # Unpack the 22-element return tuple
+        (self.state_basal, self.state_apical, self.state, diff, steps, self.dt, 
+         self.sfa_states, self.cahva_states, self.rho_slow_states, 
+         self.threshold_adaptation, self.ais_distance, self.inh_depression_soma, self.inh_depression_dend, 
+         self.u_facilitation, self.x_depression,
+         self.ip_gain, self.ip_bias, self.apical_bp1, self.apical_bp2, 
+         self.lifetime_firing, self.nmda_ratio, self.calcium_store) = res
+        
         self.last_settle_diff = diff
         return self.state
 
@@ -1304,19 +1348,19 @@ class PredictiveCodingEngine:
         """
         Compute hierarchical prediction errors.
 
-        Spatial prediction error at level ℓ:
-            ε_ℓ = x_ℓ − W_topdown * tanh(x_{ℓ+1})
+        Spatial prediction error at level l:
+            epsilon_l = x_l - W_topdown * tanh(x_{l+1})
 
-        Uses ONLY top-down edges (higher→lower level) for the prediction,
+        Uses ONLY top-down edges (higher->lower level) for the prediction,
         not the full weight matrix. The full synaptic input includes
         intra-module, lateral, and bottom-up contributions which are part
         of the dynamics, not the hierarchical prediction.
 
-        I/O nodes (0-511) get zero spatial error here — the output target
+        I/O nodes (0-511) get zero spatial error here -- the output target
         is injected separately by the training loop.
         Top-level nodes also get zero (no parent to predict them).
 
-        Returns total prediction error energy F = 0.5 * sum(||ε||²)
+        Returns total prediction error energy F = 0.5 * sum(||epsilon||?)
         """
         rho = torch.tanh(self.state)
 
@@ -1382,7 +1426,7 @@ class PredictiveCodingEngine:
         spatial_energy = 0.5 * torch.sum(self.spatial_errors ** 2).item()
 
         # --- Temporal prediction errors ---
-        # ε_temporal_ℓ = x_ℓ(t) - A_ℓ * x_ℓ(t-1)
+        # epsilon_temporal_l = x_l(t) - A_l * x_l(t-1)
         self.temporal_errors.zero_()
         temporal_energy = 0.0
 
@@ -1400,7 +1444,7 @@ class PredictiveCodingEngine:
 
         # Total free energy with Metabolic Cost (minimizing surprisal and restricting activity bounds)
         metabolic_cost = 0.001 * torch.sum(self.state.abs()).item()
-        total_energy = spatial_energy + self.temporal_alpha * temporal_energy + metabolic_cost
+        total_energy = spatial_energy + torch.sum(self.temporal_alpha * 0.5 * self.temporal_errors**2).item() + metabolic_cost
 
         return total_energy
 
@@ -1411,7 +1455,7 @@ class PredictiveCodingEngine:
         Local Hebbian weight update based on True Equilibrium Propagation.
 
         Top-Down Spatial weight update (Prospective Configuration):
-            ΔW_ij ∝ (rho_nudge_i - rho_free_i) * rho_nudge_j
+            deltaW_ij propto (rho_nudge_i - rho_free_i) * rho_nudge_j
 
         Neuromodulatory Gating:
         - Dopamine (DA): RPE surrogate. Scales plasticity based on surprise/success.
@@ -1504,7 +1548,7 @@ class PredictiveCodingEngine:
 
         
 
-            # FIX 4: Lateral edges — Central-Annual-Surround (CAS) Topology
+            # FIX 4: Lateral edges -- Central-Annual-Surround (CAS) Topology
             lat_i = idx_i[self.lateral_edge_mask]
             lat_j = idx_j[self.lateral_edge_mask]
             lat_prev_rho_i = prev_rho[lat_i]
@@ -1615,7 +1659,7 @@ class PredictiveCodingEngine:
                 rho_inh_post = rho_free[idx_j[src_inh]]
                 
                 # Target activity rho_target = sparsity_alpha
-                inh_error = rho_inh_post - self.sparsity_alpha
+                inh_error = rho_inh_post - self.sparsity_alpha[idx_j[src_inh]]
                 inh_grad = rho_inh_pre * inh_error
                 
                 # Update inhibitory weights (only if source is inhibitory)
@@ -1653,7 +1697,8 @@ class PredictiveCodingEngine:
             # Use total network energy as a proxy for 'surprise'.
             # If current_energy is much higher than the EMA, it's a novel/important signal -> scale up learning.
             # If it's matching or lower, it's predictable noise (like spaces) -> scale down learning.
-            current_energy = 0.5 * torch.sum(self.spatial_errors ** 2).item() + self.temporal_alpha * torch.sum(self.temporal_errors ** 2).item()
+            total_temp_energy = torch.sum(self.temporal_alpha * 0.5 * self.temporal_errors ** 2).item()
+            current_energy = 0.5 * torch.sum(self.spatial_errors ** 2).item() + total_temp_energy
             if self.surprise_ema == 0.0:
                 self.surprise_ema = current_energy
             else:
@@ -1694,7 +1739,7 @@ class PredictiveCodingEngine:
             self.eligibility_traces = self.eligibility_traces * (1.0 - 1.0/self.tau_eligibility) + grad * (1.0/self.tau_eligibility)
 
             # Multiplicative Update Requirement (Item 5)
-            # dw ∝ w * grad
+            # dw propto w * grad
             # To preserve sign, we use abs(w) and apply to w
             delta_w = meta_lr * self.eligibility_traces * (self.weight_values.abs() + 0.01)
             self.w_surface += delta_w
@@ -1717,7 +1762,7 @@ class PredictiveCodingEngine:
             # Fisher-Weighted Pruning
             # Instead of uniform RMS normalization, selectively decay weights based on their Fisher Information.
             # Weights with high F_i (crucial for loss) decay slower.
-            # Δw_prune = -lambda_prune * w_i / (F_i + epsilon)
+            # deltaw_prune = -lambda_prune * w_i / (F_i + epsilon)
             lambda_prune = 1e-4
             epsilon = 1e-6
             prune_decay = lambda_prune / (self.fisher_diag + epsilon)
@@ -1732,7 +1777,7 @@ class PredictiveCodingEngine:
          
 
             # --- Top-down weight diversity regularization ---
-            # (Kept from original — prevents mode collapse)
+            # (Kept from original -- prevents mode collapse)
             td_idx = torch.where(self.topdown_edge_mask)[0]
             td_src = self.topdown_indices[0]
             td_vals = self.w_surface[td_idx]
@@ -1774,7 +1819,7 @@ class PredictiveCodingEngine:
             self.ais_distance.clamp_(0.5, 2.5)
 
             # --- Temporal transition matrix update ---
-            eta = learning_rate * 25.0  # Dedicated temporal learning rate (η)
+            eta = learning_rate * 25.0  # Dedicated temporal learning rate (eta)
             for mod_idx, (start, end) in enumerate(self.module_ranges):
                 # Level gate: skip modules above the active update threshold
                 if active_level_max is not None and self.module_levels[mod_idx] > active_level_max:
@@ -1808,7 +1853,7 @@ class PredictiveCodingEngine:
         By enforcing on cascade-only, the learned weights are constrained
         independently, and the base initialization is preserved.
 
-        Only dampens w_surface — w_mid and w_deep are protected long-term
+        Only dampens w_surface -- w_mid and w_deep are protected long-term
         memory that must never be rescaled by a transient SR measurement.
         """
         with torch.no_grad():
@@ -1856,7 +1901,7 @@ class PredictiveCodingEngine:
 
     def enforce_jacobian_spectral_radius(self, target_max=0.95):
         """
-        Enforce spectral radius on the actual Jacobian J = (1/τ)(-I + W*diag(sech²(x))),
+        Enforce spectral radius on the actual Jacobian J = (1/tau)(-I + W*diag(sech?(x))),
         not just weight norms. This bounds the true dynamical instability.
 
         Uses power iteration on the full Jacobian (with I/O rows/cols zeroed)
@@ -1960,8 +2005,8 @@ class PredictiveCodingEngine:
                 transfer_m2d = self.w_mid / self.tau_mid_to_deep
                 
                 # FIX 3: Magnitude-gated hippocampal transfer
-                # Neocortical synapses (τ_deep=2000) drip-feed continuously.
-                # Hippocampal synapses (τ_deep=50) wait until a coherent pattern
+                # Neocortical synapses (tau_deep=2000) drip-feed continuously.
+                # Hippocampal synapses (tau_deep=50) wait until a coherent pattern
                 # forms in w_mid (magnitude > 0.1) before flushing rapidly.
                 # This prevents noisy transient patterns from cluttering deep CLS memory.
                 is_hippo = self.tau_mid_to_deep < 100.0

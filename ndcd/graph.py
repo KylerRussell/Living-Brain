@@ -433,15 +433,15 @@ class DynamicGraph:
                 edge_rows.extend(targets.tolist())
                 edge_cols.extend([s] * n_proj)
 
-        # 5. Cerebellar Route: Broca modules (L5/6) -> Mossy Fibers
-        # Severing direct cortical-motor paths for Broca (seq) modules
-        for mod_id in self.broca_modules:
+        # 5. Subcortical Rerouting: Level 1 & 2 Modules (L5/6) -> Mossy Fibers & BG Striatum
+        # Severing direct cortical-motor paths and redirecting to subcortical gateways.
+        subcortical_source_mods = [m['id'] for m in self.modules if m['level'] in (1, 2)]
+        for mod_id in subcortical_source_mods:
             mod = self.modules[mod_id]
             idx = mod['l56_indices']
             if len(idx) == 0: continue
             
-            # MF receive sparse random projection from Broca L5/6
-            # Each MF gets a few inputs (e.g. 4) to form a unique temporal marker
+            # MF receive sparse random projection from L1/L2 L5/6
             n_mf = len(self.mossy_fiber_indices)
             n_inputs_per_mf = 4 
             for mf_idx in self.mossy_fiber_indices:
@@ -492,17 +492,18 @@ class DynamicGraph:
             edge_cols.append(motor_node)
 
         # 7. Output projections: Level-0 NON-BROCA modules (L5/6) -> motor nodes
-        non_broca_l0 = [m_id for m_id in self.level_modules[0] if m_id not in self.broca_modules]
-        for mod_id in non_broca_l0:
-            mod = self.modules[mod_id]
-            idx = mod['l56_indices']  # Output comes from L5/6
-            if len(idx) == 0: continue
-            n_proj = max(1, len(idx) // 4)
-            for m in range(n_motor):
-                sources = np.random.choice(idx, n_proj, replace=False)
-                motor_node = self.motor_indices[m]
-                edge_rows.extend(sources.tolist())
-                edge_cols.extend([motor_node] * n_proj)
+        # [DISABLED] Severing direct cortical-motor paths to enforce subcortical sequence gating.
+        # non_broca_l0 = [m_id for m_id in self.level_modules[0] if m_id not in self.broca_modules]
+        # for mod_id in non_broca_l0:
+        #     mod = self.modules[mod_id]
+        #     idx = mod['l56_indices']  # Output comes from L5/6
+        #     if len(idx) == 0: continue
+        #     n_proj = max(1, len(idx) // 4)
+        #     for m in range(n_motor):
+        #         sources = np.random.choice(idx, n_proj, replace=False)
+        #         motor_node = self.motor_indices[m]
+        #         edge_rows.extend(sources.tolist())
+        #         edge_cols.extend([motor_node] * n_proj)
                 
         # 8. DKP-PC: Direct feedback from output (motor) to ALL hidden modules
         # This allows O(1) error propagation from output to deep layers.
