@@ -559,6 +559,34 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
     # Signed PK weights (no non-negative constraint)
     purkinje_weights = torch.randn(256, n_granule, device=device) * (1.0 / np.sqrt(n_granule))
 
+    # =========================================================================
+    # FIX (a): Heterogeneous eligibility traces on GC->PK synapses
+    # =========================================================================
+    # Suvrathan, Payne & Raymond (2016, Neuron 92:959-967) showed that vermal
+    # Purkinje cells tile a range of PF-CF intervals, each cell tuned to a
+    # different delay. The eligibility trace is mediated by the mGluR1 -> IP3
+    # / DAG / PKC cascade (Batchelor & Garthwaite 1994; Medina et al. 2000),
+    # which is postsynaptic-cell-dependent -- so tau varies by PK cell, but
+    # all synapses onto one PK share the same tau.
+    #
+    # Per-PK tau log-uniformly in [2, 20] token-steps -> decay in [0.61, 0.95].
+    # Fast PKs credit only recent GC activity (~2 steps); slow PKs integrate
+    # over ~20 steps. This creates a readout population that can discover
+    # prediction-relevant timing without the programmer picking a single delay.
+    pk_tau = torch.exp(
+        torch.linspace(np.log(2.0), np.log(20.0), 256, device=device)
+    )
+    pk_trace_decay = torch.exp(-1.0 / pk_tau).unsqueeze(1)  # (256, 1) for broadcasting
+    
+    # NEW: Cascading Eligibility Traces (CET) — 3-order temporal basis
+    # Shape: (3, 256, n_granule)
+    pk_eligibility = torch.zeros(3, 256, n_granule, device=device)
+    
+    # NEW: DCN weights (slow-learning consolidation repository)
+    base_lr = 0.02  # Standard Purkinje learning rate
+    dcn_weights = torch.zeros(256, n_granule, device=device)
+    dcn_delta_lr = base_lr / 20.0  # Consistently slower than Purkinje
+
     cerebellum = {
         'n_granule': n_granule,
         'n_pontine': N_PONTINE,
@@ -575,7 +603,7 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
         'lateral_lr': 0.001,
         'golgi_inhibition_ema': torch.zeros(1, device=device),
         'golgi_alpha': 0.005,   # Softened from 0.01 for broader early feature discovery
-        'delta_lr': 0.015,  # Boosted for distillation catch-up (from 0.005)
+        'delta_lr': base_lr,  # Dense CE gradient: target row ~0.7, non-target ~0.004. Per-synapse LTD ≈ 0.02*0.7*elig ≈ 4e-3.
         'gc_target_sparsity': 0.15,
         'calcium_threshold': torch.ones(256, device=device) * 0.5,
         'gc_active_mask': torch.zeros(n_granule, device=device),
@@ -586,12 +614,43 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
         'pk_norm_diversity': 0.2,  # Relax row normalization to allow class confidence
         # --- Fix 1: Positional encoding state ---
         'n_pos_dims': n_pos_dims,
-        'position_counter': 0,  # Monotonic counter incremented each forward pass
+        'position_counter': 0,  # Monotonic debug counter (not used for phase anymore)
+        # --- Fix (b): Resetting phase position for sinusoidal encoding ---
+        # Replaces monotonic position_counter as the sinusoid argument.
+        # Reset at sentence boundaries (. ? ! + space) so that position 3 in
+        # any sentence gets the same phase representation, matching the
+        # relative-position design principle of biological position codes
+        # (theta phase precession, time cells, PFC ramping; Hasselmo 2007).
+        'phase_position': 0,
         # --- Fix 2: Temporal reservoir state ---
         'reservoir_state': reservoir_state,
         'golgi_indices': golgi_indices,
         'golgi_values': golgi_values,
         'gc_time_constants': gc_time_constants,
+        # --- Fix (a): Heterogeneous PK eligibility traces ---
+        'pk_eligibility': pk_eligibility,      # (3, 256, n_granule) CET cascade
+        'pk_trace_decay': pk_trace_decay,      # (256, 1) per-PK decay factor
+        'pk_tau': pk_tau,                       # (256,) for diagnostics
+        'dcn_weights': dcn_weights,             # NEW (T15)
+        'dcn_delta_lr': dcn_delta_lr,           # NEW (T15)
+        'epsilon_io': 0.05,                     # NEW (T13/T16)
+        'io_gate_active': True,
+        # --- NEW (T6): DCN Rebound Dynamics ---
+        'dcn_hyperpol_state': torch.zeros(256, device=device),
+        # --- NEW (T10): Nucleo-Olivary Inhibition ---
+        'w_dcn_io': torch.ones(256, device=device) * 0.5, # 1:1 feedback
+        # --- NEW (T9): Short-Term Plasticity (Tsodyks-Markram) ---
+        'mf_u': torch.ones(N_PONTINE_TOTAL, device=device) * 0.2, # Baseline release prob
+        'mf_x': torch.ones(N_PONTINE_TOTAL, device=device),       # Available resources
+        'pf_u': torch.ones(n_granule, device=device) * 0.2,
+        'pf_x': torch.ones(n_granule, device=device),
+        # --- NEW (T5): STDP Traces ---
+        'mf_trace': torch.zeros(N_PONTINE_TOTAL, device=device),
+        'gc_trace': torch.zeros(n_granule, device=device),
+        # --- NEW (T23): Zebrin Banding Microzones ---
+        # Z+ (Aldolase C positive): Lower baseline SS firing, higher LTD sensitivity
+        # Z- (Aldolase C negative): Higher baseline SS firing, lower LTD sensitivity
+        'zebrin_z_plus': (torch.arange(256, device=device) % 2 == 0), # Even nodes Z+
     }
     init_row_norms = cerebellum['purkinje_weights'].norm(dim=1)
     cerebellum['pk_target_row_norm'] = init_row_norms.clone()
@@ -623,12 +682,17 @@ def cerebellar_forward(engine, cerebellum):
         l56_acts = engine.state[cerebellum['l56_indices']]
 
         # ==================================================================
-        # FIX 1: Generate sinusoidal positional encoding (theta-phase analog)
+        # FIX 1 + Fix (b): Sinusoidal positional encoding driven by
+        # phase_position (resets at sentence boundaries) rather than a
+        # monotonic counter. Every biological positional code is relative to
+        # sequence onset (theta phase precession, time cells, PFC ramping),
+        # so position 3 in sentence A and sentence B must share a phase.
         # ==================================================================
         n_pos_dims = cerebellum['n_pos_dims']
-        position = cerebellum['position_counter']
-        cerebellum['position_counter'] = position + 1  # Monotonic increment
-        
+        position = cerebellum['phase_position']
+        cerebellum['phase_position'] = position + 1  # Incremented, reset externally
+        cerebellum['position_counter'] = cerebellum['position_counter'] + 1  # Debug-only
+
         # Sinusoidal encoding: sin/cos at geometrically spaced frequencies
         # Analogous to theta-gamma phase coding (Lisman & Jensen 2013)
         n_freqs = n_pos_dims // 2
@@ -653,7 +717,26 @@ def cerebellar_forward(engine, cerebellum):
 
         # Divisive normalization (Carandini & Heeger, 2012)
         sigma_sq = pontine_full.pow(2).mean() + 0.01
-        pontine_acts = pontine_full / (sigma_sq.sqrt() + 0.1)
+        pontine_acts_raw = pontine_full / (sigma_sq.sqrt() + 0.1)
+
+        # ==================================================================
+        # FIX 9: Short-Term Plasticity (STP) at MF->GC Synapses
+        # ==================================================================
+        dt_ms = 20.0
+        mf_u = cerebellum['mf_u']
+        mf_x = cerebellum['mf_x']
+        U_mf = 0.2
+        tau_f_mf = 50.0   # Facilitating dynamics
+        tau_d_mf = 20.0
+        
+        mf_u_next = mf_u + (U_mf - mf_u) * (1 - math.exp(-dt_ms / tau_f_mf)) + U_mf * (1 - mf_u) * pontine_acts_raw
+        mf_x_next = mf_x + (1.0 - mf_x) * (1 - math.exp(-dt_ms / tau_d_mf)) - mf_u_next * mf_x * pontine_acts_raw
+        mf_u_next = mf_u_next.clamp(0, 1)
+        mf_x_next = mf_x_next.clamp(0, 1)
+        cerebellum['mf_u'] = mf_u_next
+        cerebellum['mf_x'] = mf_x_next
+
+        pontine_acts = mf_u_next * mf_x_next * pontine_acts_raw
 
         # ==================================================================
         # FIX 2: Temporal reservoir — Golgi recurrent feedback before GC activation
@@ -714,9 +797,64 @@ def cerebellar_forward(engine, cerebellum):
             rms = (gc_active.pow(2).mean()).sqrt().clamp(min=1e-6)
             granule_acts = granule_acts / rms
 
+        # ==================================================================
+        # FIX 9: Short-Term Plasticity (STP) at PF->PC Synapses
+        # ==================================================================
+        pf_u = cerebellum['pf_u']
+        pf_x = cerebellum['pf_x']
+        U_pf = 0.2
+        tau_f_pf = 100.0  # Facilitating PF-PC dynamics
+        tau_d_pf = 20.0
+        
+        pf_u_next = pf_u + (U_pf - pf_u) * (1 - math.exp(-dt_ms / tau_f_pf)) + U_pf * (1 - pf_u) * granule_acts
+        pf_x_next = pf_x + (1.0 - pf_x) * (1 - math.exp(-dt_ms / tau_d_pf)) - pf_u_next * pf_x * granule_acts
+        pf_u_next = pf_u_next.clamp(0, 1)
+        pf_x_next = pf_x_next.clamp(0, 1)
+        cerebellum['pf_u'] = pf_u_next
+        cerebellum['pf_x'] = pf_x_next
+
+        granule_eff = pf_u_next * pf_x_next * granule_acts
+
         # Purkinje readout with tonic baseline
-        purkinje_output = cerebellum['purkinje_weights'] @ granule_acts
-        logits_raw = cerebellum['purkinje_tonic_rate'] - purkinje_output
+        purkinje_output = cerebellum['purkinje_weights'] @ granule_eff
+        
+        # NEW (T23): Zebrin baseline SS firing modulation
+        if 'zebrin_z_plus' in cerebellum:
+            # Z+ has lower baseline (-0.5), Z- has higher baseline (+0.5)
+            zebrin_bias = torch.where(cerebellum['zebrin_z_plus'], -0.5, 0.5)
+            purkinje_output = purkinje_output + zebrin_bias
+        
+        # Consolidation: Combine fast (Purkinje) and slow (DCN) pathways
+        dcn_output = cerebellum.get('dcn_weights', 0.0) @ granule_eff
+
+        # ==================================================================
+        # FIX 6: DCN Rebound Firing (T-type Calcium)
+        # ==================================================================
+        dcn_hyp = cerebellum['dcn_hyperpol_state']
+        tau_hyp_accum = 20.0  # ms
+        tau_hyp_decay = 50.0  # ms (rebound lasts ~50ms)
+        
+        pk_inhibition = purkinje_output
+        baseline_pk = cerebellum['purkinje_tonic_rate']
+        
+        excess_inhib = (pk_inhibition - baseline_pk).clamp(min=0.0)
+        rebound_trigger = (baseline_pk - pk_inhibition).clamp(min=0.0)
+        
+        # Accumulate T-type availability
+        dcn_hyp = dcn_hyp + (excess_inhib - dcn_hyp) * (1 - math.exp(-dt_ms / tau_hyp_accum))
+        
+        # Rebound current
+        rebound_current = dcn_hyp * rebound_trigger * 5.0
+        
+        # Drain the T-type channels rapidly when triggered
+        dcn_hyp = dcn_hyp * math.exp(-dt_ms / tau_hyp_decay)
+        cerebellum['dcn_hyperpol_state'] = dcn_hyp.clamp(0, 2.0)
+        
+        # DCN activity combines baseline, inhibition, and rebound
+        dcn_actual_rate = (baseline_pk + dcn_output) - purkinje_output + rebound_current
+        cerebellum['_last_dcn_rate'] = torch.relu(dcn_actual_rate)
+
+        logits_raw = dcn_actual_rate
         
         # Adaptive logit normalization: rescale to target standard deviation
         # Biologically: Purkinje cell firing rates are bounded by membrane biophysics
@@ -748,6 +886,37 @@ def cerebellar_forward(engine, cerebellum):
         cerebellum['_last_gc_for_purkinje'] = granule_acts
         cerebellum['_last_pontine_acts'] = pontine_acts
         cerebellum['_last_pontine_acts_raw'] = pontine_full  # Full dual-pathway
+
+        # ==================================================================
+        # FIX (a): Update heterogeneous PK eligibility traces
+        # ==================================================================
+        # Leaky-integrator update:  e <- d * e + (1 - d) * gc_acts
+        # Per-PK decay d in [~0.61, ~0.95] (tau log-uniform in [2, 20] steps).
+        # Biologically: PF activation tags the synapse via mGluR1/IP3/DAG/PKC
+        # at a rate set by postsynaptic cascade kinetics; trace persists for
+        # ~tau steps after the presynaptic event. This is the mechanism that
+        # lets a CF arriving AFTER the GC population that drove the
+        # prediction still credit those same synapses (Suvrathan 2016).
+        d = cerebellum['pk_trace_decay']           # (256, 1)
+        e = cerebellum['pk_eligibility']           # (256, n_granule)
+        # NEW: Cascading Eligibility Trace (CET) Update
+        # Instead of a single leaky integrator, we use a 3rd-order cascade.
+        # e_dot_1 = (gc - e_1) / tau
+        # e_dot_2 = (e_1 - e_2) / tau
+        # e_dot_3 = (e_2 - e_3) / tau
+        # This creates a delayed peak in e_3, allowing temporal binding.
+        e = cerebellum['pk_eligibility']  # (3, 256, n_granule)
+        ga = granule_acts.unsqueeze(0)    # (1, n_granule)
+        
+        # d is (256, 1), ga is (1, n_granule) -> ga_exp is (256, n_granule)
+        ga_exp = ga.expand(256, -1)
+        
+        # Cascade state 1
+        e[0].mul_(d).add_((1.0 - d) * ga_exp)
+        # Cascade state 2 (driven by state 1)
+        e[1].mul_(d).add_((1.0 - d) * e[0])
+        # Cascade state 3 (driven by state 2)
+        e[2].mul_(d).add_((1.0 - d) * e[1])
 
         # Gate for diagnostics only
         gate_value = torch.tensor(1.0, device=logits.device)
@@ -838,93 +1007,65 @@ def prune_and_rewire_output(engine, prune_ratio=0.05):
 
 def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, engine, settle_diff=0.0, probe_model=None):
     """
-    Biologically-constrained cerebellar learning with:
-    - Fix 1: Per-Purkinje scalar climbing fiber error (sparse, strong)
-    - Fix 3: Soft-bounded inverse BCM plasticity (no hard cap)
-    - Optional Linear Probe Distillation (Intervention 5)
+    Cerebellar learning with dense cross-entropy CF gradient.
+
+    The sparse one-hot CF signal (only target + wrong-winner rows receive
+    teaching) was proven insufficient to rotate the PK readout matrix out
+    of its random-init null space. A dense gradient — the full softmax
+    cross-entropy gradient (target_onehot - probs) — updates all 256 PK
+    rows every step, providing the coherent rotational pressure that sparse
+    updates lacked.
+
+    Biologically: Najafi & Medina (2013) showed CF signals are graded, not
+    binary. Herzfeld et al. (2018) showed each PK cell has a preferred
+    error direction and the population decomposes the full error vector.
+    A dense CF gradient implements the population-level teaching signal
+    that individual-CF-per-PK cannot.
+
+    This is the simplest possible baseline for whether the cerebellar
+    readout architecture can learn at all. Once verified, individual
+    mechanisms can be made more bio-plausible one at a time.
     """
     device = logits.device
-    
-    # Fix 1: Per-Purkinje scalar CF error (sparse, graded)
-    # Each PK cell receives ONE climbing fiber carrying a scalar error (Najafi & Medina 2013).
-    # Only the target class and wrong-winner receive teaching signals.
-    #
-    # CRITICAL: The error magnitude must be scaled by 1/sqrt(n_active_GC) to normalize
-    # the effective row-level weight update. Without this, the outer product
-    # cf_error * gc_acts produces a row update whose L2 norm scales with sqrt(n_active),
-    # causing logit explosion when n_active >> 1 (328 GCs at 2% sparsity).
-    cf_error = torch.zeros(256, device=device)
-    
-    pred_byte = torch.argmax(logits).item()
-    
-    # Use softmax probabilities for graded error (not saturating sigmoid)
-    # This keeps error magnitude in [0, 1) and provides useful gradient even with large logits
+
     probs = torch.softmax(logits, dim=0)
+    pred_byte = torch.argmax(logits).item()
+
+    # Dense cross-entropy gradient: cf_error[i] = target_onehot[i] - probs[i]
+    #   target row:     +(1 - p_target)  ≈ +0.7   → LTD → logit rises
+    #   non-target rows: -(p_i)          ≈ -0.003  → LTP → logit drops
+    # This is the gradient of cross-entropy loss w.r.t. pre-softmax logits.
+    # It is dense, well-scaled, and inherently anti-collapse (pushes
+    # probability mass from non-targets to target every step).
+    target_onehot = torch.zeros(256, device=device)
+    target_onehot[target_byte] = 1.0
+    cf_error = target_onehot - probs
+
+    # NEW (T10): Nucleo-Olivary Inhibition
+    # w_dcn_io modulates the CF error signal. CF drops if DCN is high.
+    if 'w_dcn_io' in cerebellum and '_last_dcn_rate' in cerebellum:
+        dcn_rate = cerebellum['_last_dcn_rate']
+        noi_inhibition = cerebellum['w_dcn_io'] * dcn_rate
+        noi_factor = torch.clamp(1.0 - noi_inhibition, min=0.0, max=1.0)
+        cf_error = cf_error * noi_factor
     
-    # Target PK cell: CF → LTD at co-active PF synapses
-    # LTD decreases PK weights → PK fires less → DCN disinhibited → logit RISES
-    # Positive cf_error → negative weight update (via -delta_lr * cf_error * gc)
-    cf_error[target_byte] = (1.0 - probs[target_byte])
-    
-    # Wrong-winner PK cell: rebound LTP → increase PK weights → more DCN inhibition → logit DROPS
-    # Negative cf_error → positive weight update
-    if pred_byte != target_byte:
-        cf_error[pred_byte] = -probs[pred_byte]
-    
-    # ==================================================================
-    # FIX 3: Asymmetric STDP -- temporal error signal enhancement
-    # ==================================================================
-    # Climbing fibers carry a temporally extended error shaped by the
-    # previous timestep's prediction error. This is equivalent to error
-    # momentum: the PK weights respond to the trajectory of errors, not
-    # just point errors, breaking the symmetry that causes class collapse.
-    prev_probs = cerebellum.get('_prev_probs', None)
-    if prev_probs is not None:
-        stdp_asymmetry = 0.3  # Temporal error coupling coefficient
-        temporal_gradient = probs - prev_probs  # Direction of probability change
-        cf_error = cf_error + stdp_asymmetry * temporal_gradient
-    cerebellum['_prev_probs'] = probs.detach().clone()
-    
-    # ==================================================================
-    # FIX 4: Competitive queuing -- anti-monopoly suppression
-    # ==================================================================
-    # When any single class dominates predictions (>40% probability),
-    # actively push it down. This prevents winner-take-all collapse
-    # where the most frequent class grabs all PK weight mass.
-    max_prob, max_idx = probs.max(dim=0)
-    anti_monopoly_threshold = 0.4
-    if max_prob.item() > anti_monopoly_threshold:
-        # Negative CF error for dominant class -> PK weight increase -> more inhibition -> logit drops
-        monopoly_penalty = -(max_prob.item() - anti_monopoly_threshold)
-        cf_error[max_idx.item()] += monopoly_penalty
-    
-    # ==================================================================
-    # FIX 5: Homeostatic entropy regularization
-    # ==================================================================
-    # When the output distribution collapses (low entropy), add an
-    # entropy-increasing gradient. This directly fights class collapse
-    # by penalizing peaked distributions.
-    # Entropy of current distribution
-    entropy = -(probs * torch.log(probs + 1e-8)).sum().item()
-    # Maximum entropy for 256 classes = log(256) = 5.55
-    # Target: at least half-max entropy (2.77) to maintain diversity
-    max_entropy = math.log(256.0)
-    min_entropy_target = max_entropy * 0.3  # ~1.66 nats minimum
-    if entropy < min_entropy_target:
-        # Add entropy-increasing gradient: push probability toward uniform
-        # Gradient of entropy w.r.t. logits points toward uniform distribution
-        uniform = torch.ones_like(probs) / 256.0
-        entropy_gradient = (probs - uniform)  # Push away from peaked, toward uniform
-        entropy_scale = 0.3 * (min_entropy_target - entropy) / min_entropy_target
-        cf_error = cf_error - entropy_scale * entropy_gradient  # Negative -> increase those logits
-    
-    # Scale by 1/sqrt(n_active_GC) to normalize row-level gradient energy
+    # NEW (T13/T16): IO Gating — suppress CF if prediction is already confident
+    # This prevents gradient noise from overwriting stable priors in stochastic tasks.
+    # T16: Nucleo-olivary feedback makes this threshold dynamic based on DCN consolidation.
+    epsilon_io = cerebellum.get('epsilon_io', 0.05)
+    if 'dcn_weights' in cerebellum:
+        # As DCN stabilizes, it provides inhibition to IO, raising the gate threshold
+        dcn_norm = cerebellum['dcn_weights'].norm().item()
+        epsilon_io = 0.01 + 0.2 * torch.tanh(torch.tensor(dcn_norm / 50.0)).item()
+        
+    io_gate = 1.0
+    if cerebellum.get('io_gate_active', True) and probs[target_byte] > 1.0 - epsilon_io:
+        io_gate = 0.0
+
     gc_acts_for_learn = cerebellum.get('_last_gc_for_purkinje', granule_acts)
-    n_active_gc = (gc_acts_for_learn > 0).sum().item()
-    cf_scale = 1.0 / max(n_active_gc ** 0.5, 1.0)
-    cf_error = cf_error * cf_scale
-    
-    # Intervention 5: Linear Probe Distillation (blend sparse CF with probe signal)
+
+    # Probe distillation is OFF — the dense CF is the teacher signal now.
+    # Keeping the code path for future re-enablement.
     if probe_model is not None:
         with torch.no_grad():
             l56_indices = cerebellum['l56_indices']
@@ -932,7 +1073,6 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, 
             probe_logits = probe_model(l56_acts).squeeze(0)
             probe_probs = torch.softmax(probe_logits, dim=0)
             cf_error_probe = probe_probs - probs
-            # Blend: equal weight to target and probe (0.5) for aggressive distillation
             gamma = 0.5
             cf_error = gamma * cf_error + (1.0 - gamma) * cf_error_probe
 
@@ -964,10 +1104,69 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, 
     # (1 - ((ratio-1)/2)^2) clamped to [0, 1]: full LR at ratio 1, zero at ratio 3
     row_soft_scale = (1.0 - ((norm_ratio - 1.0).clamp(min=0.0) / 2.0).pow(2)).clamp(min=0.0)
     
-    # Per-Purkinje sparse delta rule: Δw = -lr * cf_error ⊗ gc_acts * row_soft_bound
-    ltd_update = -delta_lr * cf_error.unsqueeze(1) * gc_acts.unsqueeze(0)
+    # NEW (T15): DCN consolidation (slow excitatory repository)
+    if 'dcn_weights' in cerebellum:
+        dcn_lr = cerebellum.get('dcn_delta_lr', 0.001)
+        # DCN uses the EARLIEST trace (CET state 0) for rapid adaptation tracking
+        # while Purkinje uses the DELAYED trace for temporal binding.
+        dcn_update = dcn_lr * cf_error.unsqueeze(1) * cerebellum['pk_eligibility'][0]
+        cerebellum['dcn_weights'] += dcn_update
+    
+    # Per-Purkinje sparse delta rule with eligibility trace (Fix a):
+    #   Δw = -lr * cf_error ⊗ pk_eligibility * row_soft_bound
+    #
+    # The eligibility trace replaces the instantaneous gc_acts in the outer
+    # product. This is the key mechanism for temporal credit assignment: the
+    # CF error arriving at step t can still credit GC population states that
+    # were active at step t-1, t-2, ... weighted by the per-PK decay factor.
+    # Heterogeneous tau across PK cells lets the population discover which
+    # lag is predictive without hard-coding it (Suvrathan et al. 2016).
+    #
+    # Note: trace entries are bounded by max(gc_acts) (leaky integration).
+    # Step-size control is via delta_lr alone now (cf_scale dilution removed).
+    # If row norms grow past ~3x target, drop delta_lr further.
+    
+    # NEW (T14): Use the most delayed trace state [2] for temporal binding
+    eligibility = cerebellum['pk_eligibility'][2]  # (256, n_granule)
+    
+    # NEW (T23): Zebrin LTD sensitivity modulation
+    local_delta_lr = delta_lr
+    if 'zebrin_z_plus' in cerebellum:
+        # Z+ is more sensitive to LTD (e.g. 1.5x), Z- is less sensitive (0.5x)
+        z_mod = torch.where(cerebellum['zebrin_z_plus'], 1.5, 0.5)
+        local_delta_lr = local_delta_lr * z_mod.unsqueeze(1)
+        
+    ltd_update = -local_delta_lr * cf_error.unsqueeze(1) * eligibility * io_gate
     ltd_update = ltd_update * row_soft_scale.unsqueeze(1)  # Per-row soft bound
     cerebellum['purkinje_weights'] += ltd_update
+
+    # NEW (T5): MF-GC Hebbian STDP
+    # We maintain traces of pre (mf) and post (gc) to compute classical STDP
+    if 'mf_trace' in cerebellum and '_last_pontine_acts' in cerebellum:
+        tau_stdp = 20.0
+        dt_ms = 20.0
+        pontine_acts = cerebellum['_last_pontine_acts']
+        decay = math.exp(-dt_ms / tau_stdp)
+        cerebellum['mf_trace'] = cerebellum['mf_trace'] * decay + pontine_acts
+        cerebellum['gc_trace'] = cerebellum['gc_trace'] * decay + gc_acts
+        
+        # LTP: Post fires when Pre trace is high
+        ltp_mf = 1e-4 * torch.ger(gc_acts, cerebellum['mf_trace'])
+        # LTD: Pre fires when Post trace is high
+        ltd_mf = 1e-4 * torch.ger(cerebellum['gc_trace'], pontine_acts)
+        
+        # Apply bounds to prevent explosion (0 to 1)
+        cerebellum['mossy_weights'] = (cerebellum['mossy_weights'] + ltp_mf - ltd_mf).clamp(0.0, 1.0)
+
+    # Diagnostic capture: Are LTD updates actually large enough to move
+    # weights? Compare ||ltd_update_row|| to ||eligibility_row|| and to
+    # ||w_row||. If update/w << 1e-3, we're in noise-floor regime.
+    cerebellum['_diag_elig_norm'] = eligibility.norm(dim=1).mean().item()
+    cerebellum['_diag_ltd_norm'] = ltd_update.norm(dim=1).mean().item()
+    cerebellum['_diag_ltd_target'] = ltd_update[target_byte].norm().item()
+    cerebellum['_diag_io_gate'] = io_gate
+    if 'dcn_weights' in cerebellum:
+        cerebellum['_diag_dcn_norm'] = cerebellum['dcn_weights'].norm().item()
 
     # NO continuous multiplicative decay during learning.
     # Tononi & Cirelli's SHY operates during sleep, not waking.
@@ -977,7 +1176,11 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, 
     #   - Inactive PF → stable (no decay)
     # Weight homeostasis is maintained entirely by the bidirectional row normalization.
 
-    # Bidirectional row normalization: gentle pull toward target norm
+    # Bidirectional row normalization: RE-ENABLED now that the dense CE
+    # gradient provides 256x more update events per step than the sparse CF
+    # did. With sparse CF, normalization was pulling updates back faster than
+    # 2 rows/step could accumulate; with dense CE, every row gets pushed
+    # every step, overwhelming the gentle restoring force.
     _apply_pk_row_normalization(cerebellum)
 
     # Anti-Hebbian laterals (corrected sign: co-fire → increase inhibition)
@@ -993,9 +1196,11 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, 
         cerebellum['lateral_weights'].clamp_(min=0.0, max=1.0)  # Raised cap from 0.5 -> 1.0
 
     cerebellum['last_climbing_fiber_error'] = cf_error
-    # Track EMA of the non-zero CF signals only (sparse signal → larger per-cell values)
-    active_cf = cf_error[cf_error.abs() > 1e-6]
-    cf_mag = active_cf.abs().mean().item() if active_cf.numel() > 0 else 0.0
+    # Fix (c) diagnostic: report PEAK cf_error magnitude, not mean.
+    # Mean is misleading when probe distillation spreads small values over
+    # all 256 rows -- it buries the real teaching signal on the target row.
+    # Peak is what actually drives LTD on the row that matters.
+    cf_mag = cf_error.abs().max().item()
     cerebellum['error_ema'] = (
         0.99 * cerebellum.get('error_ema', 0.0)
         + 0.01 * cf_mag
@@ -1621,9 +1826,11 @@ def main():
         # Reset weights for the tuned run to ensure no stale associations
         engine.reset_plastic_weights()
 
-        # Fix 1+2: Reset cerebellar temporal dynamics at phase boundaries
+        # Fix 1+2+(a)+(b): Reset cerebellar temporal dynamics at phase boundaries
         cerebellum['position_counter'] = 0
+        cerebellum['phase_position'] = 0           # Fix (b): resetting phase
         cerebellum['reservoir_state'].zero_()
+        cerebellum['pk_eligibility'].zero_()       # Fix (a): clear synaptic tags
         # Fix 3: Reset STDP temporal error state
         cerebellum.pop('_prev_probs', None)
 
@@ -1681,6 +1888,17 @@ def main():
             # These predict the first char of a RANDOM next sentence — not learnable
             prev_byte = int(data[i - 1]) if i > 0 else 0
             is_sentence_boundary = (current_byte == 32 and prev_byte in (ord('.'), ord('?'), ord('!')))
+
+            # Fix (b): Reset phase_position at sentence boundaries so the
+            # first character of every new sentence gets phase=0. This is the
+            # core prescription from Hasselmo 2007 / Zugaro 2005 / Zheng 2024:
+            # phase codes must reset at episodic boundaries or interference
+            # from the previous trajectory corrupts position assignment.
+            # The forward pass on the boundary space has already run above,
+            # so resetting here means the NEXT iteration (first letter of the
+            # new sentence) will sinusoidally encode phase=0.
+            if is_sentence_boundary:
+                cerebellum['phase_position'] = 0
             
             # Track all predictions for raw window accuracy
             accuracies_all.append(1.0 if is_correct else 0.0)
@@ -1703,10 +1921,14 @@ def main():
                 if is_correct: cc_correct += 1
 
             # === CEREBELLAR LEARNING (replaces terminal Adam optimizer) ===
-            # Intervention 5: Pass cached probe model for distillation
+            # EXPERIMENT: probe distillation DISABLED for this run.
+            # We need a clean baseline of what the cerebellum learns from
+            # its own CF teaching signal alone, with no leakage from the
+            # 100% linear-probe shortcut. Re-enable by passing
+            # cached_probe_model in place of None below.
             cf_error = cerebellar_learn(cerebellum, logits, granule_acts, next_byte, gate_value,
                                         engine=engine, settle_diff=engine.last_settle_diff,
-                                        probe_model=cached_probe_model)
+                                        probe_model=None)
 
             # BG gate learning: dopamine-gated Hebbian update of Go weights.
             # cf_error (climbing fiber magnitude) serves as dopamine proxy —
@@ -1875,7 +2097,7 @@ def main():
 
                 print(
                     f"Step {i+1}/{seq_len} | Acc: {avg_acc:.2%} | "
-                    f"P(target): {avg_target_prob:.3f} | "
+                    f"P(target): {avg_target_prob:.3f} | P(argmax): {pred_prob:.3f} | "
                     f"PK_w: {pk_w_norm:.2f} (row mean: {pk_row_mean:.2f} max: {pk_row_max:.2f}) | "
                     f"GC_spars: {gc_sparsity:.2%}"
                 )
@@ -1924,6 +2146,23 @@ def main():
                     f"MLI: {mli_mean:.3f} | "
                     f"Ca_th: {ca_thresh_mean:.4f} | "
                     f"PK_row_ratio: {pk_row_ratio:.3f}"
+                )
+
+                # LTD update magnitude diagnostic (added to investigate
+                # frozen-weights problem). |elig|=mean row norm of
+                # eligibility matrix; |ltd|=mean row norm of the LTD weight
+                # update applied this step; |ltd_tgt|=norm of update on the
+                # target row; ltd/w=ratio of update size to current row norm
+                # (need >~1e-3 to escape noise floor in reasonable steps).
+                _elig = cerebellum.get('_diag_elig_norm', 0.0)
+                _ltd = cerebellum.get('_diag_ltd_norm', 0.0)
+                _ltd_tgt = cerebellum.get('_diag_ltd_target', 0.0)
+                _w_row = max(pk_row_mean, 1e-6)
+                print(
+                    f"  |elig|: {_elig:.4f} | "
+                    f"|ltd|: {_ltd:.6f} | "
+                    f"|ltd_tgt|: {_ltd_tgt:.6f} | "
+                    f"ltd/w: {_ltd / _w_row:.6f}"
                 )
                 
                 # GC pattern discriminability: overlap between current and previous GC pattern
