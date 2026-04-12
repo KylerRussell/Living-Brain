@@ -11,9 +11,9 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B1 Pattern Separation: PASS
-    Avg MF Correlation       : 0.3397
-    Avg GC Correlation       : 0.2023
-    Decorr Ratio             : 0.40
+    Avg MF Correlation       : 0.1759
+    Avg GC Correlation       : 0.0343
+    Decorr Ratio             : 0.80
     GC Sparsity              : 15.00%
     Criterion                : Decorr >= 0.30 & Sparsity 5-30%
 
@@ -25,11 +25,18 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Global pontine pool: 512 neurons (Level 3)
   Fix 1: Positional encoding: 32 dims (pontine input: 288)
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
-B2 PF-PC LTD: PASS
-    Target LTD Reduction     : 6114.91%
-    Control Row Deletion     : -841.20%
-    Criterion                : LTD >= 15%, Control < 5%
+B2 PF-PC LTD: FAIL
+    Target LTD Reduction     : -641.35%
+    Control (CF-Silent)      : 0.00%
+    Criterion                : LTD >= 15%, CF-Silent < 5%
 
 Benchmark 3: PF-PC LTP and bidirectional plasticity
   Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
@@ -41,10 +48,10 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B3 PF-PC LTP: FAIL
-    LTD Drop                 : 0.0014
+    LTD Drop                 : -0.0038
     LTP Gain                 : 0.0000
-    Rel Increase             : 14.94%
-    Recovery Ratio           : 0.60%
+    Rel Increase             : 0.58%
+    Recovery Ratio           : 0.96%
     Criterion                : Increase >= 10% & Recovery >= 50%
 
 Benchmark 4: BAC Burst Amplification (Coincidence Detection)
@@ -92,10 +99,18 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Global pontine pool: 512 neurons (Level 3)
   Fix 1: Positional encoding: 32 dims (pontine input: 288)
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
-B7 Temporal Processing: PASS
-    Early/Late Corr          : -0.5803
-    Criterion                : Corr < 0.80 (must evolve over time)
+B7 Temporal Processing: FAIL
+    Accuracy (Normal)        : 25.00%
+    Accuracy (Ablated)       : 25.00%
+    Criterion                : Normal >= 85%, Ablation drops >= 25%
 
 Benchmark 8: Network oscillations
   Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
@@ -107,8 +122,8 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B8 Network Oscillations: FAIL
-    GC Pop Variance          : 0.000005
-    Criterion                : Significant oscillation (var > 1e-4)
+    Theta Power/Mean         : 1.42
+    Criterion                : Theta-band (4-12Hz) power >= 3x broadband mean
 
 Benchmark 9: Short-Term Synaptic Plasticity
   Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
@@ -120,8 +135,8 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B9 Short-Term Plasticity: FAIL
-    MF PPR (20ms)            : 1.36
-    PF PPR (20ms)            : 1.08
+    MF PPR (20ms) EPSC       : 1.22
+    PF PPR (20ms) EPSC       : 1.01
     Criterion                : MF PPR > 1.2 & PF PPR > 1.1
 
 Benchmark 10: Nucleo-Olivary Inhibition
@@ -132,15 +147,6 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Global pontine pool: 512 neurons (Level 3)
   Fix 1: Positional encoding: 32 dims (pontine input: 288)
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-
-B10 Nucleo-Olivary Inhibition: FAIL
-    Initial CF Rate          : 0.0231
-    Final CF Rate            : 0.0000
-    CF Decrease              : 100.00%
-    CF/DCN Corr              : -0.08
-    Criterion                : Decrease >= 40% & Corr < -0.50
-
-Benchmark 11: Classical Eyeblink Conditioning (Temporal Delay)
   Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
 Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
   delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
@@ -149,12 +155,26 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 1: Positional encoding: 32 dims (pontine input: 288)
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
-B11 CEBC Conditioning: PASS
-    Initial Response         : 28.0696
-    Final Response           : 29.0705
-    Total Improvement        : 1.0009
-    ISI (ms)                 : 300
-    Criterion                : Improvement > 1.0
+B10 Nucleo-Olivary Inhibition: FAIL
+    CF Decrease (NOI ON)     : 99.01%
+    CF Decrease (NOI OFF)    : 99.11%
+    Criterion                : NOI ON >= 40% & NOI OFF <= 10%
+
+Benchmark 11: Classical Eyeblink Conditioning
+  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+
+B11 CEBC Conditioning: FAIL
+    Acquisition (Start->End) : 20.49 -> 25.68
+    Extinction End           : 25.68
+    Reacquisition End        : 25.69
+    ISI (steps / ms)         : 15 / 300ms
+    Criterion                : Acq/Reacq > +0.5, Ext drops back to baseline
 
 Benchmark 12: Trace Eyeblink Conditioning
   Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
@@ -166,8 +186,8 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B12 Trace CEBC: PASS
-    Init CR amp              : 8.55
-    Final CR amp             : 10.76
+    Init CR amp              : 10.85
+    Final CR amp             : 14.30
     Criterion                : Improvement > 0.50 across gap
 
 Benchmark 13: VOR Gain and Phase Adaptation
@@ -180,9 +200,9 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B13 VOR Adaptation: FAIL
-    Initial RMS Error        : 13.4793
-    Final RMS Error          : 26.4899
-    Error Reduction          : -96.52%
+    Initial RMS Error        : 14.7688
+    Final RMS Error          : 16.6745
+    Error Reduction          : -12.90%
     Criterion                : Reduction > 40%
 
 Benchmark 14: Saccade Adaptation
@@ -195,7 +215,7 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B14 Saccade Adaptation: PASS
-    Amplitude Increase       : 15.29%
+    Amplitude Increase       : 36.89%
     Criterion                : Amplitude change >= 15%
 
 Benchmark 15: Reaching Adaptation (Force Field)
@@ -208,9 +228,9 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B15 Reaching Adaptation: PASS
-    Initial Error            : 2.07
-    Final Error              : 0.13
-    Error Reduction          : 93.90%
+    Initial Error            : 2.02
+    Final Error              : 0.00
+    Error Reduction          : 100.00%
     Criterion                : Reduction >= 70%
 
 Benchmark 16: Split-belt locomotion adaptation
@@ -223,9 +243,9 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B16 Split Belt: PASS
-    Initial Split Asym       : -38.35
-    Final Split Asym         : -8.97
-    Reduction                : 76.61%
+    Initial Split Asym       : -9.31
+    Final Split Asym         : 1.57
+    Reduction                : 116.88%
     Criterion                : Reduction > 50% in ~200 strides
 
 Benchmark 17: Posture and balance adaptation
@@ -237,10 +257,10 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 1: Positional encoding: 32 dims (pontine input: 288)
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
-B17 Posture & Balance: FAIL
-    Initial Sway             : -1.67
-    Final Sway               : 6.66
-    Attenuation              : -299.72%
+B17 Posture & Balance: PASS
+    Initial Sway             : 28.87
+    Final Sway               : 2.53
+    Attenuation              : 91.22%
     Criterion                : Attenuation >= 30%, no severe hypermetria
 
 Benchmark 18: Forward Internal Model (Kinematic Prediction)
@@ -253,7 +273,7 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B18 Forward Model: FAIL
-    Avg MSE (t+5)            : 18.7680
+    Avg MSE (t+5)            : 18.1872
     Lead (steps)             : 5
     Status                   : Untrained Baseline Check
     Criterion                : MSE < 5.0 (Stability)
@@ -268,8 +288,8 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B19 Inverse Model: FAIL
-    Initial Tracking Err     : 4.0111
-    Final Tracking Err       : 0.8892
+    Initial Tracking Err     : 8.4286
+    Final Tracking Err       : 0.8751
     Criterion                : Tracking error <= 0.10 for 1Hz sinusoid
 
 Benchmark 20: Cancellation of self-generated sensory reafference
@@ -281,10 +301,10 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 1: Positional encoding: 32 dims (pontine input: 288)
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
-B20 Reafference: FAIL
-    Init Reafference         : 4.9700
-    Final Reafference        : 4.0690
-    Reduction                : 18.13%
+B20 Reafference: PASS
+    Init Reafference         : 31.5774
+    Final Reafference        : 5.5006
+    Reduction                : 82.58%
     Criterion                : Cancel >= 70% predictable reafference
 
 Benchmark 21: Reward-based learning via climbing fibers
@@ -297,9 +317,9 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B21 Reward Learning (CF): FAIL
-    Initial Reward           : 0.0573
-    Final Reward             : 0.0940
-    Target Check             : -1.38 vs 3.0
+    Initial Reward           : 0.0494
+    Final Reward             : 0.0232
+    Target Check             : 4.89 vs 3.0
     Criterion                : Consistently find and maximize reward > 0.80
 
 Benchmark 22: Sequence learning and violation detection
@@ -312,9 +332,9 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B22 Sequence Learning: FAIL
-    Prob Expected            : 0.1774
-    Prob Violation           : 0.0001
-    Violation Elevation      : 0.1772
+    Prob Expected            : 0.0794
+    Prob Violation           : 0.0000
+    Violation Elevation      : 0.0794
     Criterion                : Violation elevation > 0.3, certainty > 50%
 
 Benchmark 23: Zebrin banding and microzone specialization
@@ -328,8 +348,8 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
 
 B23 Zebrin Zones: FAIL
     Has Zebrin Spec          : True
-    Z+ Baseline Diff         : 5.91 (Z+ < Z-)
-    Z+ LTD Ratio vs Z-       : 3181.61x
+    Z+ Baseline Diff         : 5.80 (Z+ < Z-)
+    Z+ LTD Ratio vs Z-       : 1.00x
     Criterion                : Z+ lower firing, higher LTD sensitivity
 
 Benchmark 24: Temporal interval timing (Weber's law)
@@ -342,8 +362,8 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B24 Interval Timing: FAIL
-    Weber 400ms              : 0.641 (mu=290, sig=186)
-    Weber 1000ms             : 0.494 (mu=721, sig=356)
+    Weber 400ms              : 0.865 (mu=252, sig=218)
+    Weber 1000ms             : 0.187 (mu=1005, sig=188)
     Criterion                : Weber fraction <= 0.20 and invariant to interval
 
 Benchmark 25: Cognitive and working memory support
@@ -357,8 +377,8 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
 
 B25 Working Memory: FAIL
     GC Act Load 1            : 0.1479
-    GC Act Load 3            : 0.1426
-    GC Act Load 5            : 0.1403
+    GC Act Load 3            : 0.1400
+    GC Act Load 5            : 0.1366
     Criterion                : Monotonic increase in cerebellar activity with memory load
 
 
@@ -366,30 +386,30 @@ B25 Working Memory: FAIL
 DIAGNOSTIC SUITE SUMMARY
 ============================================================
 B1 Pattern Separation                         | PASS
-B2 PF-PC LTD                                  | PASS
+B2 PF-PC LTD                                  | FAIL
 B3 PF-PC LTP                                  | FAIL
 B4 BAC Bursting                               | PASS
 B5 Multi-synapse STDP                         | FAIL
 B6 DCN Rebound Firing                         | FAIL
-B7 Temporal Processing                        | PASS
+B7 Temporal Processing                        | FAIL
 B8 Network Oscillations                       | FAIL
 B9 Short-Term Plasticity                      | FAIL
 B10 Nucleo-Olivary Inhibition                 | FAIL
-B11 CEBC Conditioning                         | PASS
+B11 CEBC Conditioning                         | FAIL
 B12 Trace CEBC                                | PASS
 B13 VOR Adaptation                            | FAIL
 B14 Saccade Adaptation                        | PASS
 B15 Reaching Adaptation                       | PASS
 B16 Split Belt                                | PASS
-B17 Posture & Balance                         | FAIL
+B17 Posture & Balance                         | PASS
 B18 Forward Model                             | FAIL
 B19 Inverse Model                             | FAIL
-B20 Reafference                               | FAIL
+B20 Reafference                               | PASS
 B21 Reward Learning (CF)                      | FAIL
 B22 Sequence Learning                         | FAIL
 B23 Zebrin Zones                              | FAIL
 B24 Interval Timing                           | FAIL
 B25 Working Memory                            | FAIL
 ------------------------------------------------------------
-Total Passed: 9 / 25 (36.0%)
+Total Passed: 8 / 25 (32.0%)
 ============================================================

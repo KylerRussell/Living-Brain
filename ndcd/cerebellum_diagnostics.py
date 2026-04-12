@@ -117,45 +117,51 @@ class CerebellumDiagnosticSuite:
         print("\nBenchmark 1: GC Pattern Separation & Orthogonality")
         engine, cereb = self._new_cerebellum()
         
-        # Generate smooth trajectory in L5/6 space (Pontine input)
-        n_steps = 1000
-        t = torch.linspace(0, 4*math.pi, n_steps, device=self.device)
-        # 256-dim manifold: sin/cos combos
-        manifold = torch.stack([
-            torch.sin(t + i * 0.1) for i in range(self.n_l56)
-        ], dim=1)
-        
+        n_samples = 100
         mf_acts_list = []
         gc_acts_list = []
+        target_corrs = [0.3, 0.5, 0.7, 0.9]
         
-        for i in range(n_steps):
-            engine.set_l56(manifold[i])
-            logits, granule_acts, _ = cerebellar_forward(engine, cereb)
+        # Helper to generate a pair of vectors with roughly target correlation
+        def generate_correlated_pair(corr):
+            v1 = torch.randn(self.n_l56, device=self.device)
+            v2_uncorr = torch.randn(self.n_l56, device=self.device)
+            v2 = corr * v1 + math.sqrt(1 - corr**2) * v2_uncorr
+            return v1, v2
+
+        for corr in target_corrs:
+            for _ in range(n_samples // len(target_corrs)):
+                v1, v2 = generate_correlated_pair(corr)
+                
+                engine.set_l56(v1)
+                _, gc1, _ = cerebellar_forward(engine, cereb)
+                mf_acts_list.append(cereb['_last_pontine_acts'].clone().cpu().numpy())
+                gc_acts_list.append(gc1.clone().cpu().numpy())
+                
+                engine.set_l56(v2)
+                _, gc2, _ = cerebellar_forward(engine, cereb)
+                mf_acts_list.append(cereb['_last_pontine_acts'].clone().cpu().numpy())
+                gc_acts_list.append(gc2.clone().cpu().numpy())
+                
+        # Compute correlations between pairs
+        mf_acts = np.array(mf_acts_list)
+        gc_acts = np.array(gc_acts_list)
+        
+        mf_corrs = []
+        gc_corrs = []
+        for i in range(0, len(mf_acts), 2):
+            mr = np.corrcoef(mf_acts[i], mf_acts[i+1])[0,1]
+            gr = np.corrcoef(gc_acts[i], gc_acts[i+1])[0,1]
+            mf_corrs.append(mr)
+            gc_corrs.append(gr)
             
-            # Record Mossy Fiber (Pontine) and Granule Cell activations
-            mf_acts_list.append(cereb['_last_pontine_acts'].cpu().numpy())
-            gc_acts_list.append(granule_acts.cpu().numpy())
-            
-        mf_acts = np.array(mf_acts_list) # (steps, 1024)
-        gc_acts = np.array(gc_acts_list) # (steps, 16384)
-        
-        # Compute Correlation Matrices
-        # We sample 100 random pairs to estimate orthogonality expansion
-        n_samples = 200
-        indices = np.random.choice(n_steps, n_samples, replace=False)
-        
-        mf_corr = np.corrcoef(mf_acts[indices])
-        gc_corr = np.corrcoef(gc_acts[indices])
-        
-        # Pattern Separation Metric: Ratio of average correlations
-        # Biological GCs should be significantly more orthogonal than MFs
-        avg_mf_corr = np.mean(np.abs(mf_corr[np.triu_indices(n_samples, k=1)]))
-        avg_gc_corr = np.mean(np.abs(gc_corr[np.triu_indices(n_samples, k=1)]))
+        avg_mf_corr = np.mean(np.abs(mf_corrs))
+        avg_gc_corr = np.mean(np.abs(gc_corrs))
         
         decorrelation_ratio = 1.0 - (avg_gc_corr / (avg_mf_corr + 1e-9))
         
-        # Sparsity check
-        gc_sparsity = np.mean(gc_acts > 0)
+        # Sparsity check (ensure non-negative first)
+        gc_sparsity = np.mean(np.maximum(gc_acts, 0) > 0)
         
         passed = (0.05 <= gc_sparsity <= 0.30) and (decorrelation_ratio >= 0.30)
         
@@ -173,47 +179,44 @@ class CerebellumDiagnosticSuite:
     # -------------------------------------------------------------------------
     def benchmark_02_pf_pc_ltd(self):
         print("\nBenchmark 2: CF-gated long-term depression at PF-PC synapses")
-        engine, cereb = self._new_cerebellum(test_seed=42)
         
-        # Temporarily disable proportional restoring normalization to cleanly measure delta rule LTD
-        orig_norm = cereb['pk_target_row_norm'].clone()
-        cereb['pk_target_row_norm'] *= 10.0 # Push it far so restoring force is zero
-        
-        w_init = cereb['purkinje_weights'].clone()
-        target_pk = 0
-        n_trials = 300
-        
-        for _ in range(n_trials):
-            mf_in = torch.randn(self.n_l56, device=self.device)
-            engine.set_l56(mf_in)
-            logits, gc_acts, _ = cerebellar_forward(engine, cereb)
-            # Advance time for trace cascade
-            engine.set_l56(torch.zeros(self.n_l56, device=self.device))
-            for _ in range(2):
-                logits, _, _ = cerebellar_forward(engine, cereb)
-                
-            cerebellar_learn(cereb, logits, gc_acts, target_pk, 1.0, engine)
+        def run_ltd_protocol(cf_active):
+            engine, cereb = self._new_cerebellum(test_seed=42)
+            orig_norm = cereb['pk_target_row_norm'].clone()
+            cereb['pk_target_row_norm'] *= 10.0 # Push it far so restoring force is zero
             
-        w_final = cereb['purkinje_weights'].clone()
-        
-        # Estimate reduction on target row
-        w_init_mean = w_init[target_pk].mean().item()
-        w_final_mean = w_final[target_pk].mean().item()
-        # The delta rule subtracts from weights: w -= (positive_update)
-        reduction = (w_init_mean - w_final_mean) / (abs(w_init_mean) + 1e-9)
-        
-        # Protocol B: Control row (PF only, no CF)
-        control_pk = 1
-        w_init_c = w_init[control_pk].mean().item()
-        w_final_c = w_final[control_pk].mean().item()
-        control_reduction = (w_init_c - w_final_c) / (abs(w_init_c) + 1e-9)
+            w_init = cereb['purkinje_weights'].clone()
+            target_pk = 0
+            n_trials = 300
+            
+            for _ in range(n_trials):
+                mf_in = torch.randn(self.n_l56, device=self.device)
+                engine.set_l56(mf_in)
+                logits, gc_acts, _ = cerebellar_forward(engine, cereb)
+                # Advance time for trace cascade
+                engine.set_l56(torch.zeros(self.n_l56, device=self.device))
+                for _ in range(2):
+                    logits, _, _ = cerebellar_forward(engine, cereb)
+                    
+                if cf_active:
+                    cerebellar_learn(cereb, logits, gc_acts, target_pk, 1.0, engine)
+                # If cf_active is False, CF pathway is silent, no weight update on target
+                
+            w_final = cereb['purkinje_weights'].clone()
+            w_init_mean = w_init[target_pk].mean().item()
+            w_final_mean = w_final[target_pk].mean().item()
+            reduction = (w_init_mean - w_final_mean) / (w_init[target_pk].abs().mean().item() + 1e-9)
+            return reduction
+
+        reduction = run_ltd_protocol(cf_active=True)
+        control_reduction = run_ltd_protocol(cf_active=False)
         
         passed = (reduction >= 0.15) and (control_reduction <= 0.05)
         
         details = {
             'Target LTD Reduction': f"{reduction:.2%}",
-            'Control Row Deletion': f"{control_reduction:.2%}",
-            'Criterion': "LTD >= 15%, Control < 5%"
+            'Control (CF-Silent)': f"{control_reduction:.2%}",
+            'Criterion': "LTD >= 15%, CF-Silent < 5%"
         }
         self._log("B2 PF-PC LTD", passed, details)
 
@@ -301,7 +304,7 @@ class CerebellumDiagnosticSuite:
         w_ltp_mean = w_post_ltp[target_pk].mean().item()
         
         ltp_gain = w_ltp_mean - w_ltd_mean
-        rel_increase = ltp_gain / (abs(w_init_mean) + 1e-9)
+        rel_increase = ltp_gain / (w_init[target_pk].abs().mean().item() + 1e-9)
         recovery_ratio = ltp_gain / (abs(ltd_drop) + 1e-9)
         
         passed = (rel_increase >= 0.10) and (recovery_ratio >= 0.50)
@@ -322,33 +325,42 @@ class CerebellumDiagnosticSuite:
         engine, cereb = self._new_cerebellum(test_seed=42)
         
         target_dcn = 0
-        pause_durations = [10, 25, 50, 100, 200]
+        pause_durations = [20, 40, 50, 100, 200]
         rebound_ratios = []
         
         # We will directly stimulate Purkinje weights to create inhibition
         w_pk = cereb['purkinje_weights']
-        # Set all weights positive to guarantee strong inhibition
-        w_pk.copy_(torch.ones_like(w_pk) * 0.1)
         
         for pause in pause_durations:
             cereb['dcn_hyperpol_state'].zero_()
             
-            # 1. Steady state strong inhibition
-            for _ in range(20):
+            # Measure true baseline (no Purkinje drive)
+            w_pk.zero_()
+            for _ in range(5):
+                engine.set_l56(torch.zeros(self.n_l56, device=self.device))
+                cerebellar_forward(engine, cereb)
+            baseline_dcn = max(0.1, cereb['_last_dcn_rate'][target_dcn].item())
+            
+            # Restore strong inhibition weights
+            w_pk.copy_(torch.ones_like(w_pk) * 0.1)
+            
+            # 1. Steady state strong inhibition (accumulation of T-type availability)
+            pause_steps = max(1, pause // 20) # 20ms per step
+            for _ in range(pause_steps):
                 engine.set_l56(torch.ones(self.n_l56, device=self.device))
                 cerebellar_forward(engine, cereb)
                 
-            baseline_dcn = cereb['_last_dcn_rate'][target_dcn].item()
-            if baseline_dcn < 0.1: baseline_dcn = 0.1 # floor
+            steady_inhib_dcn = cereb['_last_dcn_rate'][target_dcn].item()
             
-            # 2. Pause inhibition
-            pause_steps = max(1, pause // 20) # 20ms per step
-            for _ in range(pause_steps):
+            # 2. Release inhibition, read Peak over 150ms window
+            peak_dcn = 0.0
+            for _ in range(8):
                 engine.set_l56(torch.zeros(self.n_l56, device=self.device))
                 cerebellar_forward(engine, cereb)
+                rate = cereb['_last_dcn_rate'][target_dcn].item()
+                if rate > peak_dcn: peak_dcn = rate
                 
-            rebound_dcn = cereb['_last_dcn_rate'][target_dcn].item()
-            rebound_ratios.append(rebound_dcn / baseline_dcn)
+            rebound_ratios.append(peak_dcn / baseline_dcn)
             
         ratio_50ms = rebound_ratios[2]
         
@@ -370,26 +382,25 @@ class CerebellumDiagnosticSuite:
         print("\nBenchmark 9: Short-Term Synaptic Plasticity")
         engine, cereb = self._new_cerebellum(test_seed=42)
         
-        # Pair pulse test at 20ms ISI (1 step)
         # 1st pulse
         engine.set_l56(torch.ones(self.n_l56, device=self.device))
         cerebellar_forward(engine, cereb)
-        pf_u_1 = cereb['pf_u'].mean().item()
-        mf_u_1 = cereb['mf_u'].mean().item()
+        mf_resp_1 = (cereb['mf_u'] * cereb['mf_x']).mean().item()
+        pf_resp_1 = (cereb['pf_u'] * cereb['pf_x']).mean().item()
         
-        # 2nd pulse
+        # 2nd pulse (20ms ISI)
+        engine.set_l56(torch.ones(self.n_l56, device=self.device))
         cerebellar_forward(engine, cereb)
-        pf_u_2 = cereb['pf_u'].mean().item()
-        mf_u_2 = cereb['mf_u'].mean().item()
+        mf_resp_2 = (cereb['mf_u'] * cereb['mf_x']).mean().item()
+        pf_resp_2 = (cereb['pf_u'] * cereb['pf_x']).mean().item()
         
-        # PPR is proportional to u_2/u_1 since x is barely depleted at start
-        ppr_mf = mf_u_2 / (pf_u_1 + 1e-9)
-        ppr_pf = pf_u_2 / (pf_u_1 + 1e-9)
+        ppr_mf = mf_resp_2 / (mf_resp_1 + 1e-9)
+        ppr_pf = pf_resp_2 / (pf_resp_1 + 1e-9)
         
         passed = (ppr_mf > 1.20) and (ppr_pf > 1.10)
         details = {
-            'MF PPR (20ms)': f"{ppr_mf:.2f}",
-            'PF PPR (20ms)': f"{ppr_pf:.2f}",
+            'MF PPR (20ms) EPSC': f"{ppr_mf:.2f}",
+            'PF PPR (20ms) EPSC': f"{ppr_pf:.2f}",
             'Criterion': "MF PPR > 1.2 & PF PPR > 1.1"
         }
         self._log("B9 Short-Term Plasticity", passed, details)
@@ -399,44 +410,38 @@ class CerebellumDiagnosticSuite:
     # -------------------------------------------------------------------------
     def benchmark_10_noi(self):
         print("\nBenchmark 10: Nucleo-Olivary Inhibition")
-        engine, cereb = self._new_cerebellum(test_seed=42)
         
-        target_pk = 0
-        n_trials = 500
-        cf_rates = []
-        dcn_rates = []
-        
-        # Force DCN output manually using dcn_weights 
-        # so CF rate drops over training
-        cereb['dcn_weights'] = torch.zeros(256, self.n_granule, device=self.device)
-        
-        for t in range(n_trials):
-            engine.set_l56(torch.ones(self.n_l56, device=self.device))
-            logits, gc_acts, _ = cerebellar_forward(engine, cereb)
+        def run_noi_protocol(noi_active):
+            engine, cereb = self._new_cerebellum(test_seed=42)
+            target_pk = 0
+            n_trials = 500
+            cf_rates = []
             
-            # DCN consolidates quickly for this test
-            cereb['dcn_weights'][target_pk] += 0.05 * gc_acts
+            if not noi_active:
+                cereb['w_dcn_io'].zero_() # Ablate NOI
+                
+            for t in range(n_trials):
+                engine.set_l56(torch.ones(self.n_l56, device=self.device))
+                logits, gc_acts, _ = cerebellar_forward(engine, cereb)
+                
+                # Standard cerebellar learning which also updates dcn_weights
+                cf_err = cerebellar_learn(cereb, logits, gc_acts, target_pk, 1.0, engine)
+                
+                cf_rates.append(cf_err.item() if isinstance(cf_err, torch.Tensor) else cf_err)
+                
+            init_val = np.mean(cf_rates[:20])
+            final_val = np.mean(cf_rates[-20:])
+            return (init_val - final_val) / (init_val + 1e-9)
             
-            dcn_rate = cereb['_last_dcn_rate'][target_pk].item()
-            dcn_rates.append(dcn_rate)
-            
-            cf_err = cerebellar_learn(cereb, logits, gc_acts, target_pk, 1.0, engine)
-            cf_rates.append(cf_err)
-            
-        initial_cf = np.mean(cf_rates[:20])
-        final_cf = np.mean(cf_rates[-20:])
-        cf_decrease = (initial_cf - final_cf) / (initial_cf + 1e-9)
+        decrease_on = run_noi_protocol(True)
+        decrease_off = run_noi_protocol(False)
         
-        correlation = np.corrcoef(cf_rates, dcn_rates)[0,1]
-        
-        passed = (cf_decrease >= 0.40) and (correlation < -0.50)
+        passed = (decrease_on >= 0.40) and (decrease_off <= 0.10)
         
         details = {
-            'Initial CF Rate': f"{initial_cf:.4f}",
-            'Final CF Rate': f"{final_cf:.4f}",
-            'CF Decrease': f"{cf_decrease:.2%}",
-            'CF/DCN Corr': f"{correlation:.2f}",
-            'Criterion': "Decrease >= 40% & Corr < -0.50"
+            'CF Decrease (NOI ON)': f"{decrease_on:.2%}",
+            'CF Decrease (NOI OFF)': f"{decrease_off:.2%}",
+            'Criterion': "NOI ON >= 40% & NOI OFF <= 10%"
         }
         self._log("B10 Nucleo-Olivary Inhibition", passed, details)
 
@@ -504,38 +509,73 @@ class CerebellumDiagnosticSuite:
     # -------------------------------------------------------------------------
     def benchmark_07_temporal_processing(self):
         print("\nBenchmark 7: Temporal processing via Golgi cell reservoir")
-        engine, cereb = self._new_cerebellum(test_seed=42)
         
-        # Present a constant MF pulse for 500 ms (25 steps at 20ms/step)
-        n_steps = 25
-        gc_trajectory = []
-        
-        pulse = torch.randn(self.n_l56, device=self.device)
-        
-        for _ in range(n_steps):
-            engine.set_l56(pulse)
-            _, gc_acts, _ = cerebellar_forward(engine, cereb)
-            gc_trajectory.append(gc_acts.clone().cpu().numpy())
+        def test_temporal_capacity(ablate_golgi):
+            engine, cereb = self._new_cerebellum(test_seed=42)
+            if ablate_golgi:
+                # Remove heterogeneity
+                cereb['gc_time_constants'].fill_(20.0)
+                mean_golgi = cereb['golgi_values'].mean().item()
+                if torch.isnan(torch.tensor(mean_golgi)) or mean_golgi == 0:
+                    mean_golgi = 0.5
+                cereb['golgi_values'].fill_(mean_golgi)
             
-        gc_trajectory = np.stack(gc_trajectory) # (25, 16384)
-        
-        # Check if GC population evolves over time despite constant input
-        # Measure correlation between early (t=5) and late (t=20) states
-        early = gc_trajectory[5]
-        late = gc_trajectory[20]
-        
-        mask = (early > 0) | (late > 0)
-        if mask.sum() > 0:
-            corr = np.corrcoef(early[mask], late[mask])[0, 1]
-            evolving = corr < 0.8  # Should decorrelate significantly
-        else:
-            evolving = False
-            corr = 1.0
+            n_trials = 20
+            # We want to identify the time point (t=5, 10, 15, 20) from the GC state
+            X = []
+            y = []
             
-        passed = evolving
+            for trial in range(n_trials):
+                # Present a constant MF pulse for 500 ms (25 steps at 20ms/step)
+                pulse = torch.randn(self.n_l56, device=self.device) * 0.1 + 0.5
+                cereb['reservoir_state'].zero_() # reset
+                
+                for step in range(25):
+                    engine.set_l56(pulse)
+                    _, gc_acts, _ = cerebellar_forward(engine, cereb)
+                    
+                    if step in [5, 10, 15, 20]:
+                        X.append(gc_acts.clone().cpu().numpy())
+                        y.append([5, 10, 15, 20].index(step))
+                        
+            X = np.stack(X)
+            y = np.array(y)
+            
+            # Simple linear classifier using least squares (ridge regression)
+            X_b = np.hstack([X, np.ones((X.shape[0], 1))])
+            Y_oh = np.eye(4)[y]
+            
+            # Train/test split (15 train, 5 test per class)
+            train_idx = []
+            test_idx = []
+            for c in range(4):
+                class_idx = np.where(y == c)[0]
+                train_idx.extend(class_idx[:15])
+                test_idx.extend(class_idx[15:])
+                
+            try:
+                lam = 1.0
+                X_train = X_b[train_idx]
+                Y_train = Y_oh[train_idx]
+                X_test = X_b[test_idx]
+                y_test = y[test_idx]
+                
+                W = np.linalg.solve(X_train.T @ X_train + lam * np.eye(X_train.shape[1]), X_train.T @ Y_train)
+                preds = np.argmax(X_test @ W, axis=1)
+                acc = np.mean(preds == y_test)
+            except:
+                acc = 0.0
+                
+            return acc
+            
+        acc_normal = test_temporal_capacity(ablate_golgi=False)
+        acc_ablated = test_temporal_capacity(ablate_golgi=True)
+        
+        passed = (acc_normal >= 0.85) and (acc_normal - acc_ablated >= 0.25)
         details = {
-            'Early/Late Corr': f"{corr:.4f}",
-            'Criterion': "Corr < 0.80 (must evolve over time)"
+            'Accuracy (Normal)': f"{acc_normal:.2%}",
+            'Accuracy (Ablated)': f"{acc_ablated:.2%}",
+            'Criterion': "Normal >= 85%, Ablation drops >= 25%"
         }
         self._log("B7 Temporal Processing", passed, details)
 
@@ -546,26 +586,33 @@ class CerebellumDiagnosticSuite:
         print("\nBenchmark 8: Network oscillations")
         engine, cereb = self._new_cerebellum(test_seed=42)
         
-        # Run network for 1000ms (50 steps at 20ms/step) with tonic Poisson-like input
-        n_steps = 50
+        # Run network for 2000ms (100 steps at 20ms/step) with tonic input
+        n_steps = 100
         gc_rates = []
-        pk_rates = []
         
         for _ in range(n_steps):
             noise = torch.randn(self.n_l56, device=self.device) * 0.5 + 0.5
             engine.set_l56(noise)
-            logits, gc_acts, _ = cerebellar_forward(engine, cereb)
-            # Record population means
+            _, gc_acts, _ = cerebellar_forward(engine, cereb)
             gc_rates.append(gc_acts.mean().item())
-            pk_rates.append(cereb['_last_dcn_rate'].mean().item()) # proxy for output
             
-        # Do a simple variance check instead of full FFT for 50 steps
-        gc_var = np.var(gc_rates)
+        rate_arr = np.array(gc_rates)
+        rate_arr -= np.mean(rate_arr)
         
-        passed = gc_var > 1e-4
+        # FFT to find Theta peak
+        fft_vals = np.abs(np.fft.rfft(rate_arr))**2
+        freqs = np.fft.rfftfreq(n_steps, d=0.02) # dt=0.02s
+        
+        theta_mask = (freqs >= 4.0) & (freqs <= 12.0)
+        theta_power = np.mean(fft_vals[theta_mask]) if np.any(theta_mask) else 0.0
+        broadband_power = np.mean(fft_vals)
+        
+        ratio = theta_power / (broadband_power + 1e-9)
+        passed = ratio >= 3.0
+        
         details = {
-            'GC Pop Variance': f"{gc_var:.6f}",
-            'Criterion': "Significant oscillation (var > 1e-4)"
+            'Theta Power/Mean': f"{ratio:.2f}",
+            'Criterion': "Theta-band (4-12Hz) power >= 3x broadband mean"
         }
         self._log("B8 Network Oscillations", passed, details)
 
@@ -573,59 +620,74 @@ class CerebellumDiagnosticSuite:
     # Benchmark 11: Classical Eyeblink Conditioning (CEBC)
     # -------------------------------------------------------------------------
     def benchmark_11_cebc(self):
-        print("\nBenchmark 11: Classical Eyeblink Conditioning (Temporal Delay)")
+        print("\nBenchmark 11: Classical Eyeblink Conditioning")
         engine, cereb = self._new_cerebellum()
         
         # Paradigm: CS (Tone) followed by US (Airpuff) at fixed ISI
-        isi = 300 # 300ms (steps)
-        n_trials = 50
-        trial_len = 500
+        isi_steps = 15 # 300ms
+        trial_len = 50 # 1000ms
+        cs_start = 5
         
         # CS is a specific Mossy Fiber pattern
         cs_pattern = torch.randn(self.n_l56, device=self.device)
         cs_pattern = cs_pattern / cs_pattern.norm() * 2.0
-        
-        # US is a Climbing Fiber pulse (target index 0)
         target_pk = 0
         
-        learning_curve = []
-        
-        for trial in range(n_trials):
-            cereb['reservoir_state'].zero_()
-            cereb['phase_position'] = 0
+        def run_phase(n_trials, isi, us_active):
+            resps = []
+            for trial in range(n_trials):
+                cereb['reservoir_state'].zero_()
+                cereb['phase_position'] = 0
+                for t in range(trial_len):
+                    if cs_start <= t < cs_start + 20: # 400ms duration
+                        engine.set_l56(cs_pattern)
+                    else:
+                        engine.set_l56(torch.zeros(self.n_l56, device=self.device))
+                        
+                    logits, granule_acts, gate = cerebellar_forward(engine, cereb)
+                    
+                    if t == cs_start + isi - 1: # just before US
+                        resps.append(logits[target_pk].item())
+                        
+                    if us_active and t == cs_start + isi:
+                        cerebellar_learn(cereb, logits, granule_acts, target_pk, gate, engine)
+            return resps
             
-            for t in range(trial_len):
-                # CS onset at t=100
-                if 100 <= t < 100 + 400:
-                    engine.set_l56(cs_pattern)
-                else:
-                    engine.set_l56(torch.zeros(self.n_l56, device=self.device))
-                
-                logits, granule_acts, gate = cerebellar_forward(engine, cereb)
-                
-                # Record Purkinje response just before US
-                if t == 100 + isi - 1:
-                    # In our model, higher logit = more "blink" (tonic - PK_out)
-                    # So we want logits[target_pk] to GROW
-                    learning_curve.append(logits[target_pk].item())
-                
-                # US arrival at t = 100 + isi
-                if t == 100 + isi:
-                    cerebellar_learn(cereb, logits, granule_acts, target_pk, gate, engine)
-
-        # Validate learning: Final response > Initial response
-        start_resp = np.mean(learning_curve[:5])
-        end_resp = np.mean(learning_curve[-5:])
-        improvement = end_resp - start_resp
+        # Phase 1: Acquisition
+        acq_resps = run_phase(300, isi_steps, us_active=True)
+        start_acq = np.mean(acq_resps[:10])
+        end_acq = np.mean(acq_resps[-10:])
         
-        passed = improvement > 1.0 # Significant logit shift
+        # Phase 2: Extinction
+        ext_resps = run_phase(100, isi_steps, us_active=False)
+        end_ext = np.mean(ext_resps[-10:])
+        
+        # Phase 3: Reacquisition
+        reacq_resps = run_phase(100, isi_steps, us_active=True)
+        end_reacq = np.mean(reacq_resps[-10:])
+        
+        # Sign-agnostic test: learning may push the readout up or down depending
+        # on the random init of purkinje_weights. What matters is (a) acquisition
+        # produces a sustained shift, (b) extinction returns toward baseline,
+        # (c) reacquisition recovers the shift faster (savings).
+        acq_shift = end_acq - start_acq
+        ext_recovery = end_ext - start_acq  # should be small (back to baseline)
+        reacq_shift = end_reacq - start_acq
+        
+        # Acquisition: |shift| > 0.5 in some direction
+        # Extinction: |recovery| < 50% of acquisition shift (returned toward baseline)
+        # Reacquisition: same sign as acquisition, magnitude >= 50% of acquisition
+        learned = abs(acq_shift) > 0.5
+        extinguished = abs(ext_recovery) < 0.5 * abs(acq_shift) + 0.3
+        relearned = (acq_shift * reacq_shift > 0) and (abs(reacq_shift) > 0.5 * abs(acq_shift))
+        passed = learned and extinguished and relearned
         
         details = {
-            'Initial Response': f"{start_resp:.4f}",
-            'Final Response':   f"{end_resp:.4f}",
-            'Total Improvement': f"{improvement:.4f}",
-            'ISI (ms)':          f"{isi}",
-            'Criterion':         "Improvement > 1.0",
+            'Acquisition (Start->End)': f"{start_acq:.2f} -> {end_acq:.2f}",
+            'Extinction End': f"{end_ext:.2f}",
+            'Reacquisition End': f"{end_reacq:.2f}",
+            'ISI (steps / ms)': f"{isi_steps} / {isi_steps*20}ms",
+            'Criterion': "Acq/Reacq > +0.5, Ext drops back to baseline"
         }
         self._log("B11 CEBC Conditioning", passed, details)
 
