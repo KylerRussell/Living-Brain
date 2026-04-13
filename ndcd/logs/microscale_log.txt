@@ -1,0 +1,28 @@
+====== Executing Micro-Scale Diagnostic Framework ======
+[PASS] I.1 Individual Neuron Dynamics (f-I & SFA): Double-exp fit MSE: 0.0007, Fast-tau: 3.75, Slow-tau: 10.00
+[PASS] I.2 Burst Coincidence Detection: Supralinear burst detected. Ratio: 2.26 (Coinc: 2.29, Linear: 1.01)
+[PASS] I.2 Dead Neuron Threshold Plasticity (IP): Dead neurons recovered. Pre: 0.2714, Post: 0.3122
+[PASS] II.1 E/I Balance and AI State (Fano & CV): In: 2.0, Fano: 0.09, CV: 1.30 | In: 10.0, Fano: 0.08, CV: 1.24
+[PASS] II.2 k-Winner-Take-All Lateral Inhibition: kWTA active. Init Ratio (A/B): 1.01, Final: 2.35
+L1 AC: [0.97084254 0.93793994 0.90297174 0.86591417 0.826393   0.7847637
+ 0.741911   0.69723994 0.65197533 0.6069395  0.56146085 0.51717526
+ 0.47380954 0.4309434  0.39018875 0.3507232  0.31321186 0.2765771
+ 0.24115899 0.20653662]
+L3 AC: [0.9712678  0.9429511  0.915428   0.88679093 0.86041653 0.83490705
+ 0.8099249  0.7860596  0.76253664 0.7408263  0.71853507 0.6970963
+ 0.6755335  0.65321416 0.6310673  0.60772663 0.5849415  0.56185734
+ 0.5383616  0.5160215 ]
+[PASS] III.1 Hierarchical Autocorrelation: Hierarchical tau validated. L1 decay: 13, L3 decay: 20
+[PASS] III.2 Apical Temporal Overlap: Apical state decays slower. Basal HL: 1, Apical HL: 50
+[PASS] IV.1 Activity-Silent STSP (Z-Score Validated): STSP Trace distinct from noise. Z-Score: 13.98
+[PASS] IV.2 Pattern Completion Capability: Pattern Completed from 20% cue. Recovery ratio: 0.16
+[PASS] IV.3 Representation Orthogonality: Orthogonal memory manifolds. Cos Similarity: 0.188
+V.1 Rep sums: A=0.30, B=0.23, AB=0.38
+[PASS] V.1 Non-Linear Logic & Pattern Separation: Pattern separation active. Sim(AB,A): 0.44, Sim(AB,B): 0.41
+[PASS] V.2 Metabolic Efficiency (Heavy-Tail Updates): Heavy-tailed updates verified. Top 5% holds 37.4% of change.
+[PASS] VI.1 Omission Responses & Hierarchical Dependence: Omission Z: 21.1 | Asymmetry Overlap: 0.30 | Hierarchical isolation validated
+[PASS] VII.1 Sleep & Synaptic Homeostasis: Margin improved (-0.10 -> -0.05) | Variance scaled effectively (0.1160 -> 0.0065)
+[PASS] VIII.1 Fisher Information Matrix Trace: High Fisher Information. Trace Approx: 9952.61
+[PASS] VIII.2 Fisher-Preserving Structural Pruning: Pruned 3919 synapses | Fisher Retained: 112.3%
+========================================================
+Diagnostics Complete: 16/16 Benchmark Suites Passed.

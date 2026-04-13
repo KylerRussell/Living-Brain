@@ -1,0 +1,926 @@
+Using device: cuda
+
+[INIT] Running Pre-Training Biological Diagnostics...
+====== Executing Micro-Scale Diagnostic Framework ======
+[PASS] I.1 Individual Neuron Dynamics (f-I & SFA): Double-exp fit MSE: 0.0007, Fast-tau: 3.75, Slow-tau: 10.00
+[PASS] I.2 Burst Coincidence Detection: Supralinear burst detected. Ratio: 2.26 (Coinc: 2.29, Linear: 1.01)
+[PASS] I.2 Dead Neuron Threshold Plasticity (IP): Dead neurons recovered. Pre: 0.2714, Post: 0.3122
+[PASS] II.1 E/I Balance and AI State (Fano & CV): In: 2.0, Fano: 0.09, CV: 1.30 | In: 10.0, Fano: 0.08, CV: 1.24
+[PASS] II.2 k-Winner-Take-All Lateral Inhibition: kWTA active. Init Ratio (A/B): 1.01, Final: 2.35
+L1 AC: [0.97084254 0.93793994 0.90297174 0.86591417 0.826393   0.7847637
+ 0.741911   0.69723994 0.65197533 0.6069395  0.56146085 0.51717526
+ 0.47380954 0.4309434  0.39018875 0.3507232  0.31321186 0.2765771
+ 0.24115899 0.20653662]
+L3 AC: [0.9712678  0.9429511  0.915428   0.88679093 0.86041653 0.83490705
+ 0.8099249  0.7860596  0.76253664 0.7408263  0.71853507 0.6970963
+ 0.6755335  0.65321416 0.6310673  0.60772663 0.5849415  0.56185734
+ 0.5383616  0.5160215 ]
+[PASS] III.1 Hierarchical Autocorrelation: Hierarchical tau validated. L1 decay: 13, L3 decay: 20
+[PASS] III.2 Apical Temporal Overlap: Apical state decays slower. Basal HL: 1, Apical HL: 50
+[PASS] IV.1 Activity-Silent STSP (Z-Score Validated): STSP Trace distinct from noise. Z-Score: 13.98
+[PASS] IV.2 Pattern Completion Capability: Pattern Completed from 20% cue. Recovery ratio: 0.16
+[PASS] IV.3 Representation Orthogonality: Orthogonal memory manifolds. Cos Similarity: 0.188
+V.1 Rep sums: A=0.30, B=0.23, AB=0.38
+[PASS] V.1 Non-Linear Logic & Pattern Separation: Pattern separation active. Sim(AB,A): 0.44, Sim(AB,B): 0.41
+[PASS] V.2 Metabolic Efficiency (Heavy-Tail Updates): Heavy-tailed updates verified. Top 5% holds 37.4% of change.
+[PASS] VI.1 Omission Responses & Hierarchical Dependence: Omission Z: 21.1 | Asymmetry Overlap: 0.30 | Hierarchical isolation validated
+[PASS] VII.1 Sleep & Synaptic Homeostasis: Margin improved (-0.10 -> -0.05) | Variance scaled effectively (0.1160 -> 0.0065)
+[PASS] VIII.1 Fisher Information Matrix Trace: High Fisher Information. Trace Approx: 9952.60
+[PASS] VIII.2 Fisher-Preserving Structural Pruning: Pruned 3919 synapses | Fisher Retained: 112.3%
+[INIT] Diagnostic Pass Rate: 16/16
+[OK] Biological constraints verified.
+Building DynamicGraph with 3500 nodes, 10 modules, 2 levels...
+CLS: 0 hippocampal modules, 10 neocortical modules
+Lateralization: 1 Broca (seq), 1 Wernicke (sem)
+Hierarchical graph: 21420 nodes, 5536007 edges, 10 modules across 2 levels
+  Level 0: 2 modules, avg size 299 nodes
+  Level 1: 8 modules, avg size 299 nodes
+Free-edge spectral radius tuned: 1.6059 -> 1.15
+Input boost: 0.81x (calibrated to 3.0x lateral RMS=0.0082)
+Edges: 2048 input-proj (2x, outside SR), 5533959 free (SR-tuned to 1.15)
+Scale-invariant E/I balancing (1/sqrt(K)) applied to 5533959 free edges.
+Weight magnitudes: input=0.0374, free=0.0054
+Applied hierarchical recurrent excitatory gradient (eta=0.68) to 65792 edges.
+Level 0 lateral edges: 492 made positive, fan-in normalized (avg fan-in=2)
+Bottom-up edges: 2485 fan-in normalized (bounded, min_mag=0.01)
+PFA: 20480 independent feedback edges enabling Product Feedback Alignment.
+Thalamocortical loop: 128 relay neurons (gated motor output enabled)
+Initializing PredictiveCodingEngine...
+  Golgi reservoir: SR 14.425 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 1208:512 = 2.4:1 (x2 with sign-inversion)
+  Global pontine pool: 410 neurons (Level 1)
+  Fix 1: Positional encoding: 32 dims (pontine input: 1240)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+BG Gate: 128 thalamic neurons, 966 L5/6 inputs, lr=0.005, decay=0.001
+PFA: Created product feedback alignment for 2 levels, 21036 nodes, 128 hidden PFA neurons, avg motor connectivity: 0.105
+  Broca ip_gain set to 1.5 for 121 L5/6 nodes
+  Wernicke L2/3 inhibitory ip_gain boosted by 10%
+
+--- Starting Phase: SimpleSequenceTracking ---
+  Steps: Free=40, Nudge=40
+  Learning rate: 0.01, Nudge strength: 5.0
+  PFA alpha: 0.15, CB alpha: 0.05, Apical gain: dynamic (beta=3.0)
+  Thalamocortical loop: 128 neurons (BG-gated, tonic=-3.0)
+  Cerebellum: 16384 granule cells
+  PFA plasticity: eta=0.001, lambda=0.0001
+  Eval data: 800 bytes
+[ENGINE] Plastic weights and homeostatic biases reset to base state.
+Step 10/3200 | Acc: 10.00% | P(target): 0.000 | P(argmax): 0.888 | PK_w: 16.00 (row mean: 1.00 max: 1.02) | GC_spars: 99.95%
+  Logit range: 13.3828 | CF_err: 0.6102 | Settle: 37.7163
+  OutProj w_surf: norm=0.1277 mean=0.000670 | Burst: mean=0.0535 frac>0.5=0.00% | CF_ema: 0.0548 | IO_space: 50.8%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.000
+  |elig|: 10.9332 | |ltd|: 0.001225 | |ltd_tgt|: 0.133355 | ltd/w: 0.001225
+  GC_overlap: 100.00% | Pontine: range=0.804 spars=49.6%
+  Structural Acc | C->S: 0.00% (2) | C->C: 16.67% (6) | S->C: 0.00% (2) | SentBound: 0
+Step 20/3200 | Acc: 5.00% | P(target): 0.000 | P(argmax): 1.000 | PK_w: 16.04 (row mean: 1.00 max: 1.21) | GC_spars: 100.00%
+  Logit range: 26.3648 | CF_err: 0.1983 | Settle: 40.7650
+  OutProj w_surf: norm=0.1373 mean=0.001060 | Burst: mean=0.0567 frac>0.5=0.00% | CF_ema: 0.0816 | IO_space: 0.8%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.002
+  |elig|: 18.8805 | |ltd|: 0.001083 | |ltd_tgt|: 0.149167 | ltd/w: 0.001081
+  GC_overlap: 18.61% | Pontine: range=0.578 spars=49.9%
+  Structural Acc | C->S: 0.00% (5) | C->C: 10.00% (10) | S->C: 0.00% (5) | SentBound: 0
+Step 30/3200 | Acc: 3.33% | P(target): 0.002 | P(argmax): 0.978 | PK_w: 16.05 (row mean: 1.00 max: 1.25) | GC_spars: 100.00%
+  Logit range: 21.4463 | CF_err: 0.1122 | Settle: 44.3335
+  OutProj w_surf: norm=0.1445 mean=0.001267 | Burst: mean=0.0583 frac>0.5=0.00% | CF_ema: 0.0861 | IO_space: 1.6%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.003
+  |elig|: 22.8299 | |ltd|: 0.000922 | |ltd_tgt|: 0.091403 | ltd/w: 0.000920
+  GC_overlap: 16.39% | Pontine: range=0.487 spars=49.8%
+  Structural Acc | C->S: 0.00% (7) | C->C: 6.25% (16) | S->C: 0.00% (7) | SentBound: 0
+Step 40/3200 | Acc: 2.50% | P(target): 0.005 | P(argmax): 0.947 | PK_w: 16.06 (row mean: 1.00 max: 1.28) | GC_spars: 100.00%
+  Logit range: 20.1311 | CF_err: 0.0882 | Settle: 46.3602
+  OutProj w_surf: norm=0.1505 mean=0.001410 | Burst: mean=0.0591 frac>0.5=0.00% | CF_ema: 0.0873 | IO_space: 1.6%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.003
+  |elig|: 25.3183 | |ltd|: 0.000746 | |ltd_tgt|: 0.069792 | ltd/w: 0.000743
+  GC_overlap: 18.70% | Pontine: range=0.663 spars=50.0%
+  Structural Acc | C->S: 0.00% (10) | C->C: 5.00% (20) | S->C: 0.00% (10) | SentBound: 0
+Step 50/3200 | Acc: 2.00% | P(target): 0.009 | P(argmax): 0.894 | PK_w: 16.06 (row mean: 1.00 max: 1.27) | GC_spars: 100.00%
+  Logit range: 17.8862 | CF_err: 0.0939 | Settle: 46.7014
+  OutProj w_surf: norm=0.1553 mean=0.001510 | Burst: mean=0.0595 frac>0.5=0.00% | CF_ema: 0.0872 | IO_space: 1.6%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.003
+  |elig|: 26.9288 | |ltd|: 0.000739 | |ltd_tgt|: 0.066449 | ltd/w: 0.000736
+  GC_overlap: 18.95% | Pontine: range=0.413 spars=49.9%
+  Structural Acc | C->S: 0.00% (12) | C->C: 3.85% (26) | S->C: 0.00% (12) | SentBound: 0
+Step 60/3200 | Acc: 1.67% | P(target): 0.017 | P(argmax): 0.845 | PK_w: 16.06 (row mean: 1.00 max: 1.27) | GC_spars: 100.00%
+  Logit range: 16.5259 | CF_err: 0.0820 | Settle: 46.3274
+  OutProj w_surf: norm=0.1592 mean=0.001584 | Burst: mean=0.0595 frac>0.5=0.00% | CF_ema: 0.0868 | IO_space: 1.6%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.003
+  |elig|: 27.9481 | |ltd|: 0.000642 | |ltd_tgt|: 0.053658 | ltd/w: 0.000640
+  GC_overlap: 18.15% | Pontine: range=0.593 spars=49.7%
+  Structural Acc | C->S: 0.00% (15) | C->C: 3.33% (30) | S->C: 0.00% (15) | SentBound: 0
+Step 70/3200 | Acc: 1.43% | P(target): 0.024 | P(argmax): 0.762 | PK_w: 16.05 (row mean: 1.00 max: 1.25) | GC_spars: 100.00%
+  Logit range: 15.5639 | CF_err: 0.0736 | Settle: 46.1929
+  OutProj w_surf: norm=0.1622 mean=0.001637 | Burst: mean=0.0595 frac>0.5=0.00% | CF_ema: 0.0858 | IO_space: 1.6%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.003
+  |elig|: 28.4409 | |ltd|: 0.000528 | |ltd_tgt|: 0.045033 | ltd/w: 0.000527
+  GC_overlap: 17.64% | Pontine: range=0.701 spars=49.7%
+  Structural Acc | C->S: 0.00% (17) | C->C: 2.78% (36) | S->C: 0.00% (17) | SentBound: 0
+Step 80/3200 | Acc: 1.25% | P(target): 0.029 | P(argmax): 0.792 | PK_w: 16.05 (row mean: 1.00 max: 1.25) | GC_spars: 100.00%
+  Logit range: 13.9953 | CF_err: 0.0776 | Settle: 46.2760
+  OutProj w_surf: norm=0.1647 mean=0.001677 | Burst: mean=0.0595 frac>0.5=0.00% | CF_ema: 0.0845 | IO_space: 1.6%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.003
+  |elig|: 28.9440 | |ltd|: 0.000525 | |ltd_tgt|: 0.042977 | ltd/w: 0.000523
+  GC_overlap: 19.13% | Pontine: range=0.794 spars=49.9%
+  Structural Acc | C->S: 0.00% (20) | C->C: 2.50% (40) | S->C: 0.00% (20) | SentBound: 0
+Step 90/3200 | Acc: 1.11% | P(target): 0.033 | P(argmax): 0.749 | PK_w: 16.05 (row mean: 1.00 max: 1.23) | GC_spars: 100.00%
+  Logit range: 12.1537 | CF_err: 0.0890 | Settle: 46.4492
+  OutProj w_surf: norm=0.1668 mean=0.001712 | Burst: mean=0.0595 frac>0.5=0.00% | CF_ema: 0.0833 | IO_space: 50.8%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.003
+  |elig|: 29.0726 | |ltd|: 0.000527 | |ltd_tgt|: 0.042544 | ltd/w: 0.000525
+  GC_overlap: 17.56% | Pontine: range=1.298 spars=49.9%
+  Structural Acc | C->S: 0.00% (22) | C->C: 2.17% (46) | S->C: 0.00% (22) | SentBound: 0
+Step 100/3200 | Acc: 1.00% | P(target): 0.038 | P(argmax): 0.734 | PK_w: 16.04 (row mean: 1.00 max: 1.22) | GC_spars: 100.00%
+  Logit range: 11.5169 | CF_err: 0.0766 | Settle: 46.4657
+  OutProj w_surf: norm=0.1687 mean=0.001742 | Burst: mean=0.0595 frac>0.5=0.00% | CF_ema: 0.0826 | IO_space: 89.8%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.003
+  |elig|: 29.1491 | |ltd|: 0.000477 | |ltd_tgt|: 0.034716 | ltd/w: 0.000475
+  GC_overlap: 18.38% | Pontine: range=0.616 spars=49.8%
+  Structural Acc | C->S: 0.00% (25) | C->C: 2.00% (50) | S->C: 0.00% (25) | SentBound: 0
+Step 110/3200 | Acc: 0.91% | P(target): 0.046 | P(argmax): 0.557 | PK_w: 16.04 (row mean: 1.00 max: 1.20) | GC_spars: 100.00%
+  Logit range: 10.0584 | CF_err: 0.0703 | Settle: 46.8110
+  OutProj w_surf: norm=0.1704 mean=0.001770 | Burst: mean=0.0596 frac>0.5=0.00% | CF_ema: 0.0815 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.003
+  |elig|: 29.1704 | |ltd|: 0.000444 | |ltd_tgt|: 0.027706 | ltd/w: 0.000443
+  GC_overlap: 17.08% | Pontine: range=0.882 spars=50.0%
+  Structural Acc | C->S: 0.00% (27) | C->C: 1.79% (56) | S->C: 0.00% (27) | SentBound: 0
+Step 120/3200 | Acc: 0.83% | P(target): 0.050 | P(argmax): 0.490 | PK_w: 16.04 (row mean: 1.00 max: 1.19) | GC_spars: 100.00%
+  Logit range: 8.7845 | CF_err: 0.0731 | Settle: 46.5348
+  OutProj w_surf: norm=0.1720 mean=0.001798 | Burst: mean=0.0596 frac>0.5=0.00% | CF_ema: 0.0800 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.002
+  |elig|: 29.2882 | |ltd|: 0.000511 | |ltd_tgt|: 0.025234 | ltd/w: 0.000510
+  GC_overlap: 17.76% | Pontine: range=0.823 spars=49.7%
+  Structural Acc | C->S: 0.00% (30) | C->C: 1.67% (60) | S->C: 0.00% (30) | SentBound: 0
+Step 130/3200 | Acc: 0.77% | P(target): 0.053 | P(argmax): 0.500 | PK_w: 16.04 (row mean: 1.00 max: 1.18) | GC_spars: 100.00%
+  Logit range: 8.6384 | CF_err: 0.0646 | Settle: 46.8810
+  OutProj w_surf: norm=0.1734 mean=0.001824 | Burst: mean=0.0596 frac>0.5=0.00% | CF_ema: 0.0782 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.002
+  |elig|: 29.5064 | |ltd|: 0.000508 | |ltd_tgt|: 0.022157 | ltd/w: 0.000507
+  GC_overlap: 18.47% | Pontine: range=0.508 spars=50.0%
+  Structural Acc | C->S: 0.00% (32) | C->C: 1.52% (66) | S->C: 0.00% (32) | SentBound: 0
+Step 140/3200 | Acc: 0.71% | P(target): 0.060 | P(argmax): 0.353 | PK_w: 16.04 (row mean: 1.00 max: 1.18) | GC_spars: 100.00%
+  Logit range: 7.7935 | CF_err: 0.0532 | Settle: 46.7554
+  OutProj w_surf: norm=0.1749 mean=0.001852 | Burst: mean=0.0597 frac>0.5=0.00% | CF_ema: 0.0767 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.002
+  |elig|: 29.3315 | |ltd|: 0.000472 | |ltd_tgt|: 0.016320 | ltd/w: 0.000471
+  GC_overlap: 19.56% | Pontine: range=0.778 spars=49.8%
+  Structural Acc | C->S: 0.00% (35) | C->C: 1.43% (70) | S->C: 0.00% (35) | SentBound: 0
+Step 150/3200 | Acc: 0.67% | P(target): 0.062 | P(argmax): 0.324 | PK_w: 16.04 (row mean: 1.00 max: 1.16) | GC_spars: 100.00%
+  Logit range: 7.0929 | CF_err: 0.0555 | Settle: 46.7110
+  OutProj w_surf: norm=0.1762 mean=0.001877 | Burst: mean=0.0598 frac>0.5=0.00% | CF_ema: 0.0746 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.002
+  |elig|: 29.1378 | |ltd|: 0.000518 | |ltd_tgt|: 0.015328 | ltd/w: 0.000517
+  GC_overlap: 18.90% | Pontine: range=0.723 spars=49.7%
+  Structural Acc | C->S: 0.00% (37) | C->C: 1.32% (76) | S->C: 0.00% (37) | SentBound: 0
+Step 160/3200 | Acc: 0.62% | P(target): 0.063 | P(argmax): 0.291 | PK_w: 16.04 (row mean: 1.00 max: 1.17) | GC_spars: 100.00%
+  Logit range: 6.4753 | CF_err: 0.0595 | Settle: 46.4517
+  OutProj w_surf: norm=0.1774 mean=0.001903 | Burst: mean=0.0597 frac>0.5=0.00% | CF_ema: 0.0725 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.002
+  |elig|: 29.3047 | |ltd|: 0.000712 | |ltd_tgt|: 0.015160 | ltd/w: 0.000711
+  GC_overlap: 16.47% | Pontine: range=0.723 spars=49.7%
+  Structural Acc | C->S: 0.00% (40) | C->C: 1.25% (80) | S->C: 0.00% (40) | SentBound: 0
+Step 170/3200 | Acc: 0.59% | P(target): 0.066 | P(argmax): 0.297 | PK_w: 16.04 (row mean: 1.00 max: 1.16) | GC_spars: 100.00%
+  Logit range: 6.9108 | CF_err: 0.0438 | Settle: 46.3203
+  OutProj w_surf: norm=0.1787 mean=0.001928 | Burst: mean=0.0598 frac>0.5=0.00% | CF_ema: 0.0700 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.002
+  |elig|: 29.3545 | |ltd|: 0.000500 | |ltd_tgt|: 0.011890 | ltd/w: 0.000499
+  GC_overlap: 16.14% | Pontine: range=0.445 spars=49.9%
+  Structural Acc | C->S: 0.00% (42) | C->C: 1.16% (86) | S->C: 0.00% (42) | SentBound: 0
+Step 180/3200 | Acc: 0.56% | P(target): 0.067 | P(argmax): 0.276 | PK_w: 16.04 (row mean: 1.00 max: 1.15) | GC_spars: 100.00%
+  Logit range: 6.4119 | CF_err: 0.0450 | Settle: 46.8266
+  OutProj w_surf: norm=0.1799 mean=0.001955 | Burst: mean=0.0597 frac>0.5=0.00% | CF_ema: 0.0671 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.003
+  |elig|: 29.5294 | |ltd|: 0.000577 | |ltd_tgt|: 0.011469 | ltd/w: 0.000576
+  GC_overlap: 17.28% | Pontine: range=0.493 spars=49.7%
+  Structural Acc | C->S: 0.00% (45) | C->C: 1.11% (90) | S->C: 0.00% (45) | SentBound: 0
+Step 190/3200 | Acc: 0.53% | P(target): 0.067 | P(argmax): 0.286 | PK_w: 16.04 (row mean: 1.00 max: 1.14) | GC_spars: 100.00%
+  Logit range: 6.2650 | CF_err: 0.0401 | Settle: 46.7282
+  OutProj w_surf: norm=0.1810 mean=0.001979 | Burst: mean=0.0597 frac>0.5=0.00% | CF_ema: 0.0641 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.003
+  |elig|: 29.5850 | |ltd|: 0.000546 | |ltd_tgt|: 0.009983 | ltd/w: 0.000545
+  GC_overlap: 17.87% | Pontine: range=0.771 spars=50.0%
+  Structural Acc | C->S: 0.00% (47) | C->C: 1.04% (96) | S->C: 0.00% (47) | SentBound: 0
+Step 200/3200 | Acc: 0.50% | P(target): 0.070 | P(argmax): 0.210 | PK_w: 16.04 (row mean: 1.00 max: 1.14) | GC_spars: 100.00%
+  Logit range: 5.8813 | CF_err: 0.0336 | Settle: 46.7422
+  OutProj w_surf: norm=0.1820 mean=0.002001 | Burst: mean=0.0596 frac>0.5=0.00% | CF_ema: 0.0609 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.003
+  |elig|: 29.6768 | |ltd|: 0.000584 | |ltd_tgt|: 0.007890 | ltd/w: 0.000582
+  GC_overlap: 18.98% | Pontine: range=0.589 spars=49.8%
+  Structural Acc | C->S: 0.00% (50) | C->C: 1.00% (100) | S->C: 0.00% (50) | SentBound: 0
+Step 210/3200 | Acc: 0.48% | P(target): 0.073 | P(argmax): 0.255 | PK_w: 16.04 (row mean: 1.00 max: 1.13) | GC_spars: 100.00%
+  Logit range: 6.2803 | CF_err: 0.0279 | Settle: 46.3257
+  OutProj w_surf: norm=0.1830 mean=0.002023 | Burst: mean=0.0595 frac>0.5=0.00% | CF_ema: 0.0578 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.003
+  |elig|: 29.8114 | |ltd|: 0.000464 | |ltd_tgt|: 0.007055 | ltd/w: 0.000463
+  GC_overlap: 19.33% | Pontine: range=0.646 spars=49.5%
+  Structural Acc | C->S: 0.00% (52) | C->C: 0.94% (106) | S->C: 0.00% (52) | SentBound: 0
+Step 220/3200 | Acc: 0.45% | P(target): 0.075 | P(argmax): 0.201 | PK_w: 16.04 (row mean: 1.00 max: 1.13) | GC_spars: 100.00%
+  Logit range: 5.8179 | CF_err: 0.0277 | Settle: 47.0396
+  OutProj w_surf: norm=0.1838 mean=0.002043 | Burst: mean=0.0596 frac>0.5=0.00% | CF_ema: 0.0549 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.003
+  |elig|: 29.6871 | |ltd|: 0.000547 | |ltd_tgt|: 0.006426 | ltd/w: 0.000545
+  GC_overlap: 18.32% | Pontine: range=0.583 spars=49.9%
+  Structural Acc | C->S: 0.00% (55) | C->C: 0.91% (110) | S->C: 0.00% (55) | SentBound: 0
+Step 230/3200 | Acc: 0.43% | P(target): 0.074 | P(argmax): 0.230 | PK_w: 16.04 (row mean: 1.00 max: 1.12) | GC_spars: 100.00%
+  Logit range: 5.7302 | CF_err: 0.0309 | Settle: 46.4158
+  OutProj w_surf: norm=0.1847 mean=0.002063 | Burst: mean=0.0597 frac>0.5=0.00% | CF_ema: 0.0520 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.003
+  |elig|: 29.8875 | |ltd|: 0.000584 | |ltd_tgt|: 0.007120 | ltd/w: 0.000582
+  GC_overlap: 18.78% | Pontine: range=0.498 spars=49.9%
+  Structural Acc | C->S: 0.00% (57) | C->C: 0.86% (116) | S->C: 0.00% (57) | SentBound: 0
+Step 240/3200 | Acc: 0.42% | P(target): 0.074 | P(argmax): 0.161 | PK_w: 16.04 (row mean: 1.00 max: 1.11) | GC_spars: 100.00%
+  Logit range: 5.1153 | CF_err: 0.0319 | Settle: 46.4707
+  OutProj w_surf: norm=0.1855 mean=0.002081 | Burst: mean=0.0598 frac>0.5=0.00% | CF_ema: 0.0494 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.003
+  |elig|: 30.0005 | |ltd|: 0.000689 | |ltd_tgt|: 0.006607 | ltd/w: 0.000687
+  GC_overlap: 18.93% | Pontine: range=0.661 spars=49.9%
+  Structural Acc | C->S: 0.00% (60) | C->C: 0.83% (120) | S->C: 0.00% (60) | SentBound: 0
+Step 250/3200 | Acc: 0.80% | P(target): 0.074 | P(argmax): 0.205 | PK_w: 16.05 (row mean: 1.00 max: 1.11) | GC_spars: 100.00%
+  Logit range: 5.2689 | CF_err: 0.0328 | Settle: 46.8432
+  OutProj w_surf: norm=0.1861 mean=0.002095 | Burst: mean=0.0598 frac>0.5=0.00% | CF_ema: 0.0473 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.003
+  |elig|: 29.9939 | |ltd|: 0.000670 | |ltd_tgt|: 0.006994 | ltd/w: 0.000668
+  GC_overlap: 16.86% | Pontine: range=0.648 spars=49.8%
+  Structural Acc | C->S: 0.00% (62) | C->C: 1.59% (126) | S->C: 0.00% (62) | SentBound: 0
+Step 260/3200 | Acc: 1.15% | P(target): 0.073 | P(argmax): 0.117 | PK_w: 16.05 (row mean: 1.00 max: 1.11) | GC_spars: 100.00%
+  Logit range: 4.3253 | CF_err: 0.0417 | Settle: 46.8865
+  OutProj w_surf: norm=0.1865 mean=0.002107 | Burst: mean=0.0598 frac>0.5=0.00% | CF_ema: 0.0458 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.003
+  |elig|: 29.9412 | |ltd|: 0.000710 | |ltd_tgt|: 0.007293 | ltd/w: 0.000708
+  GC_overlap: 16.89% | Pontine: range=0.567 spars=49.7%
+  Structural Acc | C->S: 1.54% (65) | C->C: 1.54% (130) | S->C: 0.00% (65) | SentBound: 0
+Step 270/3200 | Acc: 1.11% | P(target): 0.071 | P(argmax): 0.095 | PK_w: 16.06 (row mean: 1.00 max: 1.11) | GC_spars: 100.00%
+  Logit range: 3.8763 | CF_err: 0.0511 | Settle: 47.0204
+  OutProj w_surf: norm=0.1869 mean=0.002117 | Burst: mean=0.0598 frac>0.5=0.00% | CF_ema: 0.0453 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.004
+  |elig|: 29.5020 | |ltd|: 0.000715 | |ltd_tgt|: 0.007811 | ltd/w: 0.000712
+  GC_overlap: 18.95% | Pontine: range=0.720 spars=49.9%
+  Structural Acc | C->S: 1.49% (67) | C->C: 1.47% (136) | S->C: 0.00% (67) | SentBound: 0
+Step 280/3200 | Acc: 1.43% | P(target): 0.070 | P(argmax): 0.069 | PK_w: 16.07 (row mean: 1.00 max: 1.11) | GC_spars: 100.00%
+  Logit range: 3.4979 | CF_err: 0.0611 | Settle: 46.6857
+  OutProj w_surf: norm=0.1871 mean=0.002124 | Burst: mean=0.0599 frac>0.5=0.00% | CF_ema: 0.0457 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.004
+  |elig|: 29.4370 | |ltd|: 0.000741 | |ltd_tgt|: 0.008959 | ltd/w: 0.000738
+  GC_overlap: 18.72% | Pontine: range=0.660 spars=49.5%
+  Structural Acc | C->S: 2.86% (70) | C->C: 1.43% (140) | S->C: 0.00% (70) | SentBound: 0
+Step 290/3200 | Acc: 1.72% | P(target): 0.068 | P(argmax): 0.077 | PK_w: 16.07 (row mean: 1.00 max: 1.12) | GC_spars: 100.00%
+  Logit range: 3.7082 | CF_err: 0.0638 | Settle: 46.8635
+  OutProj w_surf: norm=0.1872 mean=0.002128 | Burst: mean=0.0600 frac>0.5=0.00% | CF_ema: 0.0465 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.005
+  |elig|: 29.8334 | |ltd|: 0.000726 | |ltd_tgt|: 0.009562 | ltd/w: 0.000722
+  GC_overlap: 19.10% | Pontine: range=0.464 spars=49.9%
+  Structural Acc | C->S: 4.17% (72) | C->C: 1.37% (146) | S->C: 0.00% (72) | SentBound: 0
+Step 300/3200 | Acc: 1.67% | P(target): 0.066 | P(argmax): 0.040 | PK_w: 16.08 (row mean: 1.01 max: 1.14) | GC_spars: 100.00%
+  Logit range: 3.0385 | CF_err: 0.0716 | Settle: 46.8437
+  OutProj w_surf: norm=0.1871 mean=0.002128 | Burst: mean=0.0600 frac>0.5=0.00% | CF_ema: 0.0480 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.005
+  |elig|: 29.8668 | |ltd|: 0.000790 | |ltd_tgt|: 0.010822 | ltd/w: 0.000786
+  GC_overlap: 19.62% | Pontine: range=0.728 spars=49.6%
+  Structural Acc | C->S: 4.00% (75) | C->C: 1.33% (150) | S->C: 0.00% (75) | SentBound: 0
+Step 310/3200 | Acc: 1.61% | P(target): 0.064 | P(argmax): 0.035 | PK_w: 16.09 (row mean: 1.01 max: 1.16) | GC_spars: 100.00%
+  Logit range: 2.8354 | CF_err: 0.0811 | Settle: 47.1858
+  OutProj w_surf: norm=0.1867 mean=0.002123 | Burst: mean=0.0599 frac>0.5=0.00% | CF_ema: 0.0497 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.006
+  |elig|: 29.8809 | |ltd|: 0.000812 | |ltd_tgt|: 0.012206 | ltd/w: 0.000807
+  GC_overlap: 16.36% | Pontine: range=0.592 spars=49.6%
+  Structural Acc | C->S: 3.90% (77) | C->C: 1.28% (156) | S->C: 0.00% (77) | SentBound: 0
+Step 320/3200 | Acc: 1.56% | P(target): 0.062 | P(argmax): 0.032 | PK_w: 16.10 (row mean: 1.01 max: 1.18) | GC_spars: 100.00%
+  Logit range: 2.7428 | CF_err: 0.0799 | Settle: 46.5976
+  OutProj w_surf: norm=0.1861 mean=0.002114 | Burst: mean=0.0600 frac>0.5=0.00% | CF_ema: 0.0515 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.007
+  |elig|: 29.7159 | |ltd|: 0.000816 | |ltd_tgt|: 0.011934 | ltd/w: 0.000811
+  GC_overlap: 17.08% | Pontine: range=0.560 spars=50.0%
+  Structural Acc | C->S: 3.75% (80) | C->C: 1.25% (160) | S->C: 0.00% (80) | SentBound: 0
+Step 330/3200 | Acc: 1.52% | P(target): 0.060 | P(argmax): 0.024 | PK_w: 16.11 (row mean: 1.01 max: 1.20) | GC_spars: 100.00%
+  Logit range: 2.2067 | CF_err: 0.0890 | Settle: 46.8764
+  OutProj w_surf: norm=0.1854 mean=0.002102 | Burst: mean=0.0601 frac>0.5=0.00% | CF_ema: 0.0534 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.007
+  |elig|: 29.5429 | |ltd|: 0.000850 | |ltd_tgt|: 0.013134 | ltd/w: 0.000844
+  GC_overlap: 17.95% | Pontine: range=1.336 spars=49.9%
+  Structural Acc | C->S: 3.66% (82) | C->C: 1.20% (166) | S->C: 0.00% (82) | SentBound: 0
+Step 340/3200 | Acc: 1.47% | P(target): 0.059 | P(argmax): 0.018 | PK_w: 16.13 (row mean: 1.01 max: 1.22) | GC_spars: 100.00%
+  Logit range: 2.0954 | CF_err: 0.0888 | Settle: 46.5725
+  OutProj w_surf: norm=0.1844 mean=0.002084 | Burst: mean=0.0601 frac>0.5=0.00% | CF_ema: 0.0556 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.008
+  |elig|: 29.2693 | |ltd|: 0.000817 | |ltd_tgt|: 0.013008 | ltd/w: 0.000810
+  GC_overlap: 16.25% | Pontine: range=0.741 spars=49.7%
+  Structural Acc | C->S: 3.53% (85) | C->C: 1.18% (170) | S->C: 0.00% (85) | SentBound: 0
+Step 350/3200 | Acc: 1.43% | P(target): 0.057 | P(argmax): 0.014 | PK_w: 16.14 (row mean: 1.01 max: 1.25) | GC_spars: 100.00%
+  Logit range: 1.7903 | CF_err: 0.0924 | Settle: 47.1757
+  OutProj w_surf: norm=0.1831 mean=0.002061 | Burst: mean=0.0601 frac>0.5=0.00% | CF_ema: 0.0576 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.009
+  |elig|: 29.1241 | |ltd|: 0.000837 | |ltd_tgt|: 0.013421 | ltd/w: 0.000830
+  GC_overlap: 16.69% | Pontine: range=0.649 spars=49.6%
+  Structural Acc | C->S: 3.45% (87) | C->C: 1.14% (176) | S->C: 0.00% (87) | SentBound: 0
+Step 360/3200 | Acc: 1.39% | P(target): 0.056 | P(argmax): 0.016 | PK_w: 16.15 (row mean: 1.01 max: 1.26) | GC_spars: 100.00%
+  Logit range: 1.8158 | CF_err: 0.0973 | Settle: 47.1598
+  OutProj w_surf: norm=0.1816 mean=0.002032 | Burst: mean=0.0601 frac>0.5=0.00% | CF_ema: 0.0597 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.009
+  |elig|: 29.4396 | |ltd|: 0.000869 | |ltd_tgt|: 0.014368 | ltd/w: 0.000861
+  GC_overlap: 13.62% | Pontine: range=0.602 spars=49.6%
+  Structural Acc | C->S: 3.33% (90) | C->C: 1.11% (180) | S->C: 0.00% (90) | SentBound: 0
+Step 370/3200 | Acc: 1.35% | P(target): 0.055 | P(argmax): 0.012 | PK_w: 16.16 (row mean: 1.01 max: 1.29) | GC_spars: 100.00%
+  Logit range: 1.6824 | CF_err: 0.0954 | Settle: 46.4400
+  OutProj w_surf: norm=0.1798 mean=0.001998 | Burst: mean=0.0601 frac>0.5=0.00% | CF_ema: 0.0619 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.010
+  |elig|: 29.2301 | |ltd|: 0.000838 | |ltd_tgt|: 0.013982 | ltd/w: 0.000830
+  GC_overlap: 18.98% | Pontine: range=0.461 spars=49.7%
+  Structural Acc | C->S: 3.26% (92) | C->C: 1.08% (186) | S->C: 0.00% (92) | SentBound: 0
+Step 380/3200 | Acc: 1.32% | P(target): 0.053 | P(argmax): 0.011 | PK_w: 16.18 (row mean: 1.01 max: 1.30) | GC_spars: 100.00%
+  Logit range: 1.4498 | CF_err: 0.1038 | Settle: 46.9261
+  OutProj w_surf: norm=0.1777 mean=0.001958 | Burst: mean=0.0602 frac>0.5=0.00% | CF_ema: 0.0643 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.011
+  |elig|: 29.1507 | |ltd|: 0.000891 | |ltd_tgt|: 0.015151 | ltd/w: 0.000882
+  GC_overlap: 17.87% | Pontine: range=0.776 spars=49.9%
+  Structural Acc | C->S: 3.16% (95) | C->C: 1.05% (190) | S->C: 0.00% (95) | SentBound: 0
+Step 390/3200 | Acc: 1.28% | P(target): 0.052 | P(argmax): 0.010 | PK_w: 16.19 (row mean: 1.01 max: 1.32) | GC_spars: 100.00%
+  Logit range: 1.3008 | CF_err: 0.1098 | Settle: 47.1885
+  OutProj w_surf: norm=0.1753 mean=0.001911 | Burst: mean=0.0601 frac>0.5=0.00% | CF_ema: 0.0667 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.012
+  |elig|: 28.7528 | |ltd|: 0.000904 | |ltd_tgt|: 0.015732 | ltd/w: 0.000894
+  GC_overlap: 15.81% | Pontine: range=0.662 spars=49.4%
+  Structural Acc | C->S: 3.09% (97) | C->C: 1.02% (196) | S->C: 0.00% (97) | SentBound: 0
+Step 400/3200 | Acc: 1.25% | P(target): 0.051 | P(argmax): 0.011 | PK_w: 16.20 (row mean: 1.01 max: 1.33) | GC_spars: 100.00%
+  Logit range: 1.4806 | CF_err: 0.1078 | Settle: 46.5742
+  OutProj w_surf: norm=0.1727 mean=0.001859 | Burst: mean=0.0602 frac>0.5=0.00% | CF_ema: 0.0688 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.012
+  |elig|: 28.6353 | |ltd|: 0.000887 | |ltd_tgt|: 0.015324 | ltd/w: 0.000877
+  GC_overlap: 16.36% | Pontine: range=0.538 spars=50.0%
+  Structural Acc | C->S: 3.00% (100) | C->C: 1.00% (200) | S->C: 0.00% (100) | SentBound: 0
+Step 410/3200 | Acc: 1.22% | P(target): 0.050 | P(argmax): 0.010 | PK_w: 16.21 (row mean: 1.01 max: 1.36) | GC_spars: 100.00%
+  Logit range: 1.2310 | CF_err: 0.1094 | Settle: 47.0538
+  OutProj w_surf: norm=0.1697 mean=0.001799 | Burst: mean=0.0602 frac>0.5=0.00% | CF_ema: 0.0711 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.013
+  |elig|: 28.7980 | |ltd|: 0.000893 | |ltd_tgt|: 0.015699 | ltd/w: 0.000882
+  GC_overlap: 19.62% | Pontine: range=0.748 spars=49.7%
+  Structural Acc | C->S: 2.94% (102) | C->C: 0.97% (206) | S->C: 0.00% (102) | SentBound: 0
+Step 420/3200 | Acc: 1.19% | P(target): 0.049 | P(argmax): 0.009 | PK_w: 16.23 (row mean: 1.01 max: 1.37) | GC_spars: 100.00%
+  Logit range: 1.2012 | CF_err: 0.1140 | Settle: 47.1971
+  OutProj w_surf: norm=0.1665 mean=0.001733 | Burst: mean=0.0602 frac>0.5=0.00% | CF_ema: 0.0733 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.014
+  |elig|: 28.9206 | |ltd|: 0.000921 | |ltd_tgt|: 0.016527 | ltd/w: 0.000908
+  GC_overlap: 15.98% | Pontine: range=0.843 spars=50.0%
+  Structural Acc | C->S: 2.86% (105) | C->C: 0.95% (210) | S->C: 0.00% (105) | SentBound: 0
+Step 430/3200 | Acc: 1.16% | P(target): 0.048 | P(argmax): 0.010 | PK_w: 16.24 (row mean: 1.01 max: 1.39) | GC_spars: 100.00%
+  Logit range: 1.3523 | CF_err: 0.1093 | Settle: 47.1297
+  OutProj w_surf: norm=0.1632 mean=0.001662 | Burst: mean=0.0603 frac>0.5=0.00% | CF_ema: 0.0753 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.015
+  |elig|: 29.1945 | |ltd|: 0.000921 | |ltd_tgt|: 0.016038 | ltd/w: 0.000908
+  GC_overlap: 18.21% | Pontine: range=0.638 spars=49.4%
+  Structural Acc | C->S: 2.80% (107) | C->C: 0.93% (216) | S->C: 0.00% (107) | SentBound: 0
+Step 440/3200 | Acc: 1.14% | P(target): 0.047 | P(argmax): 0.008 | PK_w: 16.25 (row mean: 1.02 max: 1.40) | GC_spars: 100.00%
+  Logit range: 1.1229 | CF_err: 0.1103 | Settle: 47.0756
+  OutProj w_surf: norm=0.1597 mean=0.001585 | Burst: mean=0.0604 frac>0.5=0.00% | CF_ema: 0.0772 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.015
+  |elig|: 29.1743 | |ltd|: 0.000920 | |ltd_tgt|: 0.016191 | ltd/w: 0.000906
+  GC_overlap: 15.92% | Pontine: range=0.574 spars=49.6%
+  Structural Acc | C->S: 2.73% (110) | C->C: 0.91% (220) | S->C: 0.00% (110) | SentBound: 0
+Step 450/3200 | Acc: 1.11% | P(target): 0.046 | P(argmax): 0.010 | PK_w: 16.27 (row mean: 1.02 max: 1.42) | GC_spars: 100.00%
+  Logit range: 1.2465 | CF_err: 0.1066 | Settle: 47.1378
+  OutProj w_surf: norm=0.1561 mean=0.001502 | Burst: mean=0.0604 frac>0.5=0.00% | CF_ema: 0.0791 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.016
+  |elig|: 28.9911 | |ltd|: 0.000899 | |ltd_tgt|: 0.015416 | ltd/w: 0.000885
+  GC_overlap: 18.98% | Pontine: range=0.505 spars=49.6%
+  Structural Acc | C->S: 2.68% (112) | C->C: 0.88% (226) | S->C: 0.00% (112) | SentBound: 0
+Step 460/3200 | Acc: 1.09% | P(target): 0.045 | P(argmax): 0.008 | PK_w: 16.28 (row mean: 1.02 max: 1.42) | GC_spars: 100.00%
+  Logit range: 0.9235 | CF_err: 0.1161 | Settle: 47.4235
+  OutProj w_surf: norm=0.1524 mean=0.001416 | Burst: mean=0.0604 frac>0.5=0.00% | CF_ema: 0.0808 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.017
+  |elig|: 29.1234 | |ltd|: 0.000959 | |ltd_tgt|: 0.016862 | ltd/w: 0.000943
+  GC_overlap: 19.85% | Pontine: range=0.935 spars=49.7%
+  Structural Acc | C->S: 2.61% (115) | C->C: 0.87% (230) | S->C: 0.00% (115) | SentBound: 0
+Step 470/3200 | Acc: 1.06% | P(target): 0.044 | P(argmax): 0.008 | PK_w: 16.30 (row mean: 1.02 max: 1.44) | GC_spars: 100.00%
+  Logit range: 1.0177 | CF_err: 0.1150 | Settle: 46.7836
+  OutProj w_surf: norm=0.1488 mean=0.001326 | Burst: mean=0.0604 frac>0.5=0.00% | CF_ema: 0.0826 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.018
+  |elig|: 29.1630 | |ltd|: 0.000950 | |ltd_tgt|: 0.016689 | ltd/w: 0.000934
+  GC_overlap: 18.64% | Pontine: range=0.533 spars=49.9%
+  Structural Acc | C->S: 2.56% (117) | C->C: 0.85% (236) | S->C: 0.00% (117) | SentBound: 0
+Step 480/3200 | Acc: 1.04% | P(target): 0.043 | P(argmax): 0.009 | PK_w: 16.31 (row mean: 1.02 max: 1.45) | GC_spars: 100.00%
+  Logit range: 1.1037 | CF_err: 0.1150 | Settle: 47.2446
+  OutProj w_surf: norm=0.1453 mean=0.001233 | Burst: mean=0.0603 frac>0.5=0.00% | CF_ema: 0.0844 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.019
+  |elig|: 28.9846 | |ltd|: 0.000935 | |ltd_tgt|: 0.016577 | ltd/w: 0.000918
+  GC_overlap: 19.62% | Pontine: range=0.687 spars=49.7%
+  Structural Acc | C->S: 2.50% (120) | C->C: 0.83% (240) | S->C: 0.00% (120) | SentBound: 0
+Step 490/3200 | Acc: 1.02% | P(target): 0.042 | P(argmax): 0.008 | PK_w: 16.32 (row mean: 1.02 max: 1.46) | GC_spars: 100.00%
+  Logit range: 1.0250 | CF_err: 0.1168 | Settle: 46.9695
+  OutProj w_surf: norm=0.1419 mean=0.001140 | Burst: mean=0.0604 frac>0.5=0.00% | CF_ema: 0.0863 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.019
+  |elig|: 29.2288 | |ltd|: 0.000953 | |ltd_tgt|: 0.016950 | ltd/w: 0.000935
+  GC_overlap: 18.75% | Pontine: range=0.524 spars=49.8%
+  Structural Acc | C->S: 2.46% (122) | C->C: 0.81% (246) | S->C: 0.00% (122) | SentBound: 0
+Step 500/3200 | Acc: 1.00% | P(target): 0.042 | P(argmax): 0.008 | PK_w: 16.34 (row mean: 1.02 max: 1.47) | GC_spars: 100.00%
+  Logit range: 1.0342 | CF_err: 0.1187 | Settle: 46.9898
+  OutProj w_surf: norm=0.1387 mean=0.001045 | Burst: mean=0.0604 frac>0.5=0.00% | CF_ema: 0.0882 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.020
+  |elig|: 29.2173 | |ltd|: 0.000958 | |ltd_tgt|: 0.017352 | ltd/w: 0.000939
+  GC_overlap: 17.81% | Pontine: range=0.990 spars=49.7%
+
+[DIAGNOSTIC] Running Linear Probe on 200 samples...
+  >>> LINEAR PROBE ACCURACY: 100.00% (Internal Representation Quality)
+  >>> Probe model cached for cerebellar distillation
+  [!] ALERT: Representation (100.0%) >> Readout (1.0%). Readout is the bottleneck.
+
+[READOUT] (21/80 correct)
+  Target: bc abc abc abc abc abc abc abc abc abc abc abc abc abc abc abc abc abc abc abc a
+  Output: a                  a  aaa aaaaaaa a aa aaaa ja     aa     aaaaaa aaaaa.aaaaaaaaa
+  Match:  --+---+---+---+---++---+---+---+------++------+---++--+----+---+---+---+---+---+
+  [DIVERSITY] 29 unique predictions / 100 samples | Top: 'a' (49%)
+  Structural Acc | C->S: 2.40% (125) | C->C: 0.80% (250) | S->C: 0.00% (125) | SentBound: 0
+Step 510/3200 | Acc: 0.80% | P(target): 0.041 | P(argmax): 0.007 | PK_w: 16.35 (row mean: 1.02 max: 1.48) | GC_spars: 100.00%
+  Logit range: 0.8057 | CF_err: 0.1183 | Settle: 46.3384
+  OutProj w_surf: norm=0.1350 mean=0.000928 | Burst: mean=0.0485 frac>0.5=0.00% | CF_ema: 0.0899 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.021
+  |elig|: 29.9100 | |ltd|: 0.000990 | |ltd_tgt|: 0.016804 | ltd/w: 0.000970
+  GC_overlap: 14.36% | Pontine: range=0.609 spars=50.0%
+  Structural Acc | C->S: 2.36% (127) | C->C: 0.78% (256) | S->C: 0.00% (127) | SentBound: 0
+Step 520/3200 | Acc: 0.80% | P(target): 0.040 | P(argmax): 0.010 | PK_w: 16.35 (row mean: 1.02 max: 1.47) | GC_spars: 100.00%
+  Logit range: 1.1938 | CF_err: 0.1156 | Settle: 46.6322
+  OutProj w_surf: norm=0.1326 mean=0.000840 | Burst: mean=0.0540 frac>0.5=0.00% | CF_ema: 0.0915 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.021
+  |elig|: 29.5006 | |ltd|: 0.000960 | |ltd_tgt|: 0.016670 | ltd/w: 0.000940
+  GC_overlap: 17.64% | Pontine: range=0.488 spars=49.9%
+  Structural Acc | C->S: 2.31% (130) | C->C: 0.77% (260) | S->C: 0.00% (130) | SentBound: 0
+Step 530/3200 | Acc: 0.80% | P(target): 0.040 | P(argmax): 0.008 | PK_w: 16.37 (row mean: 1.02 max: 1.48) | GC_spars: 100.00%
+  Logit range: 0.9216 | CF_err: 0.1173 | Settle: 46.9647
+  OutProj w_surf: norm=0.1308 mean=0.000767 | Burst: mean=0.0573 frac>0.5=0.00% | CF_ema: 0.0929 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.022
+  |elig|: 29.0368 | |ltd|: 0.000959 | |ltd_tgt|: 0.017028 | ltd/w: 0.000938
+  GC_overlap: 18.27% | Pontine: range=0.569 spars=49.8%
+  Structural Acc | C->S: 2.27% (132) | C->C: 0.75% (266) | S->C: 0.00% (132) | SentBound: 0
+Step 540/3200 | Acc: 0.80% | P(target): 0.039 | P(argmax): 0.008 | PK_w: 16.38 (row mean: 1.02 max: 1.49) | GC_spars: 100.00%
+  Logit range: 0.9520 | CF_err: 0.1206 | Settle: 47.2249
+  OutProj w_surf: norm=0.1291 mean=0.000694 | Burst: mean=0.0591 frac>0.5=0.00% | CF_ema: 0.0944 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.023
+  |elig|: 28.7992 | |ltd|: 0.000960 | |ltd_tgt|: 0.017382 | ltd/w: 0.000939
+  GC_overlap: 15.79% | Pontine: range=0.487 spars=49.8%
+  Structural Acc | C->S: 2.22% (135) | C->C: 0.74% (270) | S->C: 0.00% (135) | SentBound: 0
+Step 550/3200 | Acc: 0.80% | P(target): 0.038 | P(argmax): 0.008 | PK_w: 16.39 (row mean: 1.02 max: 1.50) | GC_spars: 100.00%
+  Logit range: 0.9631 | CF_err: 0.1216 | Settle: 47.2623
+  OutProj w_surf: norm=0.1277 mean=0.000622 | Burst: mean=0.0600 frac>0.5=0.00% | CF_ema: 0.0959 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.023
+  |elig|: 28.5883 | |ltd|: 0.000953 | |ltd_tgt|: 0.017334 | ltd/w: 0.000931
+  GC_overlap: 15.49% | Pontine: range=0.988 spars=50.0%
+  Structural Acc | C->S: 2.19% (137) | C->C: 0.72% (276) | S->C: 0.00% (137) | SentBound: 0
+Step 560/3200 | Acc: 0.80% | P(target): 0.038 | P(argmax): 0.008 | PK_w: 16.40 (row mean: 1.02 max: 1.50) | GC_spars: 100.00%
+  Logit range: 0.9695 | CF_err: 0.1195 | Settle: 47.2960
+  OutProj w_surf: norm=0.1265 mean=0.000555 | Burst: mean=0.0603 frac>0.5=0.00% | CF_ema: 0.0972 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.024
+  |elig|: 28.5525 | |ltd|: 0.000947 | |ltd_tgt|: 0.016998 | ltd/w: 0.000925
+  GC_overlap: 17.39% | Pontine: range=0.793 spars=49.6%
+  Structural Acc | C->S: 2.14% (140) | C->C: 0.71% (280) | S->C: 0.00% (140) | SentBound: 0
+Step 570/3200 | Acc: 0.80% | P(target): 0.037 | P(argmax): 0.009 | PK_w: 16.41 (row mean: 1.02 max: 1.51) | GC_spars: 100.00%
+  Logit range: 1.1373 | CF_err: 0.1145 | Settle: 47.3813
+  OutProj w_surf: norm=0.1255 mean=0.000497 | Burst: mean=0.0606 frac>0.5=0.00% | CF_ema: 0.0983 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.025
+  |elig|: 28.7151 | |ltd|: 0.000944 | |ltd_tgt|: 0.016371 | ltd/w: 0.000921
+  GC_overlap: 18.04% | Pontine: range=0.526 spars=49.7%
+  Structural Acc | C->S: 2.11% (142) | C->C: 0.70% (286) | S->C: 0.00% (142) | SentBound: 0
+Step 580/3200 | Acc: 0.80% | P(target): 0.037 | P(argmax): 0.007 | PK_w: 16.42 (row mean: 1.03 max: 1.51) | GC_spars: 100.00%
+  Logit range: 0.8743 | CF_err: 0.1173 | Settle: 47.1185
+  OutProj w_surf: norm=0.1248 mean=0.000447 | Burst: mean=0.0607 frac>0.5=0.00% | CF_ema: 0.0992 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.025
+  |elig|: 28.6614 | |ltd|: 0.000967 | |ltd_tgt|: 0.016763 | ltd/w: 0.000943
+  GC_overlap: 15.81% | Pontine: range=1.030 spars=49.8%
+  Structural Acc | C->S: 2.07% (145) | C->C: 0.69% (290) | S->C: 0.00% (145) | SentBound: 0
+Step 590/3200 | Acc: 0.80% | P(target): 0.036 | P(argmax): 0.008 | PK_w: 16.43 (row mean: 1.03 max: 1.52) | GC_spars: 100.00%
+  Logit range: 0.8802 | CF_err: 0.1142 | Settle: 47.2737
+  OutProj w_surf: norm=0.1243 mean=0.000405 | Burst: mean=0.0608 frac>0.5=0.00% | CF_ema: 0.1000 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.026
+  |elig|: 28.7037 | |ltd|: 0.000962 | |ltd_tgt|: 0.016264 | ltd/w: 0.000938
+  GC_overlap: 17.95% | Pontine: range=0.642 spars=49.7%
+  Structural Acc | C->S: 2.04% (147) | C->C: 0.68% (296) | S->C: 0.00% (147) | SentBound: 0
+Step 600/3200 | Acc: 0.80% | P(target): 0.036 | P(argmax): 0.008 | PK_w: 16.45 (row mean: 1.03 max: 1.53) | GC_spars: 100.00%
+  Logit range: 0.9359 | CF_err: 0.1169 | Settle: 47.3289
+  OutProj w_surf: norm=0.1240 mean=0.000370 | Burst: mean=0.0609 frac>0.5=0.00% | CF_ema: 0.1009 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.027
+  |elig|: 28.7488 | |ltd|: 0.000982 | |ltd_tgt|: 0.016695 | ltd/w: 0.000957
+  GC_overlap: 17.45% | Pontine: range=0.607 spars=49.8%
+  Structural Acc | C->S: 2.00% (150) | C->C: 0.67% (300) | S->C: 0.00% (150) | SentBound: 0
+Step 610/3200 | Acc: 0.80% | P(target): 0.035 | P(argmax): 0.007 | PK_w: 16.46 (row mean: 1.03 max: 1.53) | GC_spars: 100.00%
+  Logit range: 0.8135 | CF_err: 0.1160 | Settle: 46.9927
+  OutProj w_surf: norm=0.1237 mean=0.000340 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.1014 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.028
+  |elig|: 28.7800 | |ltd|: 0.000982 | |ltd_tgt|: 0.016619 | ltd/w: 0.000956
+  GC_overlap: 16.14% | Pontine: range=0.605 spars=49.8%
+  Structural Acc | C->S: 1.97% (152) | C->C: 0.65% (306) | S->C: 0.00% (152) | SentBound: 0
+Step 620/3200 | Acc: 0.80% | P(target): 0.035 | P(argmax): 0.006 | PK_w: 16.47 (row mean: 1.03 max: 1.53) | GC_spars: 100.00%
+  Logit range: 0.6379 | CF_err: 0.1162 | Settle: 47.5047
+  OutProj w_surf: norm=0.1235 mean=0.000314 | Burst: mean=0.0609 frac>0.5=0.00% | CF_ema: 0.1020 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.028
+  |elig|: 28.5833 | |ltd|: 0.000986 | |ltd_tgt|: 0.016495 | ltd/w: 0.000959
+  GC_overlap: 19.50% | Pontine: range=0.876 spars=49.9%
+  Structural Acc | C->S: 1.94% (155) | C->C: 0.65% (310) | S->C: 0.00% (155) | SentBound: 0
+Step 630/3200 | Acc: 0.80% | P(target): 0.034 | P(argmax): 0.008 | PK_w: 16.48 (row mean: 1.03 max: 1.54) | GC_spars: 100.00%
+  Logit range: 0.9277 | CF_err: 0.1121 | Settle: 47.1498
+  OutProj w_surf: norm=0.1234 mean=0.000299 | Burst: mean=0.0609 frac>0.5=0.00% | CF_ema: 0.1024 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.029
+  |elig|: 28.6140 | |ltd|: 0.000979 | |ltd_tgt|: 0.015871 | ltd/w: 0.000952
+  GC_overlap: 16.14% | Pontine: range=0.645 spars=49.9%
+  Structural Acc | C->S: 1.91% (157) | C->C: 0.63% (316) | S->C: 0.00% (157) | SentBound: 0
+Step 640/3200 | Acc: 0.80% | P(target): 0.034 | P(argmax): 0.006 | PK_w: 16.50 (row mean: 1.03 max: 1.54) | GC_spars: 100.00%
+  Logit range: 0.6150 | CF_err: 0.1168 | Settle: 47.6180
+  OutProj w_surf: norm=0.1233 mean=0.000291 | Burst: mean=0.0609 frac>0.5=0.00% | CF_ema: 0.1028 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.030
+  |elig|: 28.7734 | |ltd|: 0.001010 | |ltd_tgt|: 0.016725 | ltd/w: 0.000981
+  GC_overlap: 17.73% | Pontine: range=0.912 spars=49.6%
+  Structural Acc | C->S: 1.88% (160) | C->C: 0.62% (320) | S->C: 0.00% (160) | SentBound: 0
+Step 650/3200 | Acc: 0.80% | P(target): 0.033 | P(argmax): 0.007 | PK_w: 16.51 (row mean: 1.03 max: 1.55) | GC_spars: 100.00%
+  Logit range: 0.8091 | CF_err: 0.1153 | Settle: 47.4291
+  OutProj w_surf: norm=0.1233 mean=0.000287 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.1031 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.031
+  |elig|: 28.8446 | |ltd|: 0.001008 | |ltd_tgt|: 0.016529 | ltd/w: 0.000978
+  GC_overlap: 15.60% | Pontine: range=0.806 spars=50.0%
+  Structural Acc | C->S: 1.85% (162) | C->C: 0.61% (326) | S->C: 0.00% (162) | SentBound: 0
+Step 660/3200 | Acc: 0.80% | P(target): 0.033 | P(argmax): 0.007 | PK_w: 16.52 (row mean: 1.03 max: 1.55) | GC_spars: 100.00%
+  Logit range: 0.7004 | CF_err: 0.1151 | Settle: 46.9620
+  OutProj w_surf: norm=0.1233 mean=0.000286 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.1035 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.031
+  |elig|: 28.8700 | |ltd|: 0.001010 | |ltd_tgt|: 0.016552 | ltd/w: 0.000979
+  GC_overlap: 17.84% | Pontine: range=0.843 spars=49.7%
+  Structural Acc | C->S: 1.82% (165) | C->C: 0.61% (330) | S->C: 0.00% (165) | SentBound: 0
+Step 670/3200 | Acc: 0.80% | P(target): 0.032 | P(argmax): 0.008 | PK_w: 16.53 (row mean: 1.03 max: 1.56) | GC_spars: 100.00%
+  Logit range: 0.8998 | CF_err: 0.1100 | Settle: 47.3216
+  OutProj w_surf: norm=0.1233 mean=0.000285 | Burst: mean=0.0609 frac>0.5=0.00% | CF_ema: 0.1039 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.032
+  |elig|: 28.9364 | |ltd|: 0.001001 | |ltd_tgt|: 0.015783 | ltd/w: 0.000970
+  GC_overlap: 16.06% | Pontine: range=0.684 spars=49.7%
+  Structural Acc | C->S: 1.80% (167) | C->C: 0.60% (336) | S->C: 0.00% (167) | SentBound: 0
+Step 680/3200 | Acc: 0.80% | P(target): 0.032 | P(argmax): 0.007 | PK_w: 16.55 (row mean: 1.03 max: 1.55) | GC_spars: 100.00%
+  Logit range: 0.7535 | CF_err: 0.1097 | Settle: 47.6469
+  OutProj w_surf: norm=0.1233 mean=0.000285 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.1041 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.033
+  |elig|: 28.9580 | |ltd|: 0.001009 | |ltd_tgt|: 0.015801 | ltd/w: 0.000977
+  GC_overlap: 17.67% | Pontine: range=0.780 spars=49.8%
+  Structural Acc | C->S: 1.76% (170) | C->C: 0.59% (340) | S->C: 0.00% (170) | SentBound: 0
+Step 690/3200 | Acc: 0.80% | P(target): 0.032 | P(argmax): 0.006 | PK_w: 16.56 (row mean: 1.03 max: 1.56) | GC_spars: 100.00%
+  Logit range: 0.6411 | CF_err: 0.1144 | Settle: 47.3062
+  OutProj w_surf: norm=0.1233 mean=0.000285 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.1044 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.034
+  |elig|: 28.7817 | |ltd|: 0.001024 | |ltd_tgt|: 0.016362 | ltd/w: 0.000991
+  GC_overlap: 16.31% | Pontine: range=0.685 spars=49.8%
+  Structural Acc | C->S: 1.74% (172) | C->C: 0.58% (346) | S->C: 0.00% (172) | SentBound: 0
+Step 700/3200 | Acc: 0.80% | P(target): 0.031 | P(argmax): 0.005 | PK_w: 16.57 (row mean: 1.03 max: 1.56) | GC_spars: 100.00%
+  Logit range: 0.4579 | CF_err: 0.1152 | Settle: 47.7782
+  OutProj w_surf: norm=0.1233 mean=0.000285 | Burst: mean=0.0609 frac>0.5=0.00% | CF_ema: 0.1049 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.035
+  |elig|: 28.6408 | |ltd|: 0.001019 | |ltd_tgt|: 0.016358 | ltd/w: 0.000986
+  GC_overlap: 11.94% | Pontine: range=0.703 spars=49.4%
+  Structural Acc | C->S: 1.71% (175) | C->C: 0.57% (350) | S->C: 0.00% (175) | SentBound: 0
+Step 710/3200 | Acc: 0.80% | P(target): 0.031 | P(argmax): 0.011 | PK_w: 16.58 (row mean: 1.04 max: 1.57) | GC_spars: 100.00%
+  Logit range: 1.1957 | CF_err: 0.1004 | Settle: 47.1012
+  OutProj w_surf: norm=0.1233 mean=0.000284 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.1047 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.035
+  |elig|: 28.9014 | |ltd|: 0.000997 | |ltd_tgt|: 0.014332 | ltd/w: 0.000963
+  GC_overlap: 16.78% | Pontine: range=0.626 spars=49.7%
+  Structural Acc | C->S: 1.69% (177) | C->C: 0.56% (356) | S->C: 0.00% (177) | SentBound: 0
+Step 720/3200 | Acc: 0.80% | P(target): 0.031 | P(argmax): 0.007 | PK_w: 16.60 (row mean: 1.04 max: 1.56) | GC_spars: 100.00%
+  Logit range: 0.7153 | CF_err: 0.1072 | Settle: 47.8581
+  OutProj w_surf: norm=0.1233 mean=0.000283 | Burst: mean=0.0609 frac>0.5=0.00% | CF_ema: 0.1047 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.036
+  |elig|: 29.1149 | |ltd|: 0.001030 | |ltd_tgt|: 0.015551 | ltd/w: 0.000995
+  GC_overlap: 18.87% | Pontine: range=0.565 spars=49.8%
+  Structural Acc | C->S: 1.67% (180) | C->C: 0.56% (360) | S->C: 0.00% (180) | SentBound: 0
+Step 730/3200 | Acc: 0.80% | P(target): 0.030 | P(argmax): 0.007 | PK_w: 16.61 (row mean: 1.04 max: 1.57) | GC_spars: 100.00%
+  Logit range: 0.7347 | CF_err: 0.1068 | Settle: 47.5271
+  OutProj w_surf: norm=0.1233 mean=0.000284 | Burst: mean=0.0611 frac>0.5=0.00% | CF_ema: 0.1049 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.037
+  |elig|: 29.2175 | |ltd|: 0.001032 | |ltd_tgt|: 0.015575 | ltd/w: 0.000995
+  GC_overlap: 18.84% | Pontine: range=0.612 spars=49.4%
+  Structural Acc | C->S: 1.65% (182) | C->C: 0.55% (366) | S->C: 0.00% (182) | SentBound: 0
+Step 740/3200 | Acc: 0.80% | P(target): 0.030 | P(argmax): 0.009 | PK_w: 16.62 (row mean: 1.04 max: 1.56) | GC_spars: 100.00%
+  Logit range: 0.9823 | CF_err: 0.1036 | Settle: 47.7828
+  OutProj w_surf: norm=0.1233 mean=0.000284 | Burst: mean=0.0611 frac>0.5=0.00% | CF_ema: 0.1049 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.038
+  |elig|: 29.0512 | |ltd|: 0.001022 | |ltd_tgt|: 0.014991 | ltd/w: 0.000985
+  GC_overlap: 16.03% | Pontine: range=0.522 spars=49.7%
+  Structural Acc | C->S: 1.62% (185) | C->C: 0.54% (370) | S->C: 0.00% (185) | SentBound: 0
+Step 750/3200 | Acc: 0.60% | P(target): 0.030 | P(argmax): 0.007 | PK_w: 16.64 (row mean: 1.04 max: 1.57) | GC_spars: 100.00%
+  Logit range: 0.7066 | CF_err: 0.1057 | Settle: 47.7365
+  OutProj w_surf: norm=0.1233 mean=0.000285 | Burst: mean=0.0612 frac>0.5=0.00% | CF_ema: 0.1049 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.038
+  |elig|: 28.9330 | |ltd|: 0.001029 | |ltd_tgt|: 0.015115 | ltd/w: 0.000991
+  GC_overlap: 19.21% | Pontine: range=0.463 spars=49.6%
+  Structural Acc | C->S: 1.60% (187) | C->C: 0.53% (376) | S->C: 0.00% (187) | SentBound: 0
+Step 760/3200 | Acc: 0.40% | P(target): 0.029 | P(argmax): 0.006 | PK_w: 16.65 (row mean: 1.04 max: 1.56) | GC_spars: 100.00%
+  Logit range: 0.5609 | CF_err: 0.1074 | Settle: 47.5195
+  OutProj w_surf: norm=0.1233 mean=0.000284 | Burst: mean=0.0611 frac>0.5=0.00% | CF_ema: 0.1049 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.039
+  |elig|: 28.6778 | |ltd|: 0.001026 | |ltd_tgt|: 0.015220 | ltd/w: 0.000987
+  GC_overlap: 14.23% | Pontine: range=0.445 spars=49.3%
+  Structural Acc | C->S: 1.58% (190) | C->C: 0.53% (380) | S->C: 0.00% (190) | SentBound: 0
+Step 770/3200 | Acc: 0.40% | P(target): 0.029 | P(argmax): 0.006 | PK_w: 16.66 (row mean: 1.04 max: 1.57) | GC_spars: 100.00%
+  Logit range: 0.5223 | CF_err: 0.1082 | Settle: 47.4435
+  OutProj w_surf: norm=0.1233 mean=0.000285 | Burst: mean=0.0611 frac>0.5=0.00% | CF_ema: 0.1050 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.040
+  |elig|: 28.4939 | |ltd|: 0.001029 | |ltd_tgt|: 0.015167 | ltd/w: 0.000989
+  GC_overlap: 17.20% | Pontine: range=0.770 spars=49.4%
+  Structural Acc | C->S: 1.56% (192) | C->C: 0.52% (386) | S->C: 0.00% (192) | SentBound: 0
+Step 780/3200 | Acc: 0.20% | P(target): 0.029 | P(argmax): 0.006 | PK_w: 16.67 (row mean: 1.04 max: 1.56) | GC_spars: 100.00%
+  Logit range: 0.5022 | CF_err: 0.1077 | Settle: 47.2942
+  OutProj w_surf: norm=0.1233 mean=0.000286 | Burst: mean=0.0611 frac>0.5=0.00% | CF_ema: 0.1048 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.040
+  |elig|: 28.7164 | |ltd|: 0.001040 | |ltd_tgt|: 0.015351 | ltd/w: 0.000999
+  GC_overlap: 17.42% | Pontine: range=0.806 spars=49.8%
+  Structural Acc | C->S: 1.54% (195) | C->C: 0.51% (390) | S->C: 0.00% (195) | SentBound: 0
+Step 790/3200 | Acc: 0.00% | P(target): 0.028 | P(argmax): 0.007 | PK_w: 16.68 (row mean: 1.04 max: 1.57) | GC_spars: 100.00%
+  Logit range: 0.7927 | CF_err: 0.1027 | Settle: 47.0917
+  OutProj w_surf: norm=0.1233 mean=0.000287 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.1048 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.041
+  |elig|: 28.5482 | |ltd|: 0.001025 | |ltd_tgt|: 0.014508 | ltd/w: 0.000984
+  GC_overlap: 16.47% | Pontine: range=0.492 spars=49.5%
+  Structural Acc | C->S: 1.52% (197) | C->C: 0.51% (396) | S->C: 0.00% (197) | SentBound: 0
+Step 800/3200 | Acc: 0.00% | P(target): 0.028 | P(argmax): 0.007 | PK_w: 16.69 (row mean: 1.04 max: 1.56) | GC_spars: 100.00%
+  Logit range: 0.7493 | CF_err: 0.1022 | Settle: 47.7438
+  OutProj w_surf: norm=0.1233 mean=0.000287 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.1047 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.042
+  |elig|: 28.6049 | |ltd|: 0.001028 | |ltd_tgt|: 0.014518 | ltd/w: 0.000987
+  GC_overlap: 18.84% | Pontine: range=0.526 spars=49.8%
+  Structural Acc | C->S: 1.50% (200) | C->C: 0.50% (400) | S->C: 0.00% (200) | SentBound: 0
+Step 810/3200 | Acc: 0.00% | P(target): 0.028 | P(argmax): 0.005 | PK_w: 16.70 (row mean: 1.04 max: 1.57) | GC_spars: 100.00%
+  Logit range: 0.3478 | CF_err: 0.1054 | Settle: 47.7153
+  OutProj w_surf: norm=0.1233 mean=0.000286 | Burst: mean=0.0611 frac>0.5=0.00% | CF_ema: 0.1044 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.042
+  |elig|: 28.7161 | |ltd|: 0.001050 | |ltd_tgt|: 0.015018 | ltd/w: 0.001007
+  GC_overlap: 16.58% | Pontine: range=1.090 spars=49.5%
+  Structural Acc | C->S: 1.49% (202) | C->C: 0.49% (406) | S->C: 0.00% (202) | SentBound: 0
+Step 820/3200 | Acc: 0.00% | P(target): 0.027 | P(argmax): 0.005 | PK_w: 16.71 (row mean: 1.04 max: 1.56) | GC_spars: 100.00%
+  Logit range: 0.4177 | CF_err: 0.1026 | Settle: 47.3404
+  OutProj w_surf: norm=0.1233 mean=0.000285 | Burst: mean=0.0611 frac>0.5=0.00% | CF_ema: 0.1040 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.043
+  |elig|: 28.7586 | |ltd|: 0.001051 | |ltd_tgt|: 0.014688 | ltd/w: 0.001008
+  GC_overlap: 16.97% | Pontine: range=0.846 spars=49.7%
+  Structural Acc | C->S: 1.46% (205) | C->C: 0.49% (410) | S->C: 0.00% (205) | SentBound: 0
+Step 830/3200 | Acc: 0.00% | P(target): 0.027 | P(argmax): 0.006 | PK_w: 16.72 (row mean: 1.04 max: 1.56) | GC_spars: 100.00%
+  Logit range: 0.5119 | CF_err: 0.0999 | Settle: 47.9180
+  OutProj w_surf: norm=0.1233 mean=0.000285 | Burst: mean=0.0611 frac>0.5=0.00% | CF_ema: 0.1035 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.044
+  |elig|: 28.6946 | |ltd|: 0.001046 | |ltd_tgt|: 0.014270 | ltd/w: 0.001002
+  GC_overlap: 15.90% | Pontine: range=0.805 spars=49.9%
+  Structural Acc | C->S: 1.45% (207) | C->C: 0.48% (416) | S->C: 0.00% (207) | SentBound: 0
+Step 840/3200 | Acc: 0.00% | P(target): 0.027 | P(argmax): 0.008 | PK_w: 16.73 (row mean: 1.04 max: 1.56) | GC_spars: 100.00%
+  Logit range: 0.8046 | CF_err: 0.0949 | Settle: 47.7032
+  OutProj w_surf: norm=0.1233 mean=0.000286 | Burst: mean=0.0612 frac>0.5=0.00% | CF_ema: 0.1031 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.044
+  |elig|: 28.6560 | |ltd|: 0.001037 | |ltd_tgt|: 0.013513 | ltd/w: 0.000993
+  GC_overlap: 17.25% | Pontine: range=0.614 spars=49.6%
+  Structural Acc | C->S: 1.43% (210) | C->C: 0.48% (420) | S->C: 0.00% (210) | SentBound: 0
+Step 850/3200 | Acc: 0.00% | P(target): 0.027 | P(argmax): 0.005 | PK_w: 16.74 (row mean: 1.04 max: 1.56) | GC_spars: 100.00%
+  Logit range: 0.3947 | CF_err: 0.0990 | Settle: 47.5961
+  OutProj w_surf: norm=0.1233 mean=0.000286 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.1025 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.045
+  |elig|: 28.8621 | |ltd|: 0.001062 | |ltd_tgt|: 0.014184 | ltd/w: 0.001017
+  GC_overlap: 18.12% | Pontine: range=0.828 spars=49.5%
+  Structural Acc | C->S: 1.42% (212) | C->C: 0.47% (426) | S->C: 0.00% (212) | SentBound: 0
+Step 860/3200 | Acc: 0.00% | P(target): 0.026 | P(argmax): 0.005 | PK_w: 16.75 (row mean: 1.05 max: 1.55) | GC_spars: 100.00%
+  Logit range: 0.3952 | CF_err: 0.0986 | Settle: 47.6557
+  OutProj w_surf: norm=0.1233 mean=0.000286 | Burst: mean=0.0611 frac>0.5=0.00% | CF_ema: 0.1020 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.046
+  |elig|: 28.8788 | |ltd|: 0.001066 | |ltd_tgt|: 0.014235 | ltd/w: 0.001020
+  GC_overlap: 18.87% | Pontine: range=0.797 spars=49.2%
+  Structural Acc | C->S: 1.40% (215) | C->C: 0.47% (430) | S->C: 0.00% (215) | SentBound: 0
+Step 870/3200 | Acc: 0.00% | P(target): 0.026 | P(argmax): 0.005 | PK_w: 16.76 (row mean: 1.05 max: 1.56) | GC_spars: 100.00%
+  Logit range: 0.4564 | CF_err: 0.0978 | Settle: 47.6665
+  OutProj w_surf: norm=0.1233 mean=0.000286 | Burst: mean=0.0611 frac>0.5=0.00% | CF_ema: 0.1016 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.046
+  |elig|: 28.6762 | |ltd|: 0.001057 | |ltd_tgt|: 0.013913 | ltd/w: 0.001011
+  GC_overlap: 16.69% | Pontine: range=0.784 spars=49.8%
+  Structural Acc | C->S: 1.38% (217) | C->C: 0.46% (436) | S->C: 0.00% (217) | SentBound: 0
+Step 880/3200 | Acc: 0.00% | P(target): 0.026 | P(argmax): 0.005 | PK_w: 16.77 (row mean: 1.05 max: 1.55) | GC_spars: 100.00%
+  Logit range: 0.4342 | CF_err: 0.0985 | Settle: 47.9145
+  OutProj w_surf: norm=0.1233 mean=0.000286 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.1012 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.047
+  |elig|: 28.6029 | |ltd|: 0.001056 | |ltd_tgt|: 0.013992 | ltd/w: 0.001008
+  GC_overlap: 13.10% | Pontine: range=0.702 spars=49.8%
+  Structural Acc | C->S: 1.36% (220) | C->C: 0.45% (440) | S->C: 0.00% (220) | SentBound: 0
+Step 890/3200 | Acc: 0.00% | P(target): 0.026 | P(argmax): 0.006 | PK_w: 16.78 (row mean: 1.05 max: 1.55) | GC_spars: 100.00%
+  Logit range: 0.4521 | CF_err: 0.0944 | Settle: 47.8279
+  OutProj w_surf: norm=0.1233 mean=0.000286 | Burst: mean=0.0612 frac>0.5=0.00% | CF_ema: 0.1006 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.048
+  |elig|: 28.6187 | |ltd|: 0.001057 | |ltd_tgt|: 0.013391 | ltd/w: 0.001009
+  GC_overlap: 17.36% | Pontine: range=0.554 spars=49.6%
+  Structural Acc | C->S: 1.35% (222) | C->C: 0.45% (446) | S->C: 0.00% (222) | SentBound: 0
+Step 900/3200 | Acc: 0.00% | P(target): 0.025 | P(argmax): 0.005 | PK_w: 16.79 (row mean: 1.05 max: 1.55) | GC_spars: 100.00%
+  Logit range: 0.3414 | CF_err: 0.1005 | Settle: 47.5428
+  OutProj w_surf: norm=0.1233 mean=0.000286 | Burst: mean=0.0611 frac>0.5=0.00% | CF_ema: 0.1004 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.048
+  |elig|: 28.3358 | |ltd|: 0.001052 | |ltd_tgt|: 0.014112 | ltd/w: 0.001004
+  GC_overlap: 15.27% | Pontine: range=0.834 spars=49.3%
+  Structural Acc | C->S: 1.33% (225) | C->C: 0.44% (450) | S->C: 0.00% (225) | SentBound: 0
+Step 910/3200 | Acc: 0.00% | P(target): 0.025 | P(argmax): 0.009 | PK_w: 16.80 (row mean: 1.05 max: 1.55) | GC_spars: 100.00%
+  Logit range: 0.8981 | CF_err: 0.0904 | Settle: 47.7161
+  OutProj w_surf: norm=0.1233 mean=0.000287 | Burst: mean=0.0612 frac>0.5=0.00% | CF_ema: 0.1001 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.049
+  |elig|: 28.3370 | |ltd|: 0.001038 | |ltd_tgt|: 0.012673 | ltd/w: 0.000990
+  GC_overlap: 17.45% | Pontine: range=0.529 spars=50.0%
+  Structural Acc | C->S: 1.32% (227) | C->C: 0.44% (456) | S->C: 0.00% (227) | SentBound: 0
+Step 920/3200 | Acc: 0.00% | P(target): 0.025 | P(argmax): 0.008 | PK_w: 16.81 (row mean: 1.05 max: 1.54) | GC_spars: 100.00%
+  Logit range: 0.8730 | CF_err: 0.0893 | Settle: 47.5276
+  OutProj w_surf: norm=0.1233 mean=0.000287 | Burst: mean=0.0611 frac>0.5=0.00% | CF_ema: 0.0995 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.049
+  |elig|: 28.3187 | |ltd|: 0.001042 | |ltd_tgt|: 0.012550 | ltd/w: 0.000993
+  GC_overlap: 18.61% | Pontine: range=0.566 spars=49.8%
+  Structural Acc | C->S: 1.30% (230) | C->C: 0.43% (460) | S->C: 0.00% (230) | SentBound: 0
+Step 930/3200 | Acc: 0.00% | P(target): 0.025 | P(argmax): 0.005 | PK_w: 16.82 (row mean: 1.05 max: 1.55) | GC_spars: 100.00%
+  Logit range: 0.4205 | CF_err: 0.0974 | Settle: 48.0203
+  OutProj w_surf: norm=0.1233 mean=0.000286 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.0990 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.050
+  |elig|: 28.4581 | |ltd|: 0.001063 | |ltd_tgt|: 0.013766 | ltd/w: 0.001013
+  GC_overlap: 16.45% | Pontine: range=0.944 spars=49.6%
+  Structural Acc | C->S: 1.29% (232) | C->C: 0.43% (466) | S->C: 0.00% (232) | SentBound: 0
+Step 940/3200 | Acc: 0.00% | P(target): 0.025 | P(argmax): 0.011 | PK_w: 16.83 (row mean: 1.05 max: 1.54) | GC_spars: 100.00%
+  Logit range: 1.1446 | CF_err: 0.0843 | Settle: 47.9374
+  OutProj w_surf: norm=0.1233 mean=0.000286 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.0986 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.050
+  |elig|: 28.3592 | |ltd|: 0.001039 | |ltd_tgt|: 0.011874 | ltd/w: 0.000990
+  GC_overlap: 15.33% | Pontine: range=0.514 spars=49.8%
+  Structural Acc | C->S: 1.28% (235) | C->C: 0.43% (470) | S->C: 0.00% (235) | SentBound: 0
+Step 950/3200 | Acc: 0.00% | P(target): 0.024 | P(argmax): 0.006 | PK_w: 16.83 (row mean: 1.05 max: 1.54) | GC_spars: 100.00%
+  Logit range: 0.4473 | CF_err: 0.0910 | Settle: 47.9833
+  OutProj w_surf: norm=0.1233 mean=0.000285 | Burst: mean=0.0611 frac>0.5=0.00% | CF_ema: 0.0979 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.051
+  |elig|: 28.3769 | |ltd|: 0.001061 | |ltd_tgt|: 0.012834 | ltd/w: 0.001010
+  GC_overlap: 15.62% | Pontine: range=0.529 spars=49.6%
+  Structural Acc | C->S: 1.27% (237) | C->C: 0.42% (476) | S->C: 0.00% (237) | SentBound: 0
+Step 960/3200 | Acc: 0.00% | P(target): 0.024 | P(argmax): 0.005 | PK_w: 16.84 (row mean: 1.05 max: 1.53) | GC_spars: 100.00%
+  Logit range: 0.4193 | CF_err: 0.0895 | Settle: 47.7714
+  OutProj w_surf: norm=0.1233 mean=0.000286 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.0971 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.051
+  |elig|: 28.5445 | |ltd|: 0.001070 | |ltd_tgt|: 0.012775 | ltd/w: 0.001018
+  GC_overlap: 14.04% | Pontine: range=0.603 spars=49.2%
+  Structural Acc | C->S: 1.25% (240) | C->C: 0.42% (480) | S->C: 0.00% (240) | SentBound: 0
+Step 970/3200 | Acc: 0.00% | P(target): 0.024 | P(argmax): 0.007 | PK_w: 16.85 (row mean: 1.05 max: 1.54) | GC_spars: 100.00%
+  Logit range: 0.6397 | CF_err: 0.0868 | Settle: 47.8584
+  OutProj w_surf: norm=0.1233 mean=0.000286 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.0965 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.052
+  |elig|: 28.4291 | |ltd|: 0.001065 | |ltd_tgt|: 0.012286 | ltd/w: 0.001012
+  GC_overlap: 15.19% | Pontine: range=0.760 spars=49.9%
+  Structural Acc | C->S: 1.24% (242) | C->C: 0.41% (486) | S->C: 0.00% (242) | SentBound: 0
+Step 980/3200 | Acc: 0.00% | P(target): 0.024 | P(argmax): 0.005 | PK_w: 16.86 (row mean: 1.05 max: 1.53) | GC_spars: 100.00%
+  Logit range: 0.3660 | CF_err: 0.0874 | Settle: 47.8590
+  OutProj w_surf: norm=0.1233 mean=0.000286 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.0957 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.053
+  |elig|: 28.5169 | |ltd|: 0.001076 | |ltd_tgt|: 0.012428 | ltd/w: 0.001023
+  GC_overlap: 15.76% | Pontine: range=0.613 spars=49.7%
+  Structural Acc | C->S: 1.22% (245) | C->C: 0.41% (490) | S->C: 0.00% (245) | SentBound: 0
+Step 990/3200 | Acc: 0.00% | P(target): 0.024 | P(argmax): 0.004 | PK_w: 16.87 (row mean: 1.05 max: 1.53) | GC_spars: 100.00%
+  Logit range: 0.6576 | CF_err: 0.0961 | Settle: 47.8222
+  OutProj w_surf: norm=0.1233 mean=0.000286 | Burst: mean=0.0609 frac>0.5=0.00% | CF_ema: 0.0953 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.053
+  |elig|: 28.2879 | |ltd|: 0.001077 | |ltd_tgt|: 0.013502 | ltd/w: 0.001023
+  GC_overlap: 15.68% | Pontine: range=0.804 spars=49.6%
+  Structural Acc | C->S: 1.21% (247) | C->C: 0.40% (496) | S->C: 0.00% (247) | SentBound: 0
+
+  [STRUCTURAL] Pruned and rewired 69 weak output projections.
+Step 1000/3200 | Acc: 0.00% | P(target): 0.023 | P(argmax): 0.004 | PK_w: 16.88 (row mean: 1.05 max: 1.53) | GC_spars: 100.00%
+  Logit range: 0.2757 | CF_err: 0.0938 | Settle: 47.4363
+  OutProj w_surf: norm=0.8796 mean=0.002804 | Burst: mean=0.0609 frac>0.5=0.00% | CF_ema: 0.0950 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.054
+  |elig|: 28.1583 | |ltd|: 0.001070 | |ltd_tgt|: 0.013102 | ltd/w: 0.001016
+  GC_overlap: 13.99% | Pontine: range=0.632 spars=49.3%
+
+[DIAGNOSTIC] Running Linear Probe on 200 samples...
+  >>> LINEAR PROBE ACCURACY: 100.00% (Internal Representation Quality)
+  >>> Probe model cached for cerebellar distillation
+  [!] ALERT: Representation (100.0%) >> Readout (0.0%). Readout is the bottleneck.
+
+[READOUT] (19/80 correct)
+  Target: bc abc abc abc abc abc abc abc abc abc abc abc abc abc abc abc abc abc abc abc a
+  Output: ...a  .     Waaaa aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaa.aaaaaa.aaa
+  Match:  ---+------+----+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+  [DIVERSITY] 32 unique predictions / 100 samples | Top: 'a' (48%)
+  Structural Acc | C->S: 1.20% (250) | C->C: 0.40% (500) | S->C: 0.00% (250) | SentBound: 0
+Step 1010/3200 | Acc: 0.00% | P(target): 0.023 | P(argmax): 0.006 | PK_w: 16.88 (row mean: 1.05 max: 1.53) | GC_spars: 99.99%
+  Logit range: 0.5228 | CF_err: 0.0884 | Settle: 46.5424
+  OutProj w_surf: norm=0.7313 mean=0.002251 | Burst: mean=0.0481 frac>0.5=0.00% | CF_ema: 0.0949 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.054
+  |elig|: 30.5088 | |ltd|: 0.001148 | |ltd_tgt|: 0.012826 | ltd/w: 0.001090
+  GC_overlap: 12.42% | Pontine: range=0.463 spars=49.9%
+  Structural Acc | C->S: 1.19% (252) | C->C: 0.40% (506) | S->C: 0.00% (252) | SentBound: 0
+Step 1020/3200 | Acc: 0.00% | P(target): 0.023 | P(argmax): 0.007 | PK_w: 16.89 (row mean: 1.05 max: 1.51) | GC_spars: 100.00%
+  Logit range: 0.6623 | CF_err: 0.0838 | Settle: 47.1119
+  OutProj w_surf: norm=0.6792 mean=0.001978 | Burst: mean=0.0536 frac>0.5=0.00% | CF_ema: 0.0944 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.054
+  |elig|: 29.8801 | |ltd|: 0.001128 | |ltd_tgt|: 0.012214 | ltd/w: 0.001070
+  GC_overlap: 17.06% | Pontine: range=0.542 spars=49.8%
+  Structural Acc | C->S: 1.18% (255) | C->C: 0.39% (510) | S->C: 0.00% (255) | SentBound: 0
+Step 1030/3200 | Acc: 0.00% | P(target): 0.023 | P(argmax): 0.006 | PK_w: 16.89 (row mean: 1.05 max: 1.52) | GC_spars: 100.00%
+  Logit range: 0.4315 | CF_err: 0.0847 | Settle: 46.9507
+  OutProj w_surf: norm=0.6622 mean=0.001842 | Burst: mean=0.0570 frac>0.5=0.00% | CF_ema: 0.0937 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.055
+  |elig|: 29.4221 | |ltd|: 0.001119 | |ltd_tgt|: 0.012450 | ltd/w: 0.001061
+  GC_overlap: 17.62% | Pontine: range=0.519 spars=49.9%
+  Structural Acc | C->S: 1.17% (257) | C->C: 0.39% (516) | S->C: 0.00% (257) | SentBound: 0
+Step 1040/3200 | Acc: 0.00% | P(target): 0.023 | P(argmax): 0.007 | PK_w: 16.90 (row mean: 1.05 max: 1.51) | GC_spars: 100.00%
+  Logit range: 0.6218 | CF_err: 0.0841 | Settle: 47.6269
+  OutProj w_surf: norm=0.6568 mean=0.001762 | Burst: mean=0.0590 frac>0.5=0.00% | CF_ema: 0.0933 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.055
+  |elig|: 29.1269 | |ltd|: 0.001105 | |ltd_tgt|: 0.012285 | ltd/w: 0.001047
+  GC_overlap: 16.47% | Pontine: range=0.446 spars=49.7%
+  Structural Acc | C->S: 1.15% (260) | C->C: 0.38% (520) | S->C: 0.00% (260) | SentBound: 0
+Step 1050/3200 | Acc: 0.00% | P(target): 0.023 | P(argmax): 0.006 | PK_w: 16.91 (row mean: 1.06 max: 1.51) | GC_spars: 100.00%
+  Logit range: 0.4125 | CF_err: 0.0861 | Settle: 47.7899
+  OutProj w_surf: norm=0.6551 mean=0.001713 | Burst: mean=0.0601 frac>0.5=0.00% | CF_ema: 0.0927 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.056
+  |elig|: 28.9164 | |ltd|: 0.001102 | |ltd_tgt|: 0.012433 | ltd/w: 0.001045
+  GC_overlap: 19.56% | Pontine: range=0.924 spars=49.7%
+  Structural Acc | C->S: 1.15% (262) | C->C: 0.38% (526) | S->C: 0.00% (262) | SentBound: 0
+Step 1060/3200 | Acc: 0.00% | P(target): 0.022 | P(argmax): 0.008 | PK_w: 16.92 (row mean: 1.06 max: 1.51) | GC_spars: 100.00%
+  Logit range: 0.8517 | CF_err: 0.0764 | Settle: 48.0564
+  OutProj w_surf: norm=0.6545 mean=0.001682 | Burst: mean=0.0605 frac>0.5=0.00% | CF_ema: 0.0918 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.056
+  |elig|: 28.9232 | |ltd|: 0.001096 | |ltd_tgt|: 0.011048 | ltd/w: 0.001038
+  GC_overlap: 17.67% | Pontine: range=0.705 spars=49.8%
+  Structural Acc | C->S: 1.13% (265) | C->C: 0.38% (530) | S->C: 0.00% (265) | SentBound: 0
+Step 1070/3200 | Acc: 0.00% | P(target): 0.022 | P(argmax): 0.007 | PK_w: 16.93 (row mean: 1.06 max: 1.51) | GC_spars: 100.00%
+  Logit range: 0.6227 | CF_err: 0.0800 | Settle: 47.8950
+  OutProj w_surf: norm=0.6544 mean=0.001664 | Burst: mean=0.0607 frac>0.5=0.00% | CF_ema: 0.0910 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.057
+  |elig|: 28.8759 | |ltd|: 0.001103 | |ltd_tgt|: 0.011544 | ltd/w: 0.001045
+  GC_overlap: 19.27% | Pontine: range=0.687 spars=49.6%
+  Structural Acc | C->S: 1.12% (267) | C->C: 0.37% (536) | S->C: 0.00% (267) | SentBound: 0
+Step 1080/3200 | Acc: 0.00% | P(target): 0.022 | P(argmax): 0.007 | PK_w: 16.94 (row mean: 1.06 max: 1.51) | GC_spars: 100.00%
+  Logit range: 0.6004 | CF_err: 0.0810 | Settle: 48.0004
+  OutProj w_surf: norm=0.6543 mean=0.001653 | Burst: mean=0.0608 frac>0.5=0.00% | CF_ema: 0.0905 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.057
+  |elig|: 28.7179 | |ltd|: 0.001100 | |ltd_tgt|: 0.011586 | ltd/w: 0.001041
+  GC_overlap: 17.93% | Pontine: range=0.578 spars=49.7%
+  Structural Acc | C->S: 1.11% (270) | C->C: 0.37% (540) | S->C: 0.00% (270) | SentBound: 0
+Step 1090/3200 | Acc: 0.00% | P(target): 0.022 | P(argmax): 0.006 | PK_w: 16.95 (row mean: 1.06 max: 1.51) | GC_spars: 100.00%
+  Logit range: 0.5748 | CF_err: 0.0774 | Settle: 47.9792
+  OutProj w_surf: norm=0.6543 mean=0.001648 | Burst: mean=0.0609 frac>0.5=0.00% | CF_ema: 0.0897 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.058
+  |elig|: 29.0267 | |ltd|: 0.001110 | |ltd_tgt|: 0.011189 | ltd/w: 0.001050
+  GC_overlap: 19.04% | Pontine: range=0.583 spars=49.7%
+  Structural Acc | C->S: 1.10% (272) | C->C: 0.37% (546) | S->C: 0.00% (272) | SentBound: 0
+Step 1100/3200 | Acc: 0.00% | P(target): 0.022 | P(argmax): 0.005 | PK_w: 16.96 (row mean: 1.06 max: 1.50) | GC_spars: 100.00%
+  Logit range: 0.3769 | CF_err: 0.0813 | Settle: 48.2173
+  OutProj w_surf: norm=0.6543 mean=0.001645 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.0890 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.058
+  |elig|: 28.8754 | |ltd|: 0.001114 | |ltd_tgt|: 0.011739 | ltd/w: 0.001053
+  GC_overlap: 17.42% | Pontine: range=0.937 spars=49.3%
+  Structural Acc | C->S: 1.09% (275) | C->C: 0.36% (550) | S->C: 0.00% (275) | SentBound: 0
+Step 1110/3200 | Acc: 0.00% | P(target): 0.022 | P(argmax): 0.006 | PK_w: 16.96 (row mean: 1.06 max: 1.51) | GC_spars: 100.00%
+  Logit range: 0.4284 | CF_err: 0.0821 | Settle: 47.5255
+  OutProj w_surf: norm=0.6543 mean=0.001644 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.0886 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.059
+  |elig|: 28.4887 | |ltd|: 0.001097 | |ltd_tgt|: 0.011613 | ltd/w: 0.001036
+  GC_overlap: 16.81% | Pontine: range=0.559 spars=49.4%
+  Structural Acc | C->S: 1.08% (277) | C->C: 0.36% (556) | S->C: 0.00% (277) | SentBound: 0
+Step 1120/3200 | Acc: 0.00% | P(target): 0.021 | P(argmax): 0.005 | PK_w: 16.97 (row mean: 1.06 max: 1.50) | GC_spars: 100.00%
+  Logit range: 0.3175 | CF_err: 0.0832 | Settle: 48.0822
+  OutProj w_surf: norm=0.6543 mean=0.001642 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.0880 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.059
+  |elig|: 28.4590 | |ltd|: 0.001105 | |ltd_tgt|: 0.011778 | ltd/w: 0.001043
+  GC_overlap: 15.00% | Pontine: range=1.272 spars=49.8%
+  Structural Acc | C->S: 1.07% (280) | C->C: 0.36% (560) | S->C: 0.00% (280) | SentBound: 0
+Step 1130/3200 | Acc: 0.00% | P(target): 0.021 | P(argmax): 0.006 | PK_w: 16.98 (row mean: 1.06 max: 1.50) | GC_spars: 100.00%
+  Logit range: 0.4005 | CF_err: 0.0784 | Settle: 48.2221
+  OutProj w_surf: norm=0.6543 mean=0.001642 | Burst: mean=0.0611 frac>0.5=0.00% | CF_ema: 0.0873 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.060
+  |elig|: 28.4459 | |ltd|: 0.001097 | |ltd_tgt|: 0.011079 | ltd/w: 0.001035
+  GC_overlap: 15.79% | Pontine: range=0.568 spars=49.8%
+  Structural Acc | C->S: 1.06% (282) | C->C: 0.35% (566) | S->C: 0.00% (282) | SentBound: 0
+Step 1140/3200 | Acc: 0.00% | P(target): 0.021 | P(argmax): 0.005 | PK_w: 16.99 (row mean: 1.06 max: 1.49) | GC_spars: 100.00%
+  Logit range: 0.3462 | CF_err: 0.0788 | Settle: 47.9938
+  OutProj w_surf: norm=0.6543 mean=0.001642 | Burst: mean=0.0609 frac>0.5=0.00% | CF_ema: 0.0864 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.060
+  |elig|: 28.5494 | |ltd|: 0.001105 | |ltd_tgt|: 0.011216 | ltd/w: 0.001042
+  GC_overlap: 16.56% | Pontine: range=0.509 spars=49.4%
+  Structural Acc | C->S: 1.05% (285) | C->C: 0.35% (570) | S->C: 0.00% (285) | SentBound: 0
+Step 1150/3200 | Acc: 0.00% | P(target): 0.021 | P(argmax): 0.006 | PK_w: 17.00 (row mean: 1.06 max: 1.50) | GC_spars: 100.00%
+  Logit range: 0.4188 | CF_err: 0.0808 | Settle: 47.5165
+  OutProj w_surf: norm=0.6543 mean=0.001642 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.0860 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.061
+  |elig|: 28.6678 | |ltd|: 0.001111 | |ltd_tgt|: 0.011579 | ltd/w: 0.001048
+  GC_overlap: 15.95% | Pontine: range=0.654 spars=49.1%
+  Structural Acc | C->S: 1.05% (287) | C->C: 0.35% (576) | S->C: 0.00% (287) | SentBound: 0
+Step 1160/3200 | Acc: 0.00% | P(target): 0.021 | P(argmax): 0.005 | PK_w: 17.00 (row mean: 1.06 max: 1.49) | GC_spars: 100.00%
+  Logit range: 0.2947 | CF_err: 0.0836 | Settle: 47.8200
+  OutProj w_surf: norm=0.6543 mean=0.001642 | Burst: mean=0.0611 frac>0.5=0.00% | CF_ema: 0.0856 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.061
+  |elig|: 28.5802 | |ltd|: 0.001113 | |ltd_tgt|: 0.011954 | ltd/w: 0.001049
+  GC_overlap: 15.76% | Pontine: range=0.605 spars=49.6%
+  Structural Acc | C->S: 1.03% (290) | C->C: 0.34% (580) | S->C: 0.00% (290) | SentBound: 0
+Step 1170/3200 | Acc: 0.00% | P(target): 0.021 | P(argmax): 0.006 | PK_w: 17.01 (row mean: 1.06 max: 1.49) | GC_spars: 100.00%
+  Logit range: 0.4263 | CF_err: 0.0759 | Settle: 48.0800
+  OutProj w_surf: norm=0.6543 mean=0.001642 | Burst: mean=0.0611 frac>0.5=0.00% | CF_ema: 0.0848 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.062
+  |elig|: 28.5050 | |ltd|: 0.001097 | |ltd_tgt|: 0.010768 | ltd/w: 0.001033
+  GC_overlap: 16.61% | Pontine: range=0.760 spars=49.7%
+  Structural Acc | C->S: 1.03% (292) | C->C: 0.34% (586) | S->C: 0.00% (292) | SentBound: 0
+Step 1180/3200 | Acc: 0.00% | P(target): 0.021 | P(argmax): 0.006 | PK_w: 17.02 (row mean: 1.06 max: 1.49) | GC_spars: 100.00%
+  Logit range: 0.4830 | CF_err: 0.0763 | Settle: 48.4006
+  OutProj w_surf: norm=0.6543 mean=0.001642 | Burst: mean=0.0611 frac>0.5=0.00% | CF_ema: 0.0842 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.062
+  |elig|: 28.7513 | |ltd|: 0.001110 | |ltd_tgt|: 0.010960 | ltd/w: 0.001046
+  GC_overlap: 20.74% | Pontine: range=0.814 spars=49.7%
+  Structural Acc | C->S: 1.02% (295) | C->C: 0.34% (590) | S->C: 0.00% (295) | SentBound: 0
+Step 1190/3200 | Acc: 0.00% | P(target): 0.020 | P(argmax): 0.005 | PK_w: 17.02 (row mean: 1.06 max: 1.49) | GC_spars: 100.00%
+  Logit range: 0.2726 | CF_err: 0.0773 | Settle: 47.8856
+  OutProj w_surf: norm=0.6543 mean=0.001641 | Burst: mean=0.0610 frac>0.5=0.00% | CF_ema: 0.0835 | IO_space: 100.0%
+  PK_silent: 0.0% | MF_gain: 1.00x | MLI: 1.000 | Ca_th: 0.5000 | PK_row_ratio: 1.063
+  |elig|: 29.0298 | |ltd|: 0.001129 | |ltd_tgt|: 0.011269 | ltd/w: 0.001063
+  GC_overlap: 20.56% | Pontine: range=1.175 spars=49.7%
+  Structural Acc | C->S: 1.01% (297) | C->C: 0.34% (596) | S->C: 0.00% (297) | SentBound: 0
