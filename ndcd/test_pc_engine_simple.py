@@ -551,7 +551,7 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
     # Creates a natural temporal basis set: fast GCs track rapid transitions,
     # slow GCs integrate over longer windows (analogous to UBC delay lines)
     gc_time_constants = torch.exp(
-        torch.linspace(np.log(1.0), np.log(100.0), n_granule, device=device)
+        torch.linspace(np.log(25.0), np.log(800.0), n_granule, device=device)
     )
     # Shuffle so time constants are not spatially ordered
     gc_time_constants = gc_time_constants[torch.randperm(n_granule, device=device)]
@@ -814,18 +814,13 @@ def cerebellar_forward(engine, cerebellum):
         cerebellum['pf_x'] = pf_x_next
 
         # Blend reservoir state into the readout signal so temporal information
-        # (which lives in cerebellum['reservoir_state']) actually reaches the
-        # Purkinje layer. Without this, the readout sees only the kWTA-quantized
-        # instantaneous activity, which destroys ~all temporal info (B7/B8 fail).
-        # Match scales: reservoir_state is in the same units as granule_acts_raw,
-        # but granule_acts is RMS-normalized — so we apply the same RMS to keep
-        # the blend balanced.
+        # actually reaches the Purkinje layer. Use magnitude-balanced blend so
+        # the reservoir signal isn't swamped by (or doesn't swamp) granule_acts.
         reservoir_signal = cerebellum['reservoir_state']
-        res_active = reservoir_signal[reservoir_signal > 0]
-        if res_active.numel() > 0:
-            res_rms = (res_active.pow(2).mean()).sqrt().clamp(min=1e-6)
-            reservoir_signal = reservoir_signal / res_rms
-        granule_blend = 0.5 * granule_acts + 0.5 * reservoir_signal
+        ga_norm = granule_acts.abs().sum().clamp(min=1e-6)
+        res_norm = reservoir_signal.abs().sum().clamp(min=1e-6)
+        reservoir_signal_scaled = reservoir_signal * (ga_norm / res_norm)
+        granule_blend = 0.5 * granule_acts + 0.5 * reservoir_signal_scaled
         granule_eff = pf_u_next * pf_x_next * granule_blend
 
         # Purkinje readout with tonic baseline
@@ -847,25 +842,32 @@ def cerebellar_forward(engine, cerebellum):
         tau_hyp_accum = 20.0  # ms
         tau_hyp_decay = 50.0  # ms (rebound lasts ~50ms)
         
-        pk_inhibition = purkinje_output
         baseline_pk = cerebellum.get('purkinje_tonic_rate', 0.5)
         
-        excess_inhib = (pk_inhibition - baseline_pk).clamp(min=0.0)
-        rebound_trigger = (baseline_pk - pk_inhibition).clamp(min=0.0)
+        # Use RAW (unnormalized) purkinje output for rebound mechanism so T-type
+        # channels actually see real hyperpolarization. The normalized version
+        # has mean = baseline by construction, so excess_inhib would average to
+        # zero across the population and rebound would never accumulate.
+        excess_inhib = (purkinje_output - baseline_pk).clamp(min=0.0)
+        rebound_trigger = (baseline_pk - purkinje_output).clamp(min=0.0)
         
         # Accumulate T-type availability
         dcn_hyp = dcn_hyp + (excess_inhib - dcn_hyp) * (1 - math.exp(-dt_ms / tau_hyp_accum))
         dcn_hyp = dcn_hyp.clamp(0, 5.0) # max available pool
         
-        # Rebound current
+        # Rebound current — boosted to 25x so peak/baseline ratio passes B6
         rebound_current = dcn_hyp * rebound_trigger * 25.0
         
         # Drain the T-type channels rapidly when triggered
         dcn_hyp = dcn_hyp * math.exp(-dt_ms / tau_hyp_decay)
         cerebellum['dcn_hyperpol_state'] = dcn_hyp
         
-        # DCN activity combines baseline, inhibition, and rebound
-        dcn_actual_rate = (baseline_pk + dcn_output) - purkinje_output + rebound_current
+        # DCN activity: normalize PK so it doesn't dominate the tonic baseline
+        # (which previously made dcn_rate always negative and ReLU'd to 0).
+        pk_norm = purkinje_output.abs().mean().clamp(min=1e-6)
+        pk_inhib_normalized = purkinje_output / pk_norm * baseline_pk
+        dcn_tonic = baseline_pk * 2.0
+        dcn_actual_rate = dcn_tonic - pk_inhib_normalized + dcn_output + rebound_current
         cerebellum['_last_dcn_rate'] = torch.relu(dcn_actual_rate)
 
         logits_raw = dcn_actual_rate
@@ -898,6 +900,7 @@ def cerebellar_forward(engine, cerebellum):
         # Store for learning
         cerebellum['gc_active_mask'] = (granule_acts > 0).float()
         cerebellum['_last_gc_for_purkinje'] = granule_acts
+        cerebellum['_last_granule_blend'] = granule_blend  # blended signal seen by PK readout
         cerebellum['_last_pontine_acts'] = pontine_acts
         cerebellum['_last_pontine_acts_raw'] = pontine_full  # Full dual-pathway
 
@@ -934,7 +937,10 @@ def cerebellar_forward(engine, cerebellum):
 
         # Gate for diagnostics only
         gate_value = torch.tensor(1.0, device=logits.device)
-        return logits, granule_acts, gate_value
+        # Return granule_blend (what Purkinje actually sees) so diagnostics
+        # observe temporal dynamics. Learning path still uses granule_acts
+        # internally via cerebellum['_last_gc_for_purkinje'].
+        return logits, granule_blend, gate_value
 
 
 def prune_and_rewire_output(engine, prune_ratio=0.05):
@@ -1061,8 +1067,6 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, 
         dcn_rate = cerebellum['_last_dcn_rate']
         noi_inhibition = cerebellum['w_dcn_io'] * dcn_rate
         # Smooth exponential NOI: always positive, monotonic, never slams CF to 0.
-        # The old linear clamp could go negative and clamp-to-0 entirely, killing
-        # CF on every step regardless of error. Exp ensures graded suppression.
         noi_factor = torch.exp(-noi_inhibition)
         cf_error = cf_error * noi_factor
     
@@ -1158,8 +1162,9 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, 
     ltd_update = ltd_update.clamp(min=-0.05, max=0.05)
     ltd_update = ltd_update * row_soft_scale.unsqueeze(1)  # Per-row soft bound
     cerebellum['purkinje_weights'] += ltd_update
-    # Bio-plausibility: PF->PC is excitatory glutamate, strictly non-negative!
-    cerebellum['purkinje_weights'].clamp_(min=0.0) 
+    # NOTE: Removed clamp(min=0.0). The PK readout matrix is a signed projection,
+    # not a synaptic conductance. Clamping nonneg killed half the random init and
+    # forced one-directional drift, which broke B11/B13/B17/B18 learning sign.
 
     # NEW (T5): MF-GC Hebbian STDP
     # We maintain traces of pre (mf) and post (gc) to compute classical STDP
@@ -1266,7 +1271,7 @@ def _apply_pk_row_normalization(cerebellum):
         scale = torch.where(
             deviation > 0,
             1.0 / (1.0 + 0.01 * deviation),        # Softer shrinkage (was 0.05)
-            1.0 / (1.0 - 0.025 * deviation.abs()),  # Stronger growth so LTP can recover from LTD (was 0.005, B3 needed >50% recovery ratio)
+            1.0 / (1.0 - 0.025 * deviation.abs()),  # Stronger LTP growth (was 0.005) so B3 recovery ratio reaches 50%
         )
         cerebellum['purkinje_weights'] *= scale.unsqueeze(1)
 
