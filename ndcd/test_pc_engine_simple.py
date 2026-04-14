@@ -506,8 +506,19 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
     # =========================================================================
     # FIX 2: Temporal Reservoir — Golgi recurrent weights + diverse time constants
     # =========================================================================
-    # Reservoir state persists across timesteps (not reset per token)
-    reservoir_state = torch.zeros(n_granule, device=device)
+    # Reservoir state persists across timesteps (not reset per token).
+    # Three-stage cascaded leaky integrator per GC implements the Howard &
+    # Shankar (2012, PNAS 109:5008) inverse-Laplace temporal basis: for an
+    # impulse input, stage 1 decays monotonically, stage 2 peaks at t=tau,
+    # and stage 3 peaks at t=2*tau. This produces temporally localized
+    # "time cells" at a range of latencies set by the tau distribution,
+    # which is exactly what B24 interval timing and other peak-localized
+    # temporal tasks need. For sustained inputs, all three stages remain
+    # monotonic but with progressively slower, more sigmoidal approaches --
+    # still a useful multi-feature temporal basis for B7.
+    reservoir_state = torch.zeros(n_granule, device=device)    # Stage 1
+    reservoir_state_2 = torch.zeros(n_granule, device=device)  # Stage 2 (peaks at t=tau for impulse)
+    reservoir_state_3 = torch.zeros(n_granule, device=device)  # Stage 3 (peaks at t=2*tau for impulse)
     
     # Sparse Golgi recurrent connections (~2% density)
     # Each GC receives inhibitory feedback from a random subset of other GCs
@@ -547,12 +558,31 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
     print(f"  Golgi reservoir: SR {current_sr:.3f} -> {golgi_spectral_radius} "
           f"(scale={sr_scale:.3f} if tuned, {n_golgi_per_gc} inputs/GC)")
     
-    # Log-uniformly distributed time constants (1ms to 100ms)
-    # Creates a natural temporal basis set: fast GCs track rapid transitions,
-    # slow GCs integrate over longer windows (analogous to UBC delay lines)
-    gc_time_constants = torch.exp(
-        torch.linspace(np.log(25.0), np.log(800.0), n_granule, device=device)
-    )
+    # Three-component mixture of time constants, concentrating mass on the
+    # behaviorally-relevant working range [40, 500] ms with fast and slow
+    # tails for pattern separation and working memory respectively.
+    # Inspired by Bernacchia, Seo, Lee & Wang (2011, Nat Neurosci 14:366),
+    # Murray et al. (2014, Nat Neurosci 17:1661) on cortical timescale
+    # hierarchies, and Chen et al. multi-timescale reservoir analyses.
+    # Previous log-uniform [25, 800] put most of its mass outside the query
+    # windows used by B7 (100-400 ms) and B24 (Weber tests), and had no
+    # mass at all beyond 800 ms for B25 working memory load integration.
+    #
+    # Slow tail capped at 1500 ms (not 3000 ms) to bound the non-stationary
+    # drift across long-protocol tests like B17 posture (200 trials, constant
+    # input). At tau=3000 ms, reservoir_state reaches only 7% of asymptote by
+    # trial 10 but 74% by trial 200 -- an 11x drift that pushes the PK
+    # readout out from under its own learned weights. At tau=1500 ms the
+    # drift is roughly halved (12% -> 93%), and B25 still has ample
+    # integration headroom for load-dependent responses.
+    n_fast = int(0.20 * n_granule)             # [10, 40] ms    - pattern separation, rapid transitions
+    n_work = int(0.60 * n_granule)             # [40, 500] ms   - interval timing, CEBC, VOR, saccade
+    n_slow = n_granule - n_fast - n_work       # [500, 1500] ms - working memory, sequence, trace CEBC
+    gc_time_constants = torch.cat([
+        torch.exp(torch.linspace(np.log(10.0),  np.log(40.0),   n_fast, device=device)),
+        torch.exp(torch.linspace(np.log(40.0),  np.log(500.0),  n_work, device=device)),
+        torch.exp(torch.linspace(np.log(500.0), np.log(1500.0), n_slow, device=device)),
+    ])
     # Shuffle so time constants are not spatially ordered
     gc_time_constants = gc_time_constants[torch.randperm(n_granule, device=device)]
 
@@ -624,6 +654,8 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
         'phase_position': 0,
         # --- Fix 2: Temporal reservoir state ---
         'reservoir_state': reservoir_state,
+        'reservoir_state_2': reservoir_state_2,
+        'reservoir_state_3': reservoir_state_3,
         'golgi_indices': golgi_indices,
         'golgi_values': golgi_values,
         'gc_time_constants': gc_time_constants,
@@ -665,6 +697,20 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
     print(f"  Fix 2: Temporal reservoir: {n_granule} GCs, tau=[1-100ms], "
           f"Golgi density={golgi_density:.0%}, SR={golgi_spectral_radius}")
     return cerebellum
+
+
+def reset_reservoir_cascade(cerebellum):
+    """Zero all three stages of the GC temporal cascade.
+
+    Use at protocol boundaries (new sentence, new diagnostic trial, etc.)
+    so stages 2 and 3 don't carry residual activity from prior input.
+    Leaving only stage 1 zeroed would cause stages 2 and 3 to drain
+    through their own tau dynamics, which is slow for the long-tau
+    population and can contaminate early-trial measurements.
+    """
+    cerebellum['reservoir_state'].zero_()
+    cerebellum['reservoir_state_2'].zero_()
+    cerebellum['reservoir_state_3'].zero_()
 
 
 def cerebellar_forward(engine, cerebellum):
@@ -785,10 +831,56 @@ def cerebellar_forward(engine, cerebellum):
         # Slow GCs (tau~100ms) integrate over word/phrase timescales
         # dt=1.0 corresponds to one token processing step
         dt_reservoir = 20.0 # Changed to match dt=20ms so tau dynamics operate at biological rate
-        alpha = dt_reservoir / cerebellum['gc_time_constants']
-        alpha = alpha.clamp(max=1.0)  # Ensure stability
+        # Exact discretization of dx/dt = (u - x)/tau instead of the Euler form.
+        # For tau >> dt they're equivalent, but with the new fast tail
+        # (tau as low as 10 ms vs dt = 20 ms) the Euler form gives
+        # alpha = dt/tau = 2.0 -> clamped to 1.0, collapsing the fast
+        # population to a 1-step copy of the input and destroying its
+        # temporal dynamics. The exponential form gives alpha ~= 0.865
+        # for tau=10, preserving real dynamics across the full range.
+        alpha = 1.0 - torch.exp(-dt_reservoir / cerebellum['gc_time_constants'])
+        one_minus_alpha = 1.0 - alpha
+
+        # ==================================================================
+        # Three-stage cascaded leaky integrator (Howard & Shankar 2012)
+        # ==================================================================
+        # Stage 1:  dx1/dt = (u  - x1)/tau  <- driven by raw GC activity
+        # Stage 2:  dx2/dt = (x1 - x2)/tau  <- driven by stage 1
+        # Stage 3:  dx3/dt = (x2 - x3)/tau  <- driven by stage 2
+        #
+        # For an impulse input:
+        #   x1(t) ~ exp(-t/tau)             (decays from peak at t=0)
+        #   x2(t) ~ (t/tau) exp(-t/tau)     (peaks at t=tau)
+        #   x3(t) ~ (t/tau)^2 exp(-t/tau)/2 (peaks at t=2*tau)
+        # giving a temporal basis of peaks tiling the interval [0, 2*tau_max].
+        #
+        # For a sustained input u, all three stages rise monotonically to u,
+        # but with successively slower, more sigmoidal approaches --
+        # different enough to give the ridge classifier in B7 additional
+        # linearly-independent features on top of stage 1.
+        #
+        # Propagation MUST be Jacobi (each stage reads the PREVIOUS timestep's
+        # value of its driver), not Gauss-Seidel (reading the just-updated
+        # value). Gauss-Seidel lets an impulse traverse all three stages in
+        # a single timestep (x3(t=0) = alpha^3 * u), collapsing the cascade
+        # into three scaled copies of stage 1's decay and destroying the
+        # delayed-peak behavior. Empirically, an earlier G-S implementation
+        # passed B7 (sustained-input test, where G-S and Jacobi converge to
+        # the same steady state) but failed B24 (impulse-input peak
+        # localization) and regressed B12 (trace CEBC gap-bridging).
+        #
+        # We snapshot stage 1 and stage 2 before any update so each stage
+        # reads its driver's previous-timestep value.
+        x1_prev = cerebellum['reservoir_state'].clone()
+        x2_prev = cerebellum['reservoir_state_2'].clone()
         cerebellum['reservoir_state'] = (
-            (1.0 - alpha) * cerebellum['reservoir_state'] + alpha * granule_acts_raw
+            one_minus_alpha * x1_prev + alpha * granule_acts_raw
+        )
+        cerebellum['reservoir_state_2'] = (
+            one_minus_alpha * x2_prev + alpha * x1_prev
+        )
+        cerebellum['reservoir_state_3'] = (
+            one_minus_alpha * cerebellum['reservoir_state_3'] + alpha * x2_prev
         )
 
         # Normalize GC vector — RMS scaling
@@ -813,14 +905,38 @@ def cerebellar_forward(engine, cerebellum):
         cerebellum['pf_u'] = pf_u_next
         cerebellum['pf_x'] = pf_x_next
 
-        # Blend reservoir state into the readout signal so temporal information
-        # actually reaches the Purkinje layer. Use magnitude-balanced blend so
-        # the reservoir signal isn't swamped by (or doesn't swamp) granule_acts.
-        reservoir_signal = cerebellum['reservoir_state']
-        ga_norm = granule_acts.abs().sum().clamp(min=1e-6)
-        res_norm = reservoir_signal.abs().sum().clamp(min=1e-6)
-        reservoir_signal_scaled = reservoir_signal * (ga_norm / res_norm)
-        granule_blend = 0.5 * granule_acts + 0.5 * reservoir_signal_scaled
+        # Blend reservoir cascade into the readout signal so temporal
+        # information actually reaches the Purkinje layer. The blend has
+        # four components with deliberate weights:
+        #
+        #   0.2 * granule_acts  -- kWTA-sparse instantaneous pattern, for
+        #                          novel-input pattern recognition
+        #   0.8 * stage_1       -- primary reservoir, carries exponential
+        #                          relaxation under novel/sustained drive;
+        #                          this is what B7 relies on and what the
+        #                          prior 0.2/0.8 tuning optimized for
+        #   0.4 * stage_2       -- second cascade stage, peaks at t=tau for
+        #                          impulse inputs and gives a slower rise
+        #                          for sustained inputs; provides temporally
+        #                          localized features for B24/B12/B22
+        #   0.4 * stage_3       -- third cascade stage, peaks at t=2*tau;
+        #                          extends the peak-time tiling further
+        #
+        # Sums to 1.8 (not 1.0) because stages 2 and 3 are additional
+        # features rather than a redistribution. target_logit_std = 3.0
+        # downstream absorbs the amplitude difference; what matters is the
+        # relative temporal structure, not the magnitude.
+        #
+        # Safety: _last_gc_for_purkinje below still stores pure granule_acts,
+        # so the learning path (LTD/LTP, eligibility traces) is unchanged,
+        # and B1 pattern separation (which reads _last_gc_for_purkinje) is
+        # unchanged. Only the inference-time Purkinje readout changes.
+        granule_blend = (
+            0.2 * granule_acts
+            + 0.8 * cerebellum['reservoir_state']
+            + 0.4 * cerebellum['reservoir_state_2']
+            + 0.4 * cerebellum['reservoir_state_3']
+        )
         granule_eff = pf_u_next * pf_x_next * granule_blend
 
         # Purkinje readout with tonic baseline
@@ -1855,7 +1971,7 @@ def main():
         # Fix 1+2+(a)+(b): Reset cerebellar temporal dynamics at phase boundaries
         cerebellum['position_counter'] = 0
         cerebellum['phase_position'] = 0           # Fix (b): resetting phase
-        cerebellum['reservoir_state'].zero_()
+        reset_reservoir_cascade(cerebellum)        # Zero all 3 cascade stages
         cerebellum['pk_eligibility'].zero_()       # Fix (a): clear synaptic tags
         # Fix 3: Reset STDP temporal error state
         cerebellum.pop('_prev_probs', None)
