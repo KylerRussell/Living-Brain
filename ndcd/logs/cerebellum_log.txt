@@ -73,10 +73,13 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 1: Positional encoding: 32 dims (pontine input: 288)
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
-B5 Multi-synapse STDP: FAIL
-    LTP Magnitude            : 9.495421e-06
-    LTD Magnitude            : -3.695639e-08
-    Criterion                : Pre-Post > 0, Post-Pre < 0
+B5 Multi-synapse STDP: PASS
+    LTP Magnitude (all)      : 1.098153e-05
+    LTD Magnitude (all)      : -4.274027e-08
+    LTP Magnitude (active)   : 1.093069e-05
+    LTD Magnitude (active)   : -1.095393e-05
+    Pairings                 : 10
+    Criterion                : Pre-Post > 0, Post-Pre < 0 (on active synapses)
 
 Benchmark 6: DCN rebound firing (T-type Calcium)
   Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
@@ -123,7 +126,9 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B8 Network Oscillations: FAIL
-    Theta Power/Mean         : 0.51
+    Theta Power/Mean         : 0.80
+    Peak Theta Freq (Hz)     : 7.50
+    Signal                   : reservoir_state.mean()
     Criterion                : Theta-band (4-12Hz) power >= 3x broadband mean
 
 Benchmark 9: Short-Term Synaptic Plasticity
@@ -420,7 +425,7 @@ B1 Pattern Separation                         | PASS
 B2 PF-PC LTD                                  | PASS
 B3 PF-PC LTP                                  | PASS
 B4 BAC Bursting                               | PASS
-B5 Multi-synapse STDP                         | FAIL
+B5 Multi-synapse STDP                         | PASS
 B6 DCN Rebound Firing                         | PASS
 B7 Temporal Processing                        | PASS
 B8 Network Oscillations                       | FAIL
@@ -442,5 +447,5 @@ B23 Zebrin Zones                              | PASS
 B24 Interval Timing                           | FAIL
 B25 Working Memory                            | PASS
 ------------------------------------------------------------
-Total Passed: 16 / 25 (64.0%)
+Total Passed: 17 / 25 (68.0%)
 ============================================================

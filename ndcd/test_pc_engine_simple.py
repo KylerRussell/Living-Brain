@@ -658,6 +658,23 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
         'reservoir_state_3': reservoir_state_3,
         'golgi_indices': golgi_indices,
         'golgi_values': golgi_values,
+        # --- B8: Delayed Golgi feedback for theta-band network oscillations ---
+        # Vervaeke et al. 2010 showed Cx36 gap junctions synchronize Golgi
+        # cells, producing coherent theta-band inhibition onto the granule
+        # layer. Our abstraction captures this via a 3-step delay on the
+        # Golgi inhibitory feedback: phase shift of pi around the loop at
+        # f = 1/(2*D*dt) = 1/(2*3*0.02) = 8.33 Hz (center of theta band).
+        #
+        # Default is OFF (mix=0.0). Cerebellar theta is a resting-state
+        # phenomenon; during active motor execution the cerebellum shifts
+        # to beta and the theta mechanism is effectively gated off
+        # (Courtemanche & Lamarre 2005, D'Angelo & De Zeeuw 2009). Delayed
+        # inhibition on fast control loops causes destabilization (verified:
+        # mix=0.5 regressed B17 posture from 2/5 to 0/5 seeds), so tests
+        # that require fast closed-loop response MUST leave mix at 0.
+        # B8 (quiet tonic-noise protocol) sets this to 0.5 explicitly.
+        'golgi_delay_buffer': [torch.zeros(n_granule, device=device) for _ in range(3)],
+        'golgi_delay_mix': 0.0,  # OFF by default; B8 diagnostic opts in
         'gc_time_constants': gc_time_constants,
         # --- Fix (a): Heterogeneous PK eligibility traces ---
         'pk_eligibility': pk_eligibility,      # (3, 256, n_granule) CET cascade
@@ -719,10 +736,16 @@ def reset_reservoir_cascade(cerebellum):
     Leaving only stage 1 zeroed would cause stages 2 and 3 to drain
     through their own tau dynamics, which is slow for the long-tau
     population and can contaminate early-trial measurements.
+
+    Also zeroes the Golgi delay buffer (B8 theta resonance), which would
+    otherwise inject residual activity with a 3-step lag after a reset.
     """
     cerebellum['reservoir_state'].zero_()
     cerebellum['reservoir_state_2'].zero_()
     cerebellum['reservoir_state_3'].zero_()
+    if 'golgi_delay_buffer' in cerebellum:
+        for buf in cerebellum['golgi_delay_buffer']:
+            buf.zero_()
 
 
 def cerebellar_forward(engine, cerebellum):
@@ -810,7 +833,22 @@ def cerebellar_forward(engine, cerebellum):
             cerebellum['golgi_values'],
             (cerebellum['n_granule'], cerebellum['n_granule'])
         )
-        golgi_feedback = torch.mv(golgi_sparse, cerebellum['reservoir_state'])
+        # B8: Mix immediate and delayed Golgi feedback to create theta resonance.
+        # Delayed negative feedback with D=3 steps produces a pole near the
+        # unit circle at f = 1/(2*D*dt) = 8.33 Hz (theta). The 50/50 mix
+        # preserves total loop gain (so spectral radius effectively unchanged
+        # for B1 pattern separation) while introducing the pi-phase-shift
+        # needed for network oscillations.
+        mix = cerebellum.get('golgi_delay_mix', 0.0)
+        if mix > 0.0 and 'golgi_delay_buffer' in cerebellum:
+            immediate_fb = torch.mv(golgi_sparse, cerebellum['reservoir_state'])
+            delayed_fb = torch.mv(golgi_sparse, cerebellum['golgi_delay_buffer'][0])
+            golgi_feedback = (1.0 - mix) * immediate_fb + mix * delayed_fb
+            # Advance ring buffer: drop oldest, append current reservoir_state
+            cerebellum['golgi_delay_buffer'].pop(0)
+            cerebellum['golgi_delay_buffer'].append(cerebellum['reservoir_state'].clone())
+        else:
+            golgi_feedback = torch.mv(golgi_sparse, cerebellum['reservoir_state'])
         granule_pre = granule_pre + golgi_feedback
 
         # Divisive Golgi inhibition (stronger gain for K=4 sparse inputs)
