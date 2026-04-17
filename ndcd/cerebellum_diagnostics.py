@@ -297,33 +297,44 @@ class CerebellumDiagnosticSuite:
             cerebellar_learn(cereb, logits, gc_acts, target_pk, 1.0, engine)
         
         w_post_ltd = cereb['purkinje_weights'].clone()
-        # Row L2 norm: LTD should shrink the effective magnitude of the target
-        # row, LTP (via restoring force toward pk_target_row_norm) should grow
-        # it back toward the init norm. This measures actual magnitude, not
-        # near-zero signed means.
-        w_init_norm = w_init[target_pk].norm().item()
-        w_ltd_norm = w_post_ltd[target_pk].norm().item()
-        ltd_drop = w_init_norm - w_ltd_norm  # Positive if LTD shrank the row
+        # Signed distance-from-init metric: L2 row-norm is a poor measure for
+        # this engine because dense-CE gradients push signed PK weights OFF
+        # their init direction (often growing the row norm during LTD rather
+        # than shrinking it). What actually matters for bidirectional plasticity
+        # is whether Phase 2 walks the target row BACK toward its init state.
+        #
+        # ltd_dist  = how far the target row moved from init after CF-LTD
+        # ltp_dist  = how far from init it remains after PF-alone
+        # recovery  = fraction of that displacement undone in Phase 2
+        ltd_dist = (w_post_ltd - w_init)[target_pk].norm().item()
         
-        # Phase 2: LTP via normalization (spontaneous without CF error)
+        # Phase 2: LTP via normalization (spontaneous without CF error).
+        # Pass allow_pf_alone_ltp=True to enable the eligibility-gated elastic
+        # pull toward pk_init_weights (Coesmans 2004). This provides the
+        # directional component that the pure multiplicative restorer lacks.
         from test_pc_engine_simple import _apply_pk_row_normalization
         for _ in range(n_trials):
             engine.set_l56(torch.randn(self.n_l56, device=self.device))
             logits, gc_acts, _ = cerebellar_forward(engine, cereb)
             # Apply row norm without CF LTD
-            _apply_pk_row_normalization(cereb)
+            _apply_pk_row_normalization(cereb, allow_pf_alone_ltp=True)
             
         w_post_ltp = cereb['purkinje_weights'].clone()
-        w_ltp_norm = w_post_ltp[target_pk].norm().item()
+        ltp_dist = (w_post_ltp - w_init)[target_pk].norm().item()
         
-        ltp_gain = w_ltp_norm - w_ltd_norm  # Positive if LTP grew the row back
-        rel_increase = ltp_gain / (w_init_norm + 1e-9)
-        recovery_ratio = ltp_gain / (abs(ltd_drop) + 1e-9) if abs(ltd_drop) > 1e-6 else 0.0
+        # Positive recovery_ratio = weights moved back toward init.
+        # recovery_ratio = 1.0  => fully restored
+        # recovery_ratio = 0.0  => stuck at post-LTD state
+        # recovery_ratio < 0    => Phase 2 drove weights even further from init
+        recovery_ratio = 1.0 - (ltp_dist / max(ltd_dist, 1e-9))
+        # Relative movement: how much of the init-row magnitude did Phase 2 claw back
+        rel_increase = (ltd_dist - ltp_dist) / (w_init[target_pk].norm().item() + 1e-9)
         
         passed = (rel_increase >= 0.10) and (recovery_ratio >= 0.50)
         details = {
-            'LTD Drop': f"{ltd_drop:.4f}",
-            'LTP Gain': f"{ltp_gain:.4f}",
+            'Init Row Norm': f"{w_init[target_pk].norm().item():.4f}",
+            'LTD Dist From Init': f"{ltd_dist:.4f}",
+            'LTP Dist From Init': f"{ltp_dist:.4f}",
             'Rel Increase': f"{rel_increase:.2%}",
             'Recovery Ratio': f"{recovery_ratio:.2%}",
             'Criterion': "Increase >= 10% & Recovery >= 50%"

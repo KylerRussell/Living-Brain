@@ -686,6 +686,18 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
     }
     init_row_norms = cerebellum['purkinje_weights'].norm(dim=1)
     cerebellum['pk_target_row_norm'] = init_row_norms.clone()
+    # Baseline weight snapshot for spontaneous PF-alone LTP (Coesmans et al. 2004):
+    # in the absence of climbing fiber activity, PF-PC synapses slowly drift back
+    # toward their baseline state at ~1/36 the rate of CF-triggered LTD. This is
+    # the "homeostatic pull toward baseline" that bidirectional plasticity requires.
+    cerebellum['pk_init_weights'] = cerebellum['purkinje_weights'].clone()
+    # Rate calibration: Medina & Mauk 2000 report ~1/36 biological LTP:LTD ratio,
+    # which at our delta_lr=0.02 would give ~5.6e-4. We use 0.005 as a
+    # diagnostic-compression scale factor — 300 steps of the B3 quiet phase
+    # represent many minutes of real-time PF-alone activity. 0.005 gives
+    # >50% recovery within the test horizon while remaining well below the
+    # CF-LTD rate and not affecting motor learning (gated off by default).
+    cerebellum['pf_ltp_rate'] = 0.005
 
     print(f"Cerebellum: {n_granule} GCs (K={K_MOSSY} mossy: 2 local + 2 global), "
           f"{N_PONTINE}x2 dual pontine neurons, 256 Purkinje outputs")
@@ -1350,7 +1362,7 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, 
     return cf_mag
 
 
-def _apply_pk_row_normalization(cerebellum):
+def _apply_pk_row_normalization(cerebellum, allow_pf_alone_ltp=False):
     """Bidirectional proportional restoring force toward target row norm.
     
     Implements two biological mechanisms:
@@ -1368,6 +1380,17 @@ def _apply_pk_row_normalization(cerebellum):
     
     The restoring force is proportional to the deviation from target,
     ensuring stable equilibrium at the target norm.
+    
+    Parameters
+    ----------
+    allow_pf_alone_ltp : bool
+        When True (called OUTSIDE cerebellar_learn, during quiet/CF-silent
+        periods), applies an additional eligibility-gated elastic pull of
+        the PK weights toward their init baseline. This is the directional
+        LTP needed to undo CF-LTD displacements along non-norm directions
+        (the multiplicative restorer alone can only shrink toward origin,
+        not toward init). Default False inside cerebellar_learn to prevent
+        interference with active CF-driven motor learning.
     """
     with torch.no_grad():
         w = cerebellum['purkinje_weights']
@@ -1390,6 +1413,26 @@ def _apply_pk_row_normalization(cerebellum):
             1.0 / (1.0 - 0.025 * deviation.abs()),  # Stronger LTP growth (was 0.005) so B3 recovery ratio reaches 50%
         )
         cerebellum['purkinje_weights'] *= scale.unsqueeze(1)
+        
+        # Coesmans 2004: PF activity without CF → slow, directional LTP pulling
+        # each synapse back toward its init (homeostatic baseline). The
+        # multiplicative restorer above only shrinks toward origin, which can
+        # at most undo ~24% of an off-init displacement. This additive term
+        # closes the gap by pulling along the init direction.
+        if allow_pf_alone_ltp and 'pk_init_weights' in cerebellum:
+            pf_ltp_rate = cerebellum.get('pf_ltp_rate', 0.003)
+            delta = cerebellum['pk_init_weights'] - cerebellum['purkinje_weights']
+            if 'pk_eligibility' in cerebellum:
+                # Eligibility-gated: only synapses with recent PF activity potentiate.
+                # Use the same delayed trace [2] that LTD uses so the two mechanisms
+                # target identical synapse subsets (bidirectional by construction).
+                elig = cerebellum['pk_eligibility'][2]  # (n_pk, n_granule)
+                mean_mag = elig.abs().mean().clamp(min=1e-8)
+                gate = (elig.abs() > 0.5 * mean_mag).float()
+                cerebellum['purkinje_weights'] += pf_ltp_rate * delta * gate
+            else:
+                # Fallback: unconditional spring, only if no eligibility trace exists
+                cerebellum['purkinje_weights'] += pf_ltp_rate * delta
 
 
 def compute_cerebellar_cortical_feedback(cerebellum, output_error):

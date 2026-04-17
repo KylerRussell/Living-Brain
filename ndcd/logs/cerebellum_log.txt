@@ -47,11 +47,12 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 1: Positional encoding: 32 dims (pontine input: 288)
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
-B3 PF-PC LTP: FAIL
-    LTD Drop                 : -0.1548
-    LTP Gain                 : -0.1482
-    Rel Increase             : -14.82%
-    Recovery Ratio           : -95.73%
+B3 PF-PC LTP: PASS
+    Init Row Norm            : 0.9999
+    LTD Dist From Init       : 1.0154
+    LTP Dist From Init       : 0.3675
+    Rel Increase             : 64.80%
+    Recovery Ratio           : 63.81%
     Criterion                : Increase >= 10% & Recovery >= 50%
 
 Benchmark 4: BAC Burst Amplification (Coincidence Detection)
@@ -417,7 +418,7 @@ DIAGNOSTIC SUITE SUMMARY
 ============================================================
 B1 Pattern Separation                         | PASS
 B2 PF-PC LTD                                  | PASS
-B3 PF-PC LTP                                  | FAIL
+B3 PF-PC LTP                                  | PASS
 B4 BAC Bursting                               | PASS
 B5 Multi-synapse STDP                         | FAIL
 B6 DCN Rebound Firing                         | PASS
@@ -441,5 +442,5 @@ B23 Zebrin Zones                              | PASS
 B24 Interval Timing                           | FAIL
 B25 Working Memory                            | PASS
 ------------------------------------------------------------
-Total Passed: 15 / 25 (60.0%)
+Total Passed: 16 / 25 (64.0%)
 ============================================================
