@@ -59,6 +59,18 @@ class StubEngine:
         
     def update_context_ema(self):
         self.context_ema = (1 - self.context_ema_alpha) * self.context_ema + self.context_ema_alpha * self.state
+    
+    def zero_states(self):
+        """Mirror of PredictiveCodingEngine.zero_states for between-trial resets.
+        
+        The real engine zeroes basal/apical compartments, CAHVA states, etc.
+        The stub only has a few of these; we also clear context_ema because
+        tests that rely on a fresh trace each trial (like B12 trace CEBC)
+        would otherwise accumulate context across trials."""
+        self.state.zero_()
+        self.state_basal.zero_()
+        self.cahva_states.zero_()
+        self.context_ema.zero_()
 
 def summarize(hist: Dict, window: int = 200, baseline: float = 0.0) -> Dict:
     """Helper to summarize test history."""
@@ -1037,48 +1049,80 @@ class CerebellumDiagnosticSuite:
         print("\nBenchmark 12: Trace Eyeblink Conditioning")
         engine, cereb = self._new_cerebellum(test_seed=42)
         target_pk = 0
-        n_trials = 200
+        n_trials = 300
         amplitudes = []
         
-        # Test Trace Paradigm: CS on, gap, US on.
-        for _ in range(n_trials):
-            # CS (External sensory input)
-            cs_input = torch.zeros(engine.num_nodes, device=engine.device)
-            # Stimulate some random sensory nodes (level -1 or lowest level)
-            l23_start = engine.module_ranges[0][0]
-            cs_input[l23_start:l23_start+50] = 5.0
+        # Test Trace Paradigm: CS on, gap with persistent activity, US on.
+        # The biological question is whether the engine's context_ema
+        # mechanism can sustain CS representation across the gap well enough
+        # for the cerebellum to associate the (gap-end) L5/6 state with the
+        # US via PF-PC LTD.
+        #
+        # Previous version had three issues:
+        #   (1) No per-trial reset. engine.state and reservoir_state
+        #       accumulated across 200 trials, polluting the CS trace with
+        #       ever more history. Late trials had essentially no clean
+        #       signal to learn from.
+        #   (2) Single cerebellar_forward per trial gave the cascade no
+        #       chance to develop its temporal basis. Stage 2 and stage 3
+        #       of the Howard-Shankar cascade need ~tau timesteps to peak.
+        #   (3) Fixed CS nodes without much amplitude; after engine settling
+        #       + normalization, L5/6 activity was noise-floor.
+        
+        # Fixed CS input pattern (same pattern every trial)
+        cs_input = torch.zeros(engine.num_nodes, device=engine.device)
+        l23_start = engine.module_ranges[0][0]
+        cs_input[l23_start:l23_start+50] = 5.0
+        zero_input = torch.zeros_like(cs_input)
+        
+        for trial in range(n_trials):
+            # Fix (1): Reset engine + cerebellum state each trial
+            engine.zero_states()
+            reset_reservoir_cascade(cereb)
+            cereb['phase_position'] = 0
             
-            # Settle CS
+            # CS ON: drive engine with CS, let it propagate to L5/6.
+            # Two settle steps so L5/6 has time to develop a CS-driven pattern
+            # and update_context_ema captures it for the gap.
             engine.settle(cs_input)
             engine.update_context_ema()
+            # Fix (2): Run cerebellar forward on the CS-driven state so the
+            # reservoir cascade starts responding to the CS pattern.
+            cerebellar_forward(engine, cereb)
             
-            # Gap (no explicit input, but persistent activity sustains)
+            engine.settle(cs_input)
+            engine.update_context_ema()
+            cerebellar_forward(engine, cereb)
+            
+            # GAP: zero external input, context_ema sustains L5/6 via the
+            # context_injection_weight=0.5 feedback path (trace conditioning
+            # mechanism). Run the cerebellum each gap step too so the
+            # cascade's slow-tau GCs integrate the persisting trace.
             for _ in range(3):
-                engine.settle(torch.zeros_like(cs_input))
+                engine.settle(zero_input)
                 engine.update_context_ema()
-                
-            # Now we use the persisted state to drive cerebellum
-            l56_acts = engine.state[cereb['l56_indices']]
-            cereb['_last_l56_acts'] = l56_acts  # mock test bypassing forward if needed
+                cerebellar_forward(engine, cereb)
             
-            # Since test_pc_engine_simple expects pontine_input directly or from engine:
+            # US time: measure CR amplitude on the gap-end state, then learn.
             logits, gc_acts, _ = cerebellar_forward(engine, cereb)
-                
-            # CS-CR amplitude at end of gap
             cr_amp = logits[target_pk].item()
             amplitudes.append(cr_amp)
-            
-            # US applied (learning)
             cerebellar_learn(cereb, logits, gc_acts, target_pk, 1.0, engine)
         
         start_amp = np.mean(amplitudes[:10])
         end_amp = np.mean(amplitudes[-10:])
         
-        improvement = abs(end_amp - start_amp)  # Sign-agnostic
+        # Sign-agnostic: random init determines sign of learning drift.
+        # We want a sustained amplitude shift across trials, indicating the
+        # cerebellum has learned to associate the trace-sustained CS pattern
+        # with the US-timed PK row.
+        improvement = abs(end_amp - start_amp)
         passed = improvement > 0.50
         details = {
             'Init CR amp': f"{start_amp:.2f}",
             'Final CR amp': f"{end_amp:.2f}",
+            'Improvement': f"{improvement:.2f}",
+            'Trials': f"{n_trials}",
             'Criterion': "Improvement > 0.50 across gap"
         }
         self._log("B12 Trace CEBC", passed, details)

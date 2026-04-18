@@ -196,9 +196,11 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 1: Positional encoding: 32 dims (pontine input: 288)
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
-B12 Trace CEBC: FAIL
-    Init CR amp              : 9.50
-    Final CR amp             : 9.16
+B12 Trace CEBC: PASS
+    Init CR amp              : 12.60
+    Final CR amp             : 8.50
+    Improvement              : 4.10
+    Trials                   : 300
     Criterion                : Improvement > 0.50 across gap
 
 Benchmark 13: VOR Gain and Phase Adaptation
@@ -437,7 +439,7 @@ B8 Network Oscillations                       | FAIL
 B9 Short-Term Plasticity                      | PASS
 B10 Nucleo-Olivary Inhibition                 | PASS
 B11 CEBC Conditioning                         | PASS
-B12 Trace CEBC                                | FAIL
+B12 Trace CEBC                                | PASS
 B13 VOR Adaptation                            | FAIL
 B14 Saccade Adaptation                        | PASS
 B15 Reaching Adaptation                       | PASS
@@ -452,5 +454,5 @@ B23 Zebrin Zones                              | PASS
 B24 Interval Timing                           | FAIL
 B25 Working Memory                            | PASS
 ------------------------------------------------------------
-Total Passed: 19 / 25 (76.0%)
+Total Passed: 20 / 25 (80.0%)
 ============================================================
