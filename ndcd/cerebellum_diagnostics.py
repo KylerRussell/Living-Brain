@@ -485,37 +485,66 @@ class CerebellumDiagnosticSuite:
     def benchmark_10_noi(self):
         print("\nBenchmark 10: Nucleo-Olivary Inhibition")
         
-        def run_noi_protocol(noi_active):
-            engine, cereb = self._new_cerebellum(test_seed=42)
-            target_pk = 0
-            n_trials = 500
-            cf_rates = []
-            
-            if not noi_active:
-                cereb['w_dcn_io'].zero_() # Ablate NOI
-                
-            for t in range(n_trials):
-                engine.set_l56(torch.ones(self.n_l56, device=self.device))
-                logits, gc_acts, _ = cerebellar_forward(engine, cereb)
-                
-                # Standard cerebellar learning which also updates dcn_weights
-                cf_err = cerebellar_learn(cereb, logits, gc_acts, target_pk, 1.0, engine)
-                
-                cf_rates.append(cf_err.item() if isinstance(cf_err, torch.Tensor) else cf_err)
-                
-            init_val = np.mean(cf_rates[:20])
-            final_val = np.mean(cf_rates[-20:])
-            return (init_val - final_val) / (init_val + 1e-9)
-            
-        decrease_on = run_noi_protocol(True)
-        decrease_off = run_noi_protocol(False)
+        # NOI is a transfer function: cf_error *= exp(-w_dcn_io * dcn_rate).
+        # The previous protocol (constant input + fixed target for 500 steps)
+        # measured learning convergence, not NOI: the model saturated on the
+        # target (probs -> 1), driving cf_error naturally to 0 regardless of
+        # NOI state, and the IO gate (epsilon_io) further suppressed updates
+        # once the model got confident. The 99.8% / 93.4% numbers were almost
+        # entirely saturation artifact.
+        #
+        # This rewrite directly measures the suppression factor at a single
+        # well-defined operating point. Two independent cerebellum instances
+        # (NOI-on and NOI-off) are given IDENTICAL warmup to establish a
+        # non-trivial DCN rate, then one PROBE step with a hard random target
+        # reveals cf_error magnitude with vs without NOI.
         
-        passed = (decrease_on >= 0.40) and (decrease_off <= 0.10)
+        def run_noi_probe(noi_active, n_warmup=5):
+            engine, cereb = self._new_cerebellum(test_seed=42)
+            if not noi_active:
+                cereb['w_dcn_io'].zero_()
+            
+            # Disable IO gating for this test so saturation can't mask NOI
+            cereb['io_gate_active'] = False
+            
+            # Warmup: randomized inputs + rotating targets so prediction
+            # can't saturate on one byte. This builds a non-trivial
+            # dcn_weights / _last_dcn_rate so NOI has something to suppress.
+            torch.manual_seed(1234)
+            for t in range(n_warmup):
+                engine.set_l56(torch.randn(self.n_l56, device=self.device))
+                logits, gc_acts, _ = cerebellar_forward(engine, cereb)
+                target = (t * 37 + 13) % 256  # deterministic varying target
+                cerebellar_learn(cereb, logits, gc_acts, target, 1.0, engine)
+            
+            # Probe step: measure cf_error magnitude with a hard target
+            engine.set_l56(torch.randn(self.n_l56, device=self.device))
+            logits, gc_acts, _ = cerebellar_forward(engine, cereb)
+            probe_target = 200  # arbitrary target unlikely to be argmax
+            cf_mag = cerebellar_learn(cereb, logits, gc_acts, probe_target, 1.0, engine)
+            
+            dcn_rate_norm = cereb['_last_dcn_rate'].norm().item()
+            w_dcn_io_norm = cereb['w_dcn_io'].norm().item()
+            return cf_mag, dcn_rate_norm, w_dcn_io_norm
+        
+        cf_on, dcn_rate_on, w_on = run_noi_probe(noi_active=True)
+        cf_off, dcn_rate_off, w_off = run_noi_probe(noi_active=False)
+        
+        # NOI should suppress cf_error magnitude. Expected suppression ratio
+        # is exp(-<w_dcn_io * dcn_rate>) per PK row. Test criterion: with NOI
+        # on, cf is at least 10% smaller than without, AND the DCN rate on
+        # the probe step was non-trivial (otherwise the test is meaningless).
+        suppression = 1.0 - (cf_on / (cf_off + 1e-9))
+        
+        passed = (suppression >= 0.10) and (dcn_rate_on > 1e-3) and (w_on > 1e-3)
         
         details = {
-            'CF Decrease (NOI ON)': f"{decrease_on:.2%}",
-            'CF Decrease (NOI OFF)': f"{decrease_off:.2%}",
-            'Criterion': "NOI ON >= 40% & NOI OFF <= 10%"
+            'CF Mag (NOI ON)': f"{cf_on:.4f}",
+            'CF Mag (NOI OFF)': f"{cf_off:.4f}",
+            'NOI Suppression': f"{suppression:.2%}",
+            'DCN Rate Norm (ON)': f"{dcn_rate_on:.4f}",
+            'w_dcn_io Norm (ON)': f"{w_on:.4f}",
+            'Criterion': "Suppression >= 10% at non-trivial DCN rate"
         }
         self._log("B10 Nucleo-Olivary Inhibition", passed, details)
 

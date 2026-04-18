@@ -163,13 +163,16 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 1: Positional encoding: 32 dims (pontine input: 288)
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
-B10 Nucleo-Olivary Inhibition: FAIL
-    CF Decrease (NOI ON)     : 99.78%
-    CF Decrease (NOI OFF)    : 93.35%
-    Criterion                : NOI ON >= 40% & NOI OFF <= 10%
+B10 Nucleo-Olivary Inhibition: PASS
+    CF Mag (NOI ON)          : 0.4650
+    CF Mag (NOI OFF)         : 0.9915
+    NOI Suppression          : 53.10%
+    DCN Rate Norm (ON)       : 17.8773
+    w_dcn_io Norm (ON)       : 8.0000
+    Criterion                : Suppression >= 10% at non-trivial DCN rate
 
 Benchmark 11: Classical Eyeblink Conditioning
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+  Golgi reservoir: SR 14.427 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
 Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
   delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
   Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
@@ -178,9 +181,9 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B11 CEBC Conditioning: PASS
-    Acquisition (Start->End) : 20.77 -> 9.00
-    Extinction End           : 9.03
-    Reacquisition End        : 9.53
+    Acquisition (Start->End) : 21.41 -> 8.73
+    Extinction End           : 8.76
+    Reacquisition End        : 9.21
     ISI (steps / ms)         : 15 / 300ms
     Criterion                : Acq/Reacq > +0.5, Ext drops back to baseline
 
@@ -432,7 +435,7 @@ B6 DCN Rebound Firing                         | PASS
 B7 Temporal Processing                        | PASS
 B8 Network Oscillations                       | FAIL
 B9 Short-Term Plasticity                      | PASS
-B10 Nucleo-Olivary Inhibition                 | FAIL
+B10 Nucleo-Olivary Inhibition                 | PASS
 B11 CEBC Conditioning                         | PASS
 B12 Trace CEBC                                | FAIL
 B13 VOR Adaptation                            | FAIL
@@ -449,5 +452,5 @@ B23 Zebrin Zones                              | PASS
 B24 Interval Timing                           | FAIL
 B25 Working Memory                            | PASS
 ------------------------------------------------------------
-Total Passed: 18 / 25 (72.0%)
+Total Passed: 19 / 25 (76.0%)
 ============================================================
