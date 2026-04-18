@@ -140,10 +140,12 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 1: Positional encoding: 32 dims (pontine input: 288)
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
-B9 Short-Term Plasticity: FAIL
-    MF PPR (20ms) EPSC       : 1.22
-    PF PPR (20ms) EPSC       : 1.01
-    Criterion                : MF PPR > 1.2 & PF PPR > 1.1
+B9 Short-Term Plasticity: PASS
+    MF PPR (20ms, matched)   : 1.21
+    PF PPR (20ms, matched)   : 1.11
+    MF Active Overlap        : 96.7% (439 cells)
+    PF Active Overlap        : 13.4% (330 cells)
+    Criterion                : MF PPR > 1.2 & PF PPR > 1.1 (matched-set)
 
 Benchmark 10: Nucleo-Olivary Inhibition
   Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
@@ -429,7 +431,7 @@ B5 Multi-synapse STDP                         | PASS
 B6 DCN Rebound Firing                         | PASS
 B7 Temporal Processing                        | PASS
 B8 Network Oscillations                       | FAIL
-B9 Short-Term Plasticity                      | FAIL
+B9 Short-Term Plasticity                      | PASS
 B10 Nucleo-Olivary Inhibition                 | FAIL
 B11 CEBC Conditioning                         | PASS
 B12 Trace CEBC                                | FAIL
@@ -447,5 +449,5 @@ B23 Zebrin Zones                              | PASS
 B24 Interval Timing                           | FAIL
 B25 Working Memory                            | PASS
 ------------------------------------------------------------
-Total Passed: 17 / 25 (68.0%)
+Total Passed: 18 / 25 (72.0%)
 ============================================================

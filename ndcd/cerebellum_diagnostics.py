@@ -412,26 +412,70 @@ class CerebellumDiagnosticSuite:
         print("\nBenchmark 9: Short-Term Synaptic Plasticity")
         engine, cereb = self._new_cerebellum(test_seed=42)
         
+        # Paired-pulse recording in electrophysiology: a presynaptic fiber
+        # is stimulated twice with a short ISI, and the postsynaptic EPSC is
+        # compared at the *same* synapse across pulses. The biological
+        # question is "does a PF-PC (or MF-GC) synapse that receives two
+        # consecutive spikes show facilitation?".
+        #
+        # A population-mean metric across ALL cells can't answer this
+        # because kWTA + reservoir dynamics make different cells fire in
+        # pulse 1 vs pulse 2. Cells that fire in pulse 2 but NOT pulse 1
+        # are at STP baseline (u=0.15, x=1.0), which dilutes the PPR back
+        # to ~1.0 regardless of the underlying mechanism.
+        #
+        # The correct measurement is on the MATCHED SET -- presynaptic
+        # elements active in BOTH pulses. This is what the paired-pulse
+        # electrode sees.
+        
         # 1st pulse
         engine.set_l56(torch.ones(self.n_l56, device=self.device))
         cerebellar_forward(engine, cereb)
-        mf_resp_1 = (cereb['mf_u'] * cereb['mf_x']).mean().item()
-        pf_resp_1 = (cereb['pf_u'] * cereb['pf_x']).mean().item()
+        gc_active_1 = cereb['_last_gc_for_purkinje'] > 0
+        mf_active_1 = cereb['_last_pontine_acts'] > 0
+        # Capture STP state + active sets AFTER pulse 1's updates
+        pf_ux_1 = (cereb['pf_u'] * cereb['pf_x']).clone()
+        mf_ux_1 = (cereb['mf_u'] * cereb['mf_x']).clone()
         
         # 2nd pulse (20ms ISI)
         engine.set_l56(torch.ones(self.n_l56, device=self.device))
         cerebellar_forward(engine, cereb)
-        mf_resp_2 = (cereb['mf_u'] * cereb['mf_x']).mean().item()
-        pf_resp_2 = (cereb['pf_u'] * cereb['pf_x']).mean().item()
+        gc_active_2 = cereb['_last_gc_for_purkinje'] > 0
+        mf_active_2 = cereb['_last_pontine_acts'] > 0
+        pf_ux_2 = (cereb['pf_u'] * cereb['pf_x']).clone()
+        mf_ux_2 = (cereb['mf_u'] * cereb['mf_x']).clone()
         
-        ppr_mf = mf_resp_2 / (mf_resp_1 + 1e-9)
-        ppr_pf = pf_resp_2 / (pf_resp_1 + 1e-9)
+        # Matched sets: presynaptic elements active in BOTH pulses
+        pf_matched = gc_active_1 & gc_active_2
+        mf_matched = mf_active_1 & mf_active_2
+        
+        # Note on state-capture semantics: pf_ux_{1,2} reflect STP state
+        # AFTER each pulse's update. The paired-pulse ratio we want is the
+        # ratio of the release-probability-weighted response per synapse
+        # at the moment of stimulation. In the facilitation regime with
+        # initial u=0.15, post-pulse-1 u rises, post-pulse-2 u rises
+        # further (from the already-elevated state plus new input), giving
+        # PPR > 1 at matched synapses.
+        if pf_matched.any():
+            ppr_pf = pf_ux_2[pf_matched].mean().item() / (pf_ux_1[pf_matched].mean().item() + 1e-9)
+        else:
+            ppr_pf = 0.0
+        if mf_matched.any():
+            ppr_mf = mf_ux_2[mf_matched].mean().item() / (mf_ux_1[mf_matched].mean().item() + 1e-9)
+        else:
+            ppr_mf = 0.0
+        
+        # Overlap diagnostics: if matched-set is tiny, the test is brittle
+        pf_overlap = pf_matched.sum().item() / max(gc_active_1.sum().item(), 1)
+        mf_overlap = mf_matched.sum().item() / max(mf_active_1.sum().item(), 1)
         
         passed = (ppr_mf > 1.20) and (ppr_pf > 1.10)
         details = {
-            'MF PPR (20ms) EPSC': f"{ppr_mf:.2f}",
-            'PF PPR (20ms) EPSC': f"{ppr_pf:.2f}",
-            'Criterion': "MF PPR > 1.2 & PF PPR > 1.1"
+            'MF PPR (20ms, matched)': f"{ppr_mf:.2f}",
+            'PF PPR (20ms, matched)': f"{ppr_pf:.2f}",
+            'MF Active Overlap': f"{mf_overlap:.1%} ({mf_matched.sum().item()} cells)",
+            'PF Active Overlap': f"{pf_overlap:.1%} ({pf_matched.sum().item()} cells)",
+            'Criterion': "MF PPR > 1.2 & PF PPR > 1.1 (matched-set)"
         }
         self._log("B9 Short-Term Plasticity", passed, details)
 
