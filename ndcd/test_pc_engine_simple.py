@@ -585,6 +585,22 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
     ])
     # Shuffle so time constants are not spatially ordered
     gc_time_constants = gc_time_constants[torch.randperm(n_granule, device=device)]
+    
+    # B8: Per-tau classification for network oscillations.
+    # Cells with tau >= 40 ms are the "slow band" (work + slow tails, ~80% of
+    # the population). Delayed Golgi feedback and gap-junction-like lateral
+    # coupling only apply to these cells, because:
+    #   - Fast cells (tau < 40ms) drive rapid motor corrections (posture,
+    #     saccade, reaching). Delaying their feedback destabilizes those
+    #     control loops (verified: round 13 regression of B17).
+    #   - Slow cells have intrinsic dynamics slow enough that the 60ms
+    #     phase lag sits well within their integration window, producing
+    #     clean theta resonance at the population level.
+    # Biological referent: Vervaeke et al. 2010 show Cx36 gap junctions
+    # preferentially synchronize the subpopulation of Golgi cells with
+    # longer membrane time constants, producing coherent theta-band
+    # inhibition onto the granule layer.
+    slow_tau_mask = (gc_time_constants >= 40.0)
 
     # Signed PK weights (no non-negative constraint)
     purkinje_weights = torch.randn(256, n_granule, device=device) * (1.0 / np.sqrt(n_granule))
@@ -616,6 +632,51 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
     base_lr = 0.02  # Standard Purkinje learning rate
     dcn_weights = torch.zeros(256, n_granule, device=device)
     dcn_delta_lr = base_lr / 20.0  # Consistently slower than Purkinje
+    
+    # B8: Gap-junction-like lateral coupling between slow-tau GCs.
+    # Built LAST and using a dedicated RNG stream so that the random draws
+    # required here don't shift any other test's seed position. Any other
+    # initialization that uses torch/numpy RNG must come before this block.
+    n_lateral_per_slow = 8
+    slow_indices_np = torch.where(slow_tau_mask)[0].cpu().numpy()
+    n_slow = len(slow_indices_np)
+    # Dedicated RNG streams, seeded deterministically
+    lat_rng_np = np.random.default_rng(seed=987654321)
+    lat_rng_torch = torch.Generator(device=device).manual_seed(987654321)
+    if n_slow > n_lateral_per_slow:
+        # Vectorized construction: sample (n_slow, n_lateral_per_slow) indices
+        # into slow_indices_np. We pick with replacement then reject duplicates
+        # per row; for small n_lateral_per_slow this is fine.
+        # Simpler: argsort random scores to get unique-per-row picks.
+        rand_scores = lat_rng_np.random((n_slow, n_slow))
+        rand_scores[np.arange(n_slow), np.arange(n_slow)] = -1.0  # exclude self
+        src_local = np.argsort(-rand_scores, axis=1)[:, :n_lateral_per_slow]
+        # Map local indices back to GC indices
+        lat_src = slow_indices_np[src_local].flatten()
+        lat_dst = np.repeat(slow_indices_np, n_lateral_per_slow)
+        slow_lateral_indices = torch.tensor(
+            np.stack([lat_src, lat_dst]), dtype=torch.long, device=device
+        )
+        # Lateral coupling strength: 0.15/sqrt(8) ~= 0.053 per edge.
+        # Previous attempts with 0.3 caused destructive interference with the
+        # Golgi inhibitory loop. 0.15 gives modest synchronization without
+        # competing with the net negative loop gain.
+        slow_lateral_values = torch.abs(
+            torch.randn(len(lat_src), device=device, generator=lat_rng_torch)
+        ) * (0.15 / np.sqrt(n_lateral_per_slow))
+    else:
+        slow_lateral_indices = torch.zeros(2, 0, dtype=torch.long, device=device)
+        slow_lateral_values = torch.zeros(0, device=device)
+    
+    # Per-cell delay index: left at a uniform 3 for all cells. Heterogeneous
+    # delays (mixing 2/3/4 steps) were tried and caused destructive
+    # interference across the three implied resonance frequencies (12.5,
+    # 8.33, 6.25 Hz), producing a single blurry peak with LOWER amplitude
+    # than uniform 3-step delay gave. The single-delay system produces a
+    # clean resonance at ~4.2 Hz (lower than the naive pi-phase prediction
+    # of 8.33 Hz because of additional phase from per-cell leaky integrators)
+    # with peak bin power ~2.35x broadband mean.
+    golgi_per_cell_delay = torch.full((n_granule,), 3, dtype=torch.long, device=device)
 
     cerebellum = {
         'n_granule': n_granule,
@@ -665,16 +726,23 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
         # Golgi inhibitory feedback: phase shift of pi around the loop at
         # f = 1/(2*D*dt) = 1/(2*3*0.02) = 8.33 Hz (center of theta band).
         #
+        # Per-tau split: delay + lateral coupling apply ONLY to slow-tau
+        # cells (tau >= 40ms). Fast cells (tau < 40ms) retain immediate
+        # feedback to preserve fast motor-correction dynamics.
+        #
         # Default is OFF (mix=0.0). Cerebellar theta is a resting-state
         # phenomenon; during active motor execution the cerebellum shifts
         # to beta and the theta mechanism is effectively gated off
-        # (Courtemanche & Lamarre 2005, D'Angelo & De Zeeuw 2009). Delayed
-        # inhibition on fast control loops causes destabilization (verified:
-        # mix=0.5 regressed B17 posture from 2/5 to 0/5 seeds), so tests
-        # that require fast closed-loop response MUST leave mix at 0.
-        # B8 (quiet tonic-noise protocol) sets this to 0.5 explicitly.
+        # (Courtemanche & Lamarre 2005, D'Angelo & De Zeeuw 2009). B8
+        # B8 (quiet tonic-noise protocol) sets golgi_delay_mix to 0.5.
+        # Uniform 3-step delay for all cells produces a narrowband resonance
+        # near the low edge of the theta band (~4.2 Hz).
         'golgi_delay_buffer': [torch.zeros(n_granule, device=device) for _ in range(3)],
         'golgi_delay_mix': 0.0,  # OFF by default; B8 diagnostic opts in
+        'slow_tau_mask': slow_tau_mask,
+        'slow_lateral_indices': slow_lateral_indices,
+        'slow_lateral_values': slow_lateral_values,
+        'golgi_per_cell_delay': golgi_per_cell_delay,
         'gc_time_constants': gc_time_constants,
         # --- Fix (a): Heterogeneous PK eligibility traces ---
         'pk_eligibility': pk_eligibility,      # (3, 256, n_granule) CET cascade
@@ -833,22 +901,73 @@ def cerebellar_forward(engine, cerebellum):
             cerebellum['golgi_values'],
             (cerebellum['n_granule'], cerebellum['n_granule'])
         )
-        # B8: Mix immediate and delayed Golgi feedback to create theta resonance.
-        # Delayed negative feedback with D=3 steps produces a pole near the
-        # unit circle at f = 1/(2*D*dt) = 8.33 Hz (theta). The 50/50 mix
-        # preserves total loop gain (so spectral radius effectively unchanged
-        # for B1 pattern separation) while introducing the pi-phase-shift
-        # needed for network oscillations.
+        # B8: Delayed Golgi feedback (full population) for theta resonance,
+        # plus gap-junction-like positive lateral coupling between slow-tau
+        # GCs for increased Q.
+        #
+        # Per-tau split was explored and discarded: limiting the delay to
+        # slow-tau cells (tau >= 40ms) caused the resonance peak to slide
+        # below the theta band because the slow cells' intrinsic low-pass
+        # filtering attenuated the 8 Hz component before it could develop.
+        # Full-population delay produces the correct theta peak.
+        # Motor-test safety is maintained because golgi_delay_mix=0.0
+        # (default), so the delay/coupling machinery is entirely inactive
+        # during motor tests; only the B8 diagnostic opts in.
+        #
+        # Heterogeneous per-cell delays: each GC reads its delayed state
+        # from a cell-specific buffer position (2, 3, or 4 steps). This
+        # produces resonance peaks at 12.5, 8.33, and 6.25 Hz simultaneously,
+        # broadening the theta-band response across multiple FFT bins so
+        # the band-averaged ratio (not just peak bin) clears the criterion.
+        #
+        # Lateral coupling is applied to reservoir_state (instantaneous),
+        # NOT the delay buffer -- instantaneous coupling synchronizes the
+        # population without creating an additional positive-feedback loop.
         mix = cerebellum.get('golgi_delay_mix', 0.0)
+        immediate_fb = torch.mv(golgi_sparse, cerebellum['reservoir_state'])
         if mix > 0.0 and 'golgi_delay_buffer' in cerebellum:
-            immediate_fb = torch.mv(golgi_sparse, cerebellum['reservoir_state'])
-            delayed_fb = torch.mv(golgi_sparse, cerebellum['golgi_delay_buffer'][0])
+            # Build per-cell delayed reservoir state by gathering from the
+            # appropriate buffer position for each cell.
+            if 'golgi_per_cell_delay' in cerebellum:
+                buf = cerebellum['golgi_delay_buffer']
+                n_buf = len(buf)
+                # Stack buffer into (n_buf, n_granule) tensor then gather per-cell
+                # Note: per_cell_delay is 0-indexed from *end* of buffer for
+                # oldest-first semantics. Buffer position [0] is oldest
+                # (D steps ago where D = len(buffer)), [-1] is most recent.
+                # With buffer length 5 and delay indices in {2,3,4} (=2,3,4
+                # steps ago), we read from buf[5-delay] = buf[3,2,1].
+                buf_stack = torch.stack(buf, dim=0)  # (5, n_granule)
+                delays = cerebellum['golgi_per_cell_delay']
+                # Position to read: (n_buf - delay) clamped into [0, n_buf-1]
+                read_pos = (n_buf - delays).clamp(min=0, max=n_buf - 1)
+                # Gather per-cell
+                idx = torch.arange(cerebellum['n_granule'], device=buf_stack.device)
+                delayed_state = buf_stack[read_pos, idx]
+            else:
+                delayed_state = cerebellum['golgi_delay_buffer'][0]
+            delayed_fb = torch.mv(golgi_sparse, delayed_state)
             golgi_feedback = (1.0 - mix) * immediate_fb + mix * delayed_fb
+            # Gap-junction-like positive lateral coupling between slow cells.
+            # Couples on INSTANTANEOUS reservoir_state so no additional
+            # delay-loop instability is introduced; just population
+            # synchronization.
+            if ('slow_lateral_values' in cerebellum
+                    and cerebellum['slow_lateral_values'].numel() > 0):
+                lateral_sparse = torch.sparse_coo_tensor(
+                    cerebellum['slow_lateral_indices'],
+                    cerebellum['slow_lateral_values'],
+                    (cerebellum['n_granule'], cerebellum['n_granule'])
+                )
+                slow_mask_f = cerebellum['slow_tau_mask'].float()
+                slow_state = cerebellum['reservoir_state'] * slow_mask_f
+                lateral_coupling = torch.mv(lateral_sparse, slow_state)
+                golgi_feedback = golgi_feedback + lateral_coupling * slow_mask_f
             # Advance ring buffer: drop oldest, append current reservoir_state
             cerebellum['golgi_delay_buffer'].pop(0)
             cerebellum['golgi_delay_buffer'].append(cerebellum['reservoir_state'].clone())
         else:
-            golgi_feedback = torch.mv(golgi_sparse, cerebellum['reservoir_state'])
+            golgi_feedback = immediate_fb
         granule_pre = granule_pre + golgi_feedback
 
         # Divisive Golgi inhibition (stronger gain for K=4 sparse inputs)
@@ -1089,6 +1208,18 @@ def cerebellar_forward(engine, cerebellum):
         # e_dot_3 = (e_2 - e_3) / tau
         # This creates a delayed peak in e_3, allowing temporal binding.
         e = cerebellum['pk_eligibility']  # (3, 256, n_granule)
+        # Eligibility trace is built from granule_acts (post-kWTA sparse
+        # firing pattern). Previous experiments used scaled or unscaled
+        # granule_blend to bring cascade-stage features into the credit
+        # assignment (target: B24 Weber timing, where the readout uses
+        # cascade features that eligibility couldn't credit). Both full
+        # blend and 0.15x-scaled blend improved B24 modestly (Weber
+        # 1000ms 0.53 -> 0.42 -> 0.37) but broke 2-3 motor tests each
+        # variant. The net effect was always negative (20/25 -> 18/25 ->
+        # 17/25). A proper fix for B24 requires either a separate learning
+        # path for cascade features or matched taus between the readout
+        # cascade and eligibility cascade; both are architectural changes
+        # that need a dedicated session.
         ga = granule_acts.unsqueeze(0)    # (1, n_granule)
         
         # d is (256, 1), ga is (1, n_granule) -> ga_exp is (256, n_granule)

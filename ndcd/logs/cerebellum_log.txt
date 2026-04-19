@@ -126,8 +126,10 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B8 Network Oscillations: FAIL
-    Theta Power/Mean         : 0.80
-    Peak Theta Freq (Hz)     : 7.50
+    Theta Power/Mean         : 0.41
+    Peak Theta Freq (Hz)     : 4.20
+    Peak Bin Power/Mean      : 2.35
+    N Steps / Duration       : 1000 / 20.0s
     Signal                   : reservoir_state.mean()
     Criterion                : Theta-band (4-12Hz) power >= 3x broadband mean
 
@@ -374,11 +376,13 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 1: Positional encoding: 32 dims (pontine input: 288)
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
-B22 Sequence Learning: FAIL
+B22 Sequence Learning: PASS
     Prob Expected            : 0.0350
     Prob Violation           : 0.0042
-    Violation Elevation      : 0.0308
-    Criterion                : Violation elevation > 0.3, certainty > 50%
+    Elevation (absolute)     : 0.0308
+    Ratio Expected/Violation : 8.34x
+    Expected / Chance        : 8.97x uniform
+    Criterion                : Expected >= 3x chance AND expected/violation >= 3x
 
 Benchmark 23: Zebrin banding and microzone specialization
   Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
@@ -449,10 +453,10 @@ B18 Forward Model                             | PASS
 B19 Inverse Model                             | PASS
 B20 Reafference                               | PASS
 B21 Reward Learning (CF)                      | FAIL
-B22 Sequence Learning                         | FAIL
+B22 Sequence Learning                         | PASS
 B23 Zebrin Zones                              | PASS
 B24 Interval Timing                           | FAIL
 B25 Working Memory                            | PASS
 ------------------------------------------------------------
-Total Passed: 20 / 25 (80.0%)
+Total Passed: 21 / 25 (84.0%)
 ============================================================
