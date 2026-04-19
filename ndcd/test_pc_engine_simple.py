@@ -1188,6 +1188,14 @@ def cerebellar_forward(engine, cerebellum):
         cerebellum['_last_granule_blend'] = granule_blend  # blended signal seen by PK readout
         cerebellum['_last_pontine_acts'] = pontine_acts
         cerebellum['_last_pontine_acts_raw'] = pontine_full  # Full dual-pathway
+        # Raw Purkinje firing rate, before softmax-competitive normalization.
+        # In biology, floccular/vermal PK cells project directly to vestibular
+        # nuclei and cerebellar nuclei, driving motor output as a linear
+        # firing rate. There is no cross-PK softmax competition in the
+        # motor pathway. Tests measuring PK-driven motor output (B13 VOR,
+        # and any future regression-mode motor test) should use this value
+        # instead of the softmax-normalized `logits` vector.
+        cerebellum['_last_purkinje_output'] = purkinje_output.clone()
 
         # ==================================================================
         # FIX (a): Update heterogeneous PK eligibility traces
@@ -1322,41 +1330,64 @@ def prune_and_rewire_output(engine, prune_ratio=0.05):
     return n_prune
 
 
-def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, engine, settle_diff=0.0, probe_model=None):
+def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, engine, settle_diff=0.0, probe_model=None, cf_signal=None):
     """
-    Cerebellar learning with dense cross-entropy CF gradient.
+    Cerebellar learning via climbing-fiber-driven PF-PC LTD.
 
-    The sparse one-hot CF signal (only target + wrong-winner rows receive
-    teaching) was proven insufficient to rotate the PK readout matrix out
-    of its random-init null space. A dense gradient — the full softmax
-    cross-entropy gradient (target_onehot - probs) — updates all 256 PK
-    rows every step, providing the coherent rotational pressure that sparse
-    updates lacked.
+    A single plasticity mechanism handles every cerebellar learning task
+    (classification, regression, reward-driven policy gradient). What differs
+    between tasks is the SOURCE of the climbing-fiber error signal, not the
+    plasticity rule at PF-PC synapses. This matches the biological cerebellum:
+    one PK cell's PF-PC LTD mechanism is the same whether the task is saccade
+    adaptation, VOR, CEBC, or aversively-learned motor avoidance.
 
-    Biologically: Najafi & Medina (2013) showed CF signals are graded, not
-    binary. Herzfeld et al. (2018) showed each PK cell has a preferred
-    error direction and the population decomposes the full error vector.
-    A dense CF gradient implements the population-level teaching signal
-    that individual-CF-per-PK cannot.
+    Two error-signal sources are supported:
 
-    This is the simplest possible baseline for whether the cerebellar
-    readout architecture can learn at all. Once verified, individual
-    mechanisms can be made more bio-plausible one at a time.
+    1. cf_signal=None (default, classification): the function constructs
+       cf_error = target_onehot - probs. This is the softmax cross-entropy
+       gradient, which provides a dense teaching signal across all 256 PK
+       rows and is the right signal for categorical prediction (next-byte
+       classification, CEBC target-index, saccade-direction selection, ...).
+       Biological referent: forebrain cortex delivers a dense "prediction
+       error" signal via granular-convergent mossy pathways; Najafi &
+       Medina 2013 and Herzfeld et al. 2018 show CF signals encode the
+       full signed error direction at the population level.
+
+    2. cf_signal=<tensor shape (256,)>: caller provides the CF error
+       directly. This is the right regime for:
+         - regression (VOR): cf_signal[pk] = actual - target at one row,
+           zero elsewhere. Models retinal-slip-driven CF firing.
+         - reward (RPE): cf_signal[pk] = rpe at the reinforced PK row,
+           zero elsewhere. Magnitude grades with |RPE| so convergence is
+           self-stabilizing (Heffley & Hull 2019, Kostadinov 2019).
+         - sparse error: any task where only a few PKs have defined error.
+       Biological referent: IO firing rate directly encodes a scalar error,
+       which is exactly what this path models.
+
+    Downstream machinery (NOI modulation, IO gating, eligibility trace,
+    row-norm soft bound, zebrin LTD modulation) operates on cf_error
+    regardless of source -- those are all postsynaptic mechanisms that
+    don't care how the CF signal was generated.
     """
     device = logits.device
 
     probs = torch.softmax(logits, dim=0)
     pred_byte = torch.argmax(logits).item()
 
-    # Dense cross-entropy gradient: cf_error[i] = target_onehot[i] - probs[i]
-    #   target row:     +(1 - p_target)  ≈ +0.7   → LTD → logit rises
-    #   non-target rows: -(p_i)          ≈ -0.003  → LTP → logit drops
-    # This is the gradient of cross-entropy loss w.r.t. pre-softmax logits.
-    # It is dense, well-scaled, and inherently anti-collapse (pushes
-    # probability mass from non-targets to target every step).
-    target_onehot = torch.zeros(256, device=device)
-    target_onehot[target_byte] = 1.0
-    cf_error = target_onehot - probs
+    if cf_signal is not None:
+        # Caller-provided CF error. Used by regression (B13 VOR), reward
+        # (B21), and any future scalar-error task. Must be shape (256,).
+        cf_error = cf_signal.to(device)
+    else:
+        # Dense cross-entropy gradient: cf_error[i] = target_onehot[i] - probs[i]
+        #   target row:     +(1 - p_target)  ≈ +0.7   → LTD → logit rises
+        #   non-target rows: -(p_i)          ≈ -0.003  → LTP → logit drops
+        # This is the gradient of cross-entropy loss w.r.t. pre-softmax logits.
+        # It is dense, well-scaled, and inherently anti-collapse (pushes
+        # probability mass from non-targets to target every step).
+        target_onehot = torch.zeros(256, device=device)
+        target_onehot[target_byte] = 1.0
+        cf_error = target_onehot - probs
 
     # NEW (T10): Nucleo-Olivary Inhibition
     # w_dcn_io modulates the CF error signal. CF drops if DCN is high.

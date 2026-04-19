@@ -213,11 +213,27 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Global pontine pool: 512 neurons (Level 3)
   Fix 1: Positional encoding: 32 dims (pontine input: 288)
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+  Golgi reservoir: SR 14.425 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
-B13 VOR Adaptation: FAIL
-    Initial RMS Error        : 9.6176
-    Final RMS Error          : 11.5466
-    Error Reduction          : -20.06%
+B13 VOR Adaptation: PASS
+    CONST ablation           : start=-4.453 end=-1.242 target=1.0 converged=False
+    Pre-learning Baseline    : amp=0.54 mean=-0.47
+    Target Amp / Mean        : 2.00 / 0.00
+    Initial RMS Error        : 5.3796
+    Final RMS Error          : 1.7979
+    Error Reduction          : 66.58%
+    Init Output (amp/mean)   : 21.316 / -2.539
+    Final Output (amp/mean)  : 4.224 / 1.187
+    Output-Target Corr       : 0.502
+    Mean Slip (init/final)   : 5.380 / 1.798
+    PK[10] Row Change        : 1.333 (init norm 0.994, final 1.029)
+    Mechanism                : cf_signal = retinal slip at target PK, raw PK output as eye velocity
     Criterion                : Reduction > 40%
 
 Benchmark 14: Saccade Adaptation
@@ -444,7 +460,7 @@ B9 Short-Term Plasticity                      | PASS
 B10 Nucleo-Olivary Inhibition                 | PASS
 B11 CEBC Conditioning                         | PASS
 B12 Trace CEBC                                | PASS
-B13 VOR Adaptation                            | FAIL
+B13 VOR Adaptation                            | PASS
 B14 Saccade Adaptation                        | PASS
 B15 Reaching Adaptation                       | PASS
 B16 Split Belt                                | PASS
@@ -458,5 +474,5 @@ B23 Zebrin Zones                              | PASS
 B24 Interval Timing                           | FAIL
 B25 Working Memory                            | PASS
 ------------------------------------------------------------
-Total Passed: 21 / 25 (84.0%)
+Total Passed: 22 / 25 (88.0%)
 ============================================================

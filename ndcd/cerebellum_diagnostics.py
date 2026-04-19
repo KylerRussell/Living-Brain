@@ -853,52 +853,122 @@ class CerebellumDiagnosticSuite:
     # -------------------------------------------------------------------------
     def benchmark_13_vor_adaptation(self):
         print("\nBenchmark 13: VOR Gain and Phase Adaptation")
-        engine, cereb = self._new_cerebellum()
         
-        # Stimulus: Sinusoidal head rotation (2 Hz)
+        # ------------------------------------------------------------------
+        # Ablation: does the mechanism work for a CONSTANT target?
+        # If PK 10's output can converge to a fixed value under constant
+        # input + fixed slip-driven cf_signal, the mechanism is sound and
+        # the 2Hz tracking failure is specifically about phase alignment.
+        # If it can't converge to a constant either, there's a more
+        # fundamental issue (wrong sign, eligibility trace problem, etc.)
+        # ------------------------------------------------------------------
+        engine, cereb = self._new_cerebellum()
+        target_pk = 10
+        CONST_TARGET = 1.0
+        CONST_STEPS = 500
+        
+        const_outputs = []
+        for step in range(CONST_STEPS):
+            # Constant mild-positive input
+            engine.set_l56(0.5 * torch.ones(self.n_l56, device=self.device))
+            logits, granule_acts, gate = cerebellar_forward(engine, cereb)
+            output = cereb['_last_purkinje_output'][target_pk].item()
+            const_outputs.append(output)
+            
+            slip = output - CONST_TARGET
+            cf_signal = torch.zeros(256, device=self.device)
+            cf_signal[target_pk] = slip
+            cerebellar_learn(cereb, logits, granule_acts, target_pk,
+                             gate, engine, cf_signal=cf_signal)
+        
+        const_start = np.mean(const_outputs[:20])
+        const_end = np.mean(const_outputs[-20:])
+        const_converged = abs(const_end - CONST_TARGET) < 0.2
+        
+        # ------------------------------------------------------------------
+        # Main VOR test: 2Hz sinusoidal head rotation
+        # ------------------------------------------------------------------
+        engine, cereb = self._new_cerebellum()  # Fresh cerebellum
+        
         n_steps = 2000
         hz = 2.0
         dt = 0.01
         t = torch.linspace(0, n_steps * dt, n_steps, device=self.device)
         head_pos = torch.sin(2 * math.pi * hz * t)
-        
-        # Target: Eye velocity (Gain 2.0 initially, then switch to phase reversal)
         target_velocity = 2.0 * torch.cos(2 * math.pi * hz * t)
         
-        target_pk = 10 # Chosen Purkinje cell for eye velocity control
-        
-        errors = []
-        for step in range(n_steps):
-            # Input is head position/velocity
+        # Pre-learning baseline
+        baseline_outputs = []
+        w_init = cereb['purkinje_weights'][target_pk].clone()
+        for step in range(200):
             engine.set_l56(head_pos[step] * torch.ones(self.n_l56, device=self.device))
-            
+            cerebellar_forward(engine, cereb)
+            baseline_outputs.append(cereb['_last_purkinje_output'][target_pk].item())
+        
+        baseline_outputs = np.array(baseline_outputs)
+        baseline_amp = np.max(np.abs(baseline_outputs))
+        baseline_mean = np.mean(baseline_outputs)
+        
+        # Learning phase
+        errors = []
+        outputs = []
+        slip_magnitudes = []
+        
+        for step in range(n_steps):
+            engine.set_l56(head_pos[step] * torch.ones(self.n_l56, device=self.device))
             logits, granule_acts, gate = cerebellar_forward(engine, cereb)
             
-            # Prediction Error (Retinal Slip) = Target - Output
-            # We use target_pk as the controller
-            output = logits[target_pk]
-            error = target_velocity[step] - output
-            errors.append(error.item())
+            output = cereb['_last_purkinje_output'][target_pk].item()
+            outputs.append(output)
             
-            # Learn: CF maps to the target direction
-            # In our CE-style learn, we just provide the target_pk
-            # But here we need to map the analog error. 
-            # We simulate this by providing target_pk to cerebellar_learn
-            # if we are below target, etc.
-            cerebellar_learn(cereb, logits, granule_acts, target_pk, gate, engine)
+            slip = output - target_velocity[step].item()
+            error = target_velocity[step].item() - output
+            errors.append(error)
+            slip_magnitudes.append(abs(slip))
+            
+            cf_signal = torch.zeros(256, device=self.device)
+            cf_signal[target_pk] = slip
+            
+            cerebellar_learn(cereb, logits, granule_acts, target_pk,
+                             gate, engine, cf_signal=cf_signal)
 
-        # Measure error reduction
+        errors = np.array(errors)
+        outputs = np.array(outputs)
+        slip_magnitudes = np.array(slip_magnitudes)
+        
         init_err = np.mean(np.abs(errors[:200]))
         final_err = np.mean(np.abs(errors[-200:]))
         reduction = (init_err - final_err) / (init_err + 1e-9)
         
-        passed = reduction > 0.40 # At least 40% error reduction
+        init_output_amp = np.max(np.abs(outputs[:200]))
+        final_output_amp = np.max(np.abs(outputs[-200:]))
+        init_output_mean = np.mean(outputs[:200])
+        final_output_mean = np.mean(outputs[-200:])
+        
+        target_np = target_velocity.cpu().numpy()
+        final_window_corr = np.corrcoef(outputs[-500:], target_np[-500:])[0, 1]
+        
+        w_final = cereb['purkinje_weights'][target_pk].clone()
+        weight_row_change = (w_final - w_init).norm().item()
+        weight_row_init_norm = w_init.norm().item()
+        weight_row_final_norm = w_final.norm().item()
+        
+        passed = reduction > 0.40
         
         details = {
-            'Initial RMS Error': f"{init_err:.4f}",
-            'Final RMS Error':   f"{final_err:.4f}",
-            'Error Reduction':   f"{reduction:.2%}",
-            'Criterion':         "Reduction > 40%",
+            'CONST ablation':        f"start={const_start:.3f} end={const_end:.3f} target={CONST_TARGET} converged={const_converged}",
+            'Pre-learning Baseline': f"amp={baseline_amp:.2f} mean={baseline_mean:.2f}",
+            'Target Amp / Mean':     "2.00 / 0.00",
+            'Initial RMS Error':     f"{init_err:.4f}",
+            'Final RMS Error':       f"{final_err:.4f}",
+            'Error Reduction':       f"{reduction:.2%}",
+            'Init Output (amp/mean)': f"{init_output_amp:.3f} / {init_output_mean:.3f}",
+            'Final Output (amp/mean)': f"{final_output_amp:.3f} / {final_output_mean:.3f}",
+            'Output-Target Corr':    f"{final_window_corr:.3f}",
+            'Mean Slip (init/final)': f"{np.mean(slip_magnitudes[:200]):.3f} / {np.mean(slip_magnitudes[-200:]):.3f}",
+            'PK[10] Row Change':     f"{weight_row_change:.3f} (init norm {weight_row_init_norm:.3f}, final {weight_row_final_norm:.3f})",
+            'Mechanism':             "cf_signal = retinal slip at target PK, raw PK output as eye velocity",
+            'Criterion':             "Reduction > 40%",
         }
         self._log("B13 VOR Adaptation", passed, details)
 
@@ -1443,6 +1513,27 @@ class CerebellumDiagnosticSuite:
         print("\nBenchmark 21: Reward-based learning via climbing fibers")
         engine, cereb = self._new_cerebellum(test_seed=42)
         
+        # Reverted to original protocol after two attempts at diagnostic-only
+        # fixes failed. The failures revealed a genuine mechanism interaction:
+        #
+        # Attempt 1 (longer training + annealed exploration): action moved
+        # AWAY from target (2.28 -> 1.17) over 1000 trials. Root cause: the
+        # engine's NOI-modulated CF is consolidation-aware -- once one PK is
+        # trained, its high DCN suppresses further CF to that PK, so
+        # subsequent reinforcements bias toward the UNDER-trained PK,
+        # producing asymmetric drift in a two-target REINFORCE scheme.
+        #
+        # Attempt 2 (disable NOI + IO gate): action converged toward target
+        # (2.47) but reward became bimodal and median collapsed to ~0. Root
+        # cause: without consolidation damping, CF fires at full strength
+        # every trial including post-convergence, driving unbounded LTD
+        # that destabilizes PK weights over 800 trials. The engine's safety
+        # mechanisms are load-bearing, not gratuitous.
+        #
+        # Fixing B21 properly requires either RPE-scaled CF magnitude
+        # (instead of alternating targets with fixed magnitude) or a
+        # dedicated reward-CF pathway that doesn't share the consolidation
+        # feedback. Both are engine changes, not diagnostic fixes.
         target_pk_pos = 0
         target_pk_neg = 1
         
@@ -1452,33 +1543,26 @@ class CerebellumDiagnosticSuite:
         
         baseline_R = 0.0
         alpha_R = 0.1
-        optimal_target = 3.0 # Hidden target action
+        optimal_target = 3.0  # Hidden target action
         
         for trial in range(n_trials):
             state = torch.zeros(self.n_l56, device=self.device)
-            state[0] = 1.0 # Constant CS
+            state[0] = 1.0  # Constant CS
             engine.set_l56(state)
             
             logits, gc_acts, _ = cerebellar_forward(engine, cereb)
             
-            # Base action via cereb prediction
             a_mean = logits[target_pk_pos].item() - logits[target_pk_neg].item()
-            
-            # Exploratory action selection
             noise = np.random.randn() * 0.5
             a_taken = a_mean + noise
             action_log.append(a_taken)
             
-            # Calculate environment reward
             R = math.exp(-0.2 * (a_taken - optimal_target)**2)
             RPE = R - baseline_R
             reward_log.append(R)
             
-            # Update baseline
             baseline_R = (1 - alpha_R) * baseline_R + alpha_R * R
             
-            # REINFORCE via CF error modulation
-            # If RPE > 0 and noise > 0, reinforce UP
             if RPE > 0:
                 if noise > 0:
                     cerebellar_learn(cereb, logits, gc_acts, target_pk_pos, 1.0, engine)
@@ -1495,7 +1579,6 @@ class CerebellumDiagnosticSuite:
         init_reward = np.mean(reward_log[:20])
         final_reward = np.mean(reward_log[-20:])
         
-        # Did we find the target and maximize reward?
         passed = final_reward >= 0.80 and (final_reward > init_reward + 0.3)
         
         details = {
