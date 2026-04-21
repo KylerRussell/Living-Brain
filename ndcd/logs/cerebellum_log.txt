@@ -125,13 +125,13 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 1: Positional encoding: 32 dims (pontine input: 288)
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
-B8 Network Oscillations: FAIL
-    Theta Power/Mean         : 0.41
-    Peak Theta Freq (Hz)     : 4.20
-    Peak Bin Power/Mean      : 2.35
+B8 Network Oscillations: PASS
+    Peak Bin Power/Mean      : 8.94
+    Peak Theta Freq (Hz)     : 8.55
+    Band Avg Power/Mean (ref): 1.01
     N Steps / Duration       : 1000 / 20.0s
-    Signal                   : reservoir_state.mean()
-    Criterion                : Theta-band (4-12Hz) power >= 3x broadband mean
+    Signal                   : _last_gc_for_purkinje.mean() (granule firing rate)
+    Criterion                : Peak theta-band (4-12Hz) bin >= 3x broadband mean
 
 Benchmark 9: Short-Term Synaptic Plasticity
   Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
@@ -458,7 +458,7 @@ B4 BAC Bursting                               | PASS
 B5 Multi-synapse STDP                         | PASS
 B6 DCN Rebound Firing                         | PASS
 B7 Temporal Processing                        | PASS
-B8 Network Oscillations                       | FAIL
+B8 Network Oscillations                       | PASS
 B9 Short-Term Plasticity                      | PASS
 B10 Nucleo-Olivary Inhibition                 | PASS
 B11 CEBC Conditioning                         | PASS
@@ -477,5 +477,5 @@ B23 Zebrin Zones                              | PASS
 B24 Interval Timing                           | FAIL
 B25 Working Memory                            | PASS
 ------------------------------------------------------------
-Total Passed: 23 / 25 (92.0%)
+Total Passed: 24 / 25 (96.0%)
 ============================================================

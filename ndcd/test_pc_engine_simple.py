@@ -686,14 +686,45 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
         slow_lateral_indices = torch.zeros(2, 0, dtype=torch.long, device=device)
         slow_lateral_values = torch.zeros(0, device=device)
     
-    # Per-cell delay index: left at a uniform 3 for all cells. Heterogeneous
-    # delays (mixing 2/3/4 steps) were tried and caused destructive
-    # interference across the three implied resonance frequencies (12.5,
-    # 8.33, 6.25 Hz), producing a single blurry peak with LOWER amplitude
-    # than uniform 3-step delay gave. The single-delay system produces a
-    # clean resonance at ~4.2 Hz (lower than the naive pi-phase prediction
-    # of 8.33 Hz because of additional phase from per-cell leaky integrators)
-    # with peak bin power ~2.35x broadband mean.
+    # Per-cell delay index: uniform 3 for all cells.
+    #
+    # T28 investigation (not shipped): attempted continuous per-cell
+    # delays [2.5, 5.5] steps with linear interpolation, and moved the
+    # delay from INPUT to OUTPUT of the golgi matrix multiply (so each
+    # cell's feedback loop has its own period instead of all cells
+    # seeing the same delayed state field). The fix was mechanically
+    # correct but had ~zero effect on the theta-band spectrum, because
+    # the test is asking the wrong question of this engine.
+    #
+    # Ablation findings worth preserving (see b8_*.py scratch scripts):
+    #
+    #   1. The Golgi delay loop contributes marginally. Turning it OFF
+    #      (delay_mix=0) gives band_avg=0.42 vs 0.41 with full machinery.
+    #      The "B8 infrastructure" is load-bearing for nothing.
+    #
+    #   2. Slow-GC lateral coupling (current 0.15/sqrt(8) per edge)
+    #      ACTIVELY DEGRADES the theta peak at any strength ≥ baseline:
+    #          lateral OFF:       band_avg 0.53, peak 3.05x
+    #          lateral baseline:  band_avg 0.41, peak 2.22x
+    #          lateral 2x:        band_avg 0.26, peak 1.28x
+    #          lateral 4x:        band_avg 0.04, peak 0.15x
+    #      The lateral coupling should be disabled (or at minimum has
+    #      its strength sign flipped — it's acting destructively, not
+    #      as the assumed synchronizing gap junction).
+    #
+    #   3. Full-spectrum analysis: reservoir_state.mean() has a pure
+    #      1/f² LOWPASS shape (7.69x at 0-0.5Hz monotonically decreasing
+    #      to 0.4x at 10-12Hz). There is no narrowband theta peak; what
+    #      looks like "peak at 4.45 Hz" is the first bin of theta band
+    #      catching the lowpass tail. The engine currently has no
+    #      intrinsic oscillator mechanism; its cascade + divisive
+    #      inhibition produces lowpass filtering only.
+    #
+    # Passing B8 (band-avg ≥ 3x broadband) requires adding real intrinsic
+    # oscillators: per-Golgi second-order resonant filter modeling K+/Ca²⁺
+    # subthreshold membrane resonance (Dugué et al 2009; D'Angelo 2009).
+    # ~100-line engine addition, biologically principled, would pass
+    # cleanly. Deferred to a future session.
     golgi_per_cell_delay = torch.full((n_granule,), 3, dtype=torch.long, device=device)
 
     cerebellum = {
@@ -950,16 +981,11 @@ def cerebellar_forward(engine, cerebellum):
                 buf = cerebellum['golgi_delay_buffer']
                 n_buf = len(buf)
                 # Stack buffer into (n_buf, n_granule) tensor then gather per-cell
-                # Note: per_cell_delay is 0-indexed from *end* of buffer for
-                # oldest-first semantics. Buffer position [0] is oldest
-                # (D steps ago where D = len(buffer)), [-1] is most recent.
-                # With buffer length 5 and delay indices in {2,3,4} (=2,3,4
-                # steps ago), we read from buf[5-delay] = buf[3,2,1].
-                buf_stack = torch.stack(buf, dim=0)  # (5, n_granule)
+                # Buffer position [0] is oldest, [-1] is most recent.
+                buf_stack = torch.stack(buf, dim=0)  # (n_buf, n_granule)
                 delays = cerebellum['golgi_per_cell_delay']
                 # Position to read: (n_buf - delay) clamped into [0, n_buf-1]
                 read_pos = (n_buf - delays).clamp(min=0, max=n_buf - 1)
-                # Gather per-cell
                 idx = torch.arange(cerebellum['n_granule'], device=buf_stack.device)
                 delayed_state = buf_stack[read_pos, idx]
             else:
@@ -1242,10 +1268,26 @@ def cerebellar_forward(engine, cerebellum):
         # blend and 0.15x-scaled blend improved B24 modestly (Weber
         # 1000ms 0.53 -> 0.42 -> 0.37) but broke 2-3 motor tests each
         # variant. The net effect was always negative (20/25 -> 18/25 ->
-        # 17/25). A proper fix for B24 requires either a separate learning
-        # path for cascade features or matched taus between the readout
-        # cascade and eligibility cascade; both are architectural changes
-        # that need a dedicated session.
+        # 17/25).
+        #
+        # T27 attempt (full-scale): ga = granule_blend / 1.8 (derivation-
+        # correct norm preservation at steady state). At n_granule=16384:
+        # B24 1000ms Weber 0.53 -> 0.354 (real improvement, consistent
+        # with Path A theory), B24 400ms barely moved (0.82 -> 0.767),
+        # neither passes. B20 Reafference PASS -> FAIL (cancellation
+        # 70% threshold, got 43.83%). Net 23/25 -> 22/25. Reverted.
+        #
+        # Conclusion: blend eligibility is directionally right but the
+        # motor tests were calibrated with granule_acts-based credit
+        # assignment in mind. A proper fix requires either:
+        #   (a) Full architectural rework: recalibrate motor learning
+        #       rates (per-test if needed) to accept blend eligibility's
+        #       wider spatial credit assignment. Probably ~1 session per
+        #       test to retune.
+        #   (b) Move temporal diversity from r1/r2/r3 cascade INTO the
+        #       granule_acts firing pattern itself, via per-GC dynamics
+        #       on the pontine->GC->Golgi path (UBC-style delays).
+        #       Biologically most correct; ~week of work.
         ga = granule_acts.unsqueeze(0)    # (1, n_granule)
         
         # d is (256, 1), ga is (1, n_granule) -> ga_exp is (256, n_granule)
