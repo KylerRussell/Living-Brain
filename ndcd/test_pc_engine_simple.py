@@ -520,6 +520,24 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
     reservoir_state_2 = torch.zeros(n_granule, device=device)  # Stage 2 (peaks at t=tau for impulse)
     reservoir_state_3 = torch.zeros(n_granule, device=device)  # Stage 3 (peaks at t=2*tau for impulse)
     
+    # B8 oscillator experiment (REMOVED -- kept comment for future reference):
+    # Attempted a per-cell harmonic oscillator population (Solinas-style
+    # Ih/T-type resonance) to broaden the theta-band response beyond
+    # what the delayed-Golgi mechanism alone produces. After 5 iterations
+    # varying Q (2 to 5), drive gain (plain noise, omega^2 drive),
+    # coupling (shared vs independent noise), and frequency distribution
+    # (continuous log-uniform vs 16 discrete groups), the mechanism
+    # consistently produced elevated PEAK bin power (up to 14x at best
+    # config) but could not clear the 3x band-average threshold. The
+    # population-mean readout (reservoir_state.mean()) dilutes the
+    # coherent same-frequency contribution by N=16384, and no combination
+    # of the above parameters overcomes this while remaining numerically
+    # stable. A proper fix requires either (a) a different readout
+    # (e.g., population variance, or a subset-mean), (b) many-to-many
+    # coupled oscillators (gap-junction network) that synchronize without
+    # requiring shared drive, or (c) the B8 criterion recalibrated to
+    # peak-bin rather than band-average power.
+    
     # Sparse Golgi recurrent connections (~2% density)
     # Each GC receives inhibitory feedback from a random subset of other GCs
     # via Golgi interneurons (modeled as direct inhibitory recurrence)
@@ -1490,6 +1508,12 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, 
     ltd_update = ltd_update.clamp(min=-0.05, max=0.05)
     ltd_update = ltd_update * row_soft_scale.unsqueeze(1)  # Per-row soft bound
     cerebellum['purkinje_weights'] += ltd_update
+    # Diagnostic: expose what the learning signal and gate looked like
+    # after all modulations (NOI, IO gate, probe, etc). B21 and future
+    # tests that fail on mechanism-interaction issues can read these to
+    # see the effective gradient applied per step.
+    cerebellum['_last_cf_error'] = cf_error.detach().clone()
+    cerebellum['_last_io_gate'] = io_gate
     # NOTE: Removed clamp(min=0.0). The PK readout matrix is a signed projection,
     # not a synaptic conductance. Clamping nonneg killed half the random init and
     # forced one-directional drift, which broke B11/B13/B17/B18 learning sign.
@@ -1539,15 +1563,31 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, 
 
     # Anti-Hebbian laterals (corrected sign: co-fire → increase inhibition)
     # Fix 4 (continued): Boosted lateral inhibition for stronger competitive dynamics
-    with torch.no_grad():
-        y = torch.relu(logits)
-        y_norm = y / (y.norm() + 1e-8)
-        lateral_lr = 0.005  # Boosted from 0.001 for stronger competition
-        co_fire = lateral_lr * y_norm.unsqueeze(1) * y_norm.unsqueeze(0)
-        co_fire.fill_diagonal_(0.0)
-        cerebellum['lateral_weights'] += co_fire
-        cerebellum['lateral_weights'] *= 0.998
-        cerebellum['lateral_weights'].clamp_(min=0.0, max=1.0)  # Raised cap from 0.5 -> 1.0
+    #
+    # T26 (B21 fix): MLI (basket/stellate) plasticity is CF-gated in biology
+    # (Jörntell & Ekerot 2003): PF→MLI LTP requires concurrent CF activation
+    # at co-active Purkinje cells. In the dense-CE regime (cf_signal=None),
+    # CF fires on every trial across all PK rows via target_onehot-probs, so
+    # broad MLI competition is physiologically appropriate. In the sparse-CF
+    # regime (cf_signal provided: VOR slip, reward RPE, etc.), CF fires at
+    # only the targeted rows; updating lateral weights from the whole logit
+    # pattern would be biologically wrong and computationally fatal -- the
+    # cross-inhibition accumulates into a ~140x-growth (0.005 -> 0.7 Frobenius
+    # norm over 200 steps) that drives every logit toward the uniform baseline,
+    # swamping the small policy-gradient signal. Observed on B21: drift
+    # from a_mean=+6 to a_mean=0 in 200 trials with cf_signal=0. The fix
+    # preserves CE-path behavior exactly and freezes lateral plasticity on
+    # the cf_signal path.
+    if cf_signal is None:
+        with torch.no_grad():
+            y = torch.relu(logits)
+            y_norm = y / (y.norm() + 1e-8)
+            lateral_lr = 0.005  # Boosted from 0.001 for stronger competition
+            co_fire = lateral_lr * y_norm.unsqueeze(1) * y_norm.unsqueeze(0)
+            co_fire.fill_diagonal_(0.0)
+            cerebellum['lateral_weights'] += co_fire
+            cerebellum['lateral_weights'] *= 0.998
+            cerebellum['lateral_weights'].clamp_(min=0.0, max=1.0)  # Raised cap from 0.5 -> 1.0
 
     cerebellum['last_climbing_fiber_error'] = cf_error
     # Fix (c) diagnostic: report PEAK cf_error magnitude, not mean.

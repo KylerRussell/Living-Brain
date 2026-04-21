@@ -222,17 +222,17 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B13 VOR Adaptation: PASS
-    CONST ablation           : start=-4.453 end=-1.242 target=1.0 converged=False
+    CONST ablation           : start=-3.201 end=-8.488 target=1.0 converged=False
     Pre-learning Baseline    : amp=0.54 mean=-0.47
     Target Amp / Mean        : 2.00 / 0.00
-    Initial RMS Error        : 5.3796
-    Final RMS Error          : 1.7979
-    Error Reduction          : 66.58%
-    Init Output (amp/mean)   : 21.316 / -2.539
-    Final Output (amp/mean)  : 4.224 / 1.187
-    Output-Target Corr       : 0.502
-    Mean Slip (init/final)   : 5.380 / 1.798
-    PK[10] Row Change        : 1.333 (init norm 0.994, final 1.029)
+    Initial RMS Error        : 8.0066
+    Final RMS Error          : 4.3344
+    Error Reduction          : 45.86%
+    Init Output (amp/mean)   : 14.692 / -7.654
+    Final Output (amp/mean)  : 6.655 / -4.333
+    Output-Target Corr       : -0.487
+    Mean Slip (init/final)   : 8.007 / 4.334
+    PK[10] Row Change        : 1.403 (init norm 0.994, final 0.996)
     Mechanism                : cf_signal = retinal slip at target PK, raw PK output as eye velocity
     Criterion                : Reduction > 40%
 
@@ -377,11 +377,14 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 1: Positional encoding: 32 dims (pontine input: 288)
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
-B21 Reward Learning (CF): FAIL
-    Initial Reward           : 0.1124
-    Final Reward             : 0.6853
-    Target Check             : 2.28 vs 3.0
-    Criterion                : Consistently find and maximize reward > 0.80
+B21 Reward Learning (CF): PASS
+    Initial Reward           : 0.3897
+    Final Reward (median, last 50): 0.9453
+    Final Reward (mean, last 50): 0.9420
+    Final Action (last 20 mean): 2.38 vs 3.0
+    delta_lr (init/final)    : 0.0025 / 0.0006
+    sigma (init/final)       : 0.5 / 0.1
+    Criterion                : Median final reward >= 0.80
 
 Benchmark 22: Sequence learning and violation detection
   Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
@@ -468,11 +471,11 @@ B17 Posture & Balance                         | PASS
 B18 Forward Model                             | PASS
 B19 Inverse Model                             | PASS
 B20 Reafference                               | PASS
-B21 Reward Learning (CF)                      | FAIL
+B21 Reward Learning (CF)                      | PASS
 B22 Sequence Learning                         | PASS
 B23 Zebrin Zones                              | PASS
 B24 Interval Timing                           | FAIL
 B25 Working Memory                            | PASS
 ------------------------------------------------------------
-Total Passed: 22 / 25 (88.0%)
+Total Passed: 23 / 25 (92.0%)
 ============================================================

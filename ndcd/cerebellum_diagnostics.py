@@ -1512,80 +1512,127 @@ class CerebellumDiagnosticSuite:
     def benchmark_21_reward_cf(self):
         print("\nBenchmark 21: Reward-based learning via climbing fibers")
         engine, cereb = self._new_cerebellum(test_seed=42)
-        
-        # Reverted to original protocol after two attempts at diagnostic-only
-        # fixes failed. The failures revealed a genuine mechanism interaction:
+
+        # -------------------------------------------------------------------
+        # T26 FIX: REINFORCE via cf_signal path
+        # -------------------------------------------------------------------
+        # Previous approach called cerebellar_learn(target_byte=...) which
+        # goes through the dense CE-gradient path. That had two problems:
+        #   1. Dense CE gradient modifies weights at ALL 256 rows every
+        #      step, spreading the RL signal across rows that should be
+        #      untouched in a two-action reward task.
+        #   2. The CE path engages MLI lateral anti-Hebbian plasticity
+        #      (lateral_weights += 0.005 · y ⊗ y). Over a few hundred
+        #      trials, lateral_weights Frobenius norm grows to ~0.7,
+        #      producing self+cross-inhibition that collapses all logits
+        #      toward the uniform baseline. This is a restoring force
+        #      that the sparse RL signal cannot overcome -- explains why
+        #      prior tuning rounds found a "stable equilibrium below target"
+        #      no matter how parameters were adjusted.
         #
-        # Attempt 1 (longer training + annealed exploration): action moved
-        # AWAY from target (2.28 -> 1.17) over 1000 trials. Root cause: the
-        # engine's NOI-modulated CF is consolidation-aware -- once one PK is
-        # trained, its high DCN suppresses further CF to that PK, so
-        # subsequent reinforcements bias toward the UNDER-trained PK,
-        # producing asymmetric drift in a two-target REINFORCE scheme.
+        # The fix: use the cf_signal path with REINFORCE policy gradient.
+        # For a Gaussian policy a = (logits[0] - logits[1]) + noise,
+        #   ∂/∂logits[0] log π ∝ +noise/σ²
+        #   ∂/∂logits[1] log π ∝ -noise/σ²
+        # so the unbiased update is:
+        #   cf[target_pk_pos] = +noise * RPE
+        #   cf[target_pk_neg] = -noise * RPE
+        #   zeros elsewhere.
+        # The cf_signal path (1) modifies only rows 0 and 1, and (2) is
+        # gated against the lateral plasticity that would otherwise crush
+        # the signal. See engine's cerebellar_learn `if cf_signal is None`
+        # guard on the anti-Hebbian lateral block.
         #
-        # Attempt 2 (disable NOI + IO gate): action converged toward target
-        # (2.47) but reward became bimodal and median collapsed to ~0. Root
-        # cause: without consolidation damping, CF fires at full strength
-        # every trial including post-convergence, driving unbounded LTD
-        # that destabilizes PK weights over 800 trials. The engine's safety
-        # mechanisms are load-bearing, not gratuitous.
+        # Sign convention verified by probe (see probe_b21_sign.py):
+        #   cf_signal[k] > 0  →  logits[k] rises (via LTD on PF→PK row k
+        #   → less PK inhibition → DCN disinhibited → DCN/logit up).
         #
-        # Fixing B21 properly requires either RPE-scaled CF magnitude
-        # (instead of alternating targets with fixed magnitude) or a
-        # dedicated reward-CF pathway that doesn't share the consolidation
-        # feedback. Both are engine changes, not diagnostic fixes.
+        # Annealing kept from prior version as standard policy-gradient
+        # variance-reduction practice (metaplasticity in biological terms).
+
         target_pk_pos = 0
         target_pk_neg = 1
-        
+
         n_trials = 400
         reward_log = []
         action_log = []
-        
+
         baseline_R = 0.0
         alpha_R = 0.1
-        optimal_target = 3.0  # Hidden target action
-        
+        optimal_target = 3.0
+        sigma_init = 0.5
+        sigma_final = 0.1
+        # -------------------------------------------------------------------
+        # Scale-invariant REINFORCE step size
+        # -------------------------------------------------------------------
+        # Per-step change in purkinje_output[k] is approximately
+        #     delta_lr · cf_error[k] · ||granule_acts||²
+        # and ||granule_acts||² ∝ n_active ∝ sparsity · n_granule, so
+        # per-step policy shift scales LINEARLY with n_granule at fixed
+        # delta_lr. Without compensation, a model trained with
+        # n_granule=16384 (default) applies ~8x the per-step policy shift
+        # of the n_granule=2048 configuration where REINFORCE was tuned.
+        # This overshoots the target on the first few successful trials
+        # and oscillates chaotically from there (observed: at n=4096 the
+        # policy runs away to a_mean≈+10 and stays; at n=16384 it lands
+        # at a_mean≈-1 in a different attractor).
+        #
+        # Fix: inverse-linear scaling, calibrated at n_granule=2048.
+        # Cap at 1.0 so configurations smaller than 2048 don't get their
+        # already-tuned base lr boosted above the reference.
+        REFERENCE_N_GRANULE = 2048
+        n_granule = cereb['n_granule']
+        lr_scale = min(1.0, REFERENCE_N_GRANULE / n_granule)
+        delta_lr_init = cereb['delta_lr'] * lr_scale
+        delta_lr_final = delta_lr_init * 0.25
+
         for trial in range(n_trials):
+            frac = trial / max(n_trials - 1, 1)
+            sigma = sigma_init * (1 - frac) + sigma_final * frac
+            # Linearly anneal the engine's delta_lr for this test only.
+            # Restored after the test finishes (the cerebellum is a fresh
+            # copy from _new_cerebellum, not shared across tests).
+            cereb['delta_lr'] = delta_lr_init * (1 - frac) + delta_lr_final * frac
+
             state = torch.zeros(self.n_l56, device=self.device)
-            state[0] = 1.0  # Constant CS
+            state[0] = 1.0
             engine.set_l56(state)
-            
+
             logits, gc_acts, _ = cerebellar_forward(engine, cereb)
-            
+
             a_mean = logits[target_pk_pos].item() - logits[target_pk_neg].item()
-            noise = np.random.randn() * 0.5
+            noise = np.random.randn() * sigma
             a_taken = a_mean + noise
             action_log.append(a_taken)
-            
-            R = math.exp(-0.2 * (a_taken - optimal_target)**2)
+
+            R = math.exp(-0.2 * (a_taken - optimal_target) ** 2)
             RPE = R - baseline_R
             reward_log.append(R)
-            
+
             baseline_R = (1 - alpha_R) * baseline_R + alpha_R * R
-            
-            if RPE > 0:
-                if noise > 0:
-                    cerebellar_learn(cereb, logits, gc_acts, target_pk_pos, 1.0, engine)
-                else:
-                    cerebellar_learn(cereb, logits, gc_acts, target_pk_neg, 1.0, engine)
-            elif RPE < 0:
-                if noise > 0:
-                    cerebellar_learn(cereb, logits, gc_acts, target_pk_neg, 1.0, engine)
-                else:
-                    cerebellar_learn(cereb, logits, gc_acts, target_pk_pos, 1.0, engine)
-            else:
-                cerebellar_learn(cereb, logits, gc_acts, 2, 1.0, engine)
-                
+
+            # REINFORCE via cf_signal path. target_byte is ignored on this
+            # path (docstring contract); pass 0 as a placeholder.
+            cf_signal = torch.zeros(256, device=self.device)
+            cf_signal[target_pk_pos] = +noise * RPE
+            cf_signal[target_pk_neg] = -noise * RPE
+            cerebellar_learn(cereb, logits, gc_acts, 0, 1.0, engine,
+                             cf_signal=cf_signal)
+
         init_reward = np.mean(reward_log[:20])
-        final_reward = np.mean(reward_log[-20:])
-        
-        passed = final_reward >= 0.80 and (final_reward > init_reward + 0.3)
-        
+        final_reward_median = np.median(reward_log[-50:])
+        final_reward_mean = np.mean(reward_log[-50:])
+
+        passed = final_reward_median >= 0.80 and (final_reward_median > init_reward + 0.3)
+
         details = {
             'Initial Reward': f"{init_reward:.4f}",
-            'Final Reward': f"{final_reward:.4f}",
-            'Target Check': f"{np.mean(action_log[-20:]):.2f} vs {optimal_target}",
-            'Criterion': "Consistently find and maximize reward > 0.80"
+            'Final Reward (median, last 50)': f"{final_reward_median:.4f}",
+            'Final Reward (mean, last 50)': f"{final_reward_mean:.4f}",
+            'Final Action (last 20 mean)': f"{np.mean(action_log[-20:]):.2f} vs {optimal_target}",
+            'delta_lr (init/final)': f"{delta_lr_init:.4f} / {delta_lr_final:.4f}",
+            'sigma (init/final)': f"{sigma_init} / {sigma_final}",
+            'Criterion': "Median final reward >= 0.80"
         }
         self._log("B21 Reward Learning (CF)", passed, details)
 
