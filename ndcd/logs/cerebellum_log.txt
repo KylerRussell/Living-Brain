@@ -1,8 +1,9 @@
+[diagnostic] CUDA matmul TF32 = False, cuDNN TF32 = False, device = NVIDIA GeForce RTX 3090
 Starting Bio-Plausible Cerebellar Diagnostic Suite
 ============================================================
 
 Benchmark 1: GC Pattern Separation & Orthogonality
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
 Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
   delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
   Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
@@ -11,283 +12,14 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B1 Pattern Separation: PASS
-    Avg MF Correlation       : 0.1759
-    Avg GC Correlation       : 0.0332
-    Decorr Ratio             : 0.81
+    Avg MF Correlation       : 0.1750
+    Avg GC Correlation       : 0.0323
+    Decorr Ratio             : 0.82
     GC Sparsity              : 15.00%
     Criterion                : Decorr >= 0.30 & Sparsity 5-30%
 
 Benchmark 2: CF-gated long-term depression at PF-PC synapses
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-
-B2 PF-PC LTD: PASS
-    LTD Weight Motion        : 903.83%
-    Control (CF-Silent)      : 0.00%
-    Criterion                : LTD motion >= 15%, CF-Silent < 5%
-
-Benchmark 3: PF-PC LTP and bidirectional plasticity
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-
-B3 PF-PC LTP: PASS
-    Init Row Norm            : 0.9999
-    LTD Dist From Init       : 1.0154
-    LTP Dist From Init       : 0.3675
-    Rel Increase             : 64.80%
-    Recovery Ratio           : 63.81%
-    Criterion                : Increase >= 10% & Recovery >= 50%
-
-Benchmark 4: BAC Burst Amplification (Coincidence Detection)
-
-B4 BAC Bursting: PASS
-    Basal-only Output        : 0.0388
-    Apical-only Output       : 0.0004
-    Coincident Output        : 0.5918
-    Supralinear Ratio        : 15.11
-    Criterion                : Ratio > 1.20
-
-Benchmark 5: STDP at multiple cerebellar synapses
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-
-B5 Multi-synapse STDP: PASS
-    LTP Magnitude (all)      : 1.098153e-05
-    LTD Magnitude (all)      : -4.274027e-08
-    LTP Magnitude (active)   : 1.093069e-05
-    LTD Magnitude (active)   : -1.095393e-05
-    Pairings                 : 10
-    Criterion                : Pre-Post > 0, Post-Pre < 0 (on active synapses)
-
-Benchmark 6: DCN rebound firing (T-type Calcium)
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-
-B6 DCN Rebound Firing: PASS
-    Ratio (50ms)             : 21.55
-    Monotonic                : True
-    Criterion                : Ratio >= 1.50 for 50ms pulse & Monotonic
-
-Benchmark 7: Temporal processing via Golgi cell reservoir
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-
-B7 Temporal Processing: PASS
-    Accuracy (Normal)        : 85.00%
-    Accuracy (Ablated)       : 35.00%
-    Criterion                : Normal >= 85%, Ablation drops >= 25%
-
-Benchmark 8: Network oscillations
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-
-B8 Network Oscillations: PASS
-    Peak Bin Power/Mean      : 8.94
-    Peak Theta Freq (Hz)     : 8.55
-    Band Avg Power/Mean (ref): 1.01
-    N Steps / Duration       : 1000 / 20.0s
-    Signal                   : _last_gc_for_purkinje.mean() (granule firing rate)
-    Criterion                : Peak theta-band (4-12Hz) bin >= 3x broadband mean
-
-Benchmark 9: Short-Term Synaptic Plasticity
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-
-B9 Short-Term Plasticity: PASS
-    MF PPR (20ms, matched)   : 1.21
-    PF PPR (20ms, matched)   : 1.11
-    MF Active Overlap        : 96.7% (439 cells)
-    PF Active Overlap        : 13.4% (330 cells)
-    Criterion                : MF PPR > 1.2 & PF PPR > 1.1 (matched-set)
-
-Benchmark 10: Nucleo-Olivary Inhibition
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-
-B10 Nucleo-Olivary Inhibition: PASS
-    CF Mag (NOI ON)          : 0.4650
-    CF Mag (NOI OFF)         : 0.9915
-    NOI Suppression          : 53.10%
-    DCN Rate Norm (ON)       : 17.8773
-    w_dcn_io Norm (ON)       : 8.0000
-    Criterion                : Suppression >= 10% at non-trivial DCN rate
-
-Benchmark 11: Classical Eyeblink Conditioning
-  Golgi reservoir: SR 14.427 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-
-B11 CEBC Conditioning: PASS
-    Acquisition (Start->End) : 21.41 -> 8.73
-    Extinction End           : 8.76
-    Reacquisition End        : 9.21
-    ISI (steps / ms)         : 15 / 300ms
-    Criterion                : Acq/Reacq > +0.5, Ext drops back to baseline
-
-Benchmark 12: Trace Eyeblink Conditioning
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-
-B12 Trace CEBC: PASS
-    Init CR amp              : 12.60
-    Final CR amp             : 8.50
-    Improvement              : 4.10
-    Trials                   : 300
-    Criterion                : Improvement > 0.50 across gap
-
-Benchmark 13: VOR Gain and Phase Adaptation
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-  Golgi reservoir: SR 14.425 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-
-B13 VOR Adaptation: PASS
-    CONST ablation           : start=-3.201 end=-8.488 target=1.0 converged=False
-    Pre-learning Baseline    : amp=0.54 mean=-0.47
-    Target Amp / Mean        : 2.00 / 0.00
-    Initial RMS Error        : 8.0066
-    Final RMS Error          : 4.3344
-    Error Reduction          : 45.86%
-    Init Output (amp/mean)   : 14.692 / -7.654
-    Final Output (amp/mean)  : 6.655 / -4.333
-    Output-Target Corr       : -0.487
-    Mean Slip (init/final)   : 8.007 / 4.334
-    PK[10] Row Change        : 1.403 (init norm 0.994, final 0.996)
-    Mechanism                : cf_signal = retinal slip at target PK, raw PK output as eye velocity
-    Criterion                : Reduction > 40%
-
-Benchmark 14: Saccade Adaptation
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-
-B14 Saccade Adaptation: PASS
-    Amplitude Increase       : 24.48%
-    Criterion                : Amplitude change >= 15%
-
-Benchmark 15: Reaching Adaptation (Force Field)
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-
-B15 Reaching Adaptation: PASS
-    Initial Error            : 2.60
-    Final Error              : 0.00
-    Error Reduction          : 100.00%
-    Criterion                : Reduction >= 70%
-
-Benchmark 16: Split-belt locomotion adaptation
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-
-B16 Split Belt: PASS
-    Initial Split Asym       : -6.54
-    Final Split Asym         : 1.33
-    Reduction                : 120.33%
-    Criterion                : Reduction > 50% in ~200 strides
-
-Benchmark 17: Posture and balance adaptation
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-  Golgi reservoir: SR 14.418 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
 Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
   delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
   Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
@@ -301,14 +33,14 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Global pontine pool: 512 neurons (Level 3)
   Fix 1: Positional encoding: 32 dims (pontine input: 288)
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-  Golgi reservoir: SR 14.434 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
-Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
-  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
-  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
-  Global pontine pool: 512 neurons (Level 3)
-  Fix 1: Positional encoding: 32 dims (pontine input: 288)
-  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
-  Golgi reservoir: SR 14.424 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+
+B2 PF-PC LTD: PASS
+    LTD Weight Motion        : 900.25%
+    Control (CF-Silent)      : 0.00%
+    Criterion                : LTD motion >= 15%, CF-Silent < 5%
+
+Benchmark 3: PF-PC LTP and bidirectional plasticity
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
 Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
   delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
   Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
@@ -316,15 +48,118 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 1: Positional encoding: 32 dims (pontine input: 288)
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
-B17 Posture & Balance: PASS
-    Initial Sway (median)    : -1.20
-    Final Sway (median)      : 1.06
-    Attenuation (median)     : 11.94%
-    Attenuation (all seeds)  : 54.11%, -22.33%, 11.94%, 4.07%, 38.44%
-    Seeds with atten >= 30%  : 2/5
-    Criterion                : At least 2 of 5 seeds with attenuation >= 30%, no severe hypermetria
+B3 PF-PC LTP: PASS
+    Init Row Norm            : 0.9987
+    LTD Dist From Init       : 1.0104
+    LTP Dist From Init       : 0.2485
+    Rel Increase             : 76.28%
+    Recovery Ratio           : 75.40%
+    Criterion                : Increase >= 10% & Recovery >= 50%
 
-Benchmark 18: Forward Internal Model (Kinematic Prediction)
+Benchmark 4: BAC Burst Amplification (Coincidence Detection)
+
+B4 BAC Bursting: PASS
+    Basal-only Output        : 0.0388
+    Apical-only Output       : 0.0004
+    Coincident Output        : 0.5918
+    Supralinear Ratio        : 15.11
+    Criterion                : Ratio > 1.20
+
+Benchmark 5: STDP at multiple cerebellar synapses
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+
+B5 Multi-synapse STDP: PASS
+    LTP Magnitude (all)      : 1.056508e-05
+    LTD Magnitude (all)      : -4.108885e-08
+    LTP Magnitude (active)   : 1.050714e-05
+    LTD Magnitude (active)   : -1.053068e-05
+    Pairings                 : 10
+    Criterion                : Pre-Post > 0, Post-Pre < 0 (on active synapses)
+
+Benchmark 6: DCN rebound firing (T-type Calcium)
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+
+B6 DCN Rebound Firing: PASS
+    Ratio (50ms)             : 21.55
+    Monotonic                : True
+    Criterion                : Ratio >= 1.50 for 50ms pulse & Monotonic
+
+Benchmark 7: Temporal processing via Golgi cell reservoir
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+  Golgi reservoir: SR 14.419 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+  Golgi reservoir: SR 14.419 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+  Golgi reservoir: SR 14.431 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+  Golgi reservoir: SR 14.432 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+  Golgi reservoir: SR 14.427 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
   Golgi reservoir: SR 14.427 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
 Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
   delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
@@ -333,14 +168,238 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 1: Positional encoding: 32 dims (pontine input: 288)
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
+B7 Temporal Processing: PASS
+    Accuracy (Normal, median): 73.08%
+    Accuracy (Ablated, median): 17.31%
+    Normal accs (per seed)   : 75.00%, 73.08%, 73.08%, 75.00%, 71.15%
+    Ablated accs (per seed)  : 19.23%, 21.15%, 13.46%, 17.31%, 13.46%
+    Criterion                : Median normal >= 70%, ablation drops >= 20%
+
+Benchmark 8: Network oscillations
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+
+B8 Network Oscillations: PASS
+    Peak Bin Power/Mean      : 6.99
+    Peak Theta Freq (Hz)     : 6.15
+    Band Avg Power/Mean (ref): 0.98
+    N Steps / Duration       : 1000 / 20.0s
+    Signal                   : _last_gc_for_purkinje.mean() (granule firing rate)
+    Criterion                : Peak theta-band (4-12Hz) bin >= 3x broadband mean
+
+Benchmark 9: Short-Term Synaptic Plasticity
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+
+B9 Short-Term Plasticity: PASS
+    MF PPR (20ms, matched)   : 1.22
+    PF PPR (20ms, matched)   : 1.11
+    MF Active Overlap        : 97.3% (440 cells)
+    PF Active Overlap        : 13.1% (321 cells)
+    Criterion                : MF PPR > 1.2 & PF PPR > 1.1 (matched-set)
+
+Benchmark 10: Nucleo-Olivary Inhibition
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+
+B10 Nucleo-Olivary Inhibition: PASS
+    CF Mag (NOI ON)          : 0.4688
+    CF Mag (NOI OFF)         : 0.9923
+    NOI Suppression          : 52.75%
+    DCN Rate Norm (ON)       : 17.8757
+    w_dcn_io Norm (ON)       : 8.0000
+    Criterion                : Suppression >= 10% at non-trivial DCN rate
+
+Benchmark 11: Classical Eyeblink Conditioning
+  Golgi reservoir: SR 14.430 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+
+B11 CEBC Conditioning: PASS
+    Acquisition (Start->End) : 10.92 -> 7.90
+    Extinction End           : 7.92
+    Reacquisition End        : 8.43
+    ISI (steps / ms)         : 15 / 300ms
+    Criterion                : Acq/Reacq > +0.5, Ext drops back to baseline
+
+Benchmark 12: Trace Eyeblink Conditioning
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+
+B12 Trace CEBC: PASS
+    Init CR amp              : 9.94
+    Final CR amp             : 6.80
+    Improvement              : 3.15
+    Trials                   : 300
+    Criterion                : Improvement > 0.50 across gap
+
+Benchmark 13: VOR Gain and Phase Adaptation
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+  Golgi reservoir: SR 14.415 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+
+B13 VOR Adaptation: PASS
+    CONST ablation           : start=-4.401 end=9.412 target=1.0 converged=False
+    Pre-learning Baseline    : amp=0.58 mean=-0.51
+    Target Amp / Mean        : 2.00 / 0.00
+    Initial RMS Error        : 10.9867
+    Final RMS Error          : 4.9710
+    Error Reduction          : 54.75%
+    Init Output (amp/mean)   : 28.791 / -10.913
+    Final Output (amp/mean)  : 6.545 / 4.972
+    Output-Target Corr       : -0.440
+    Mean Slip (init/final)   : 10.987 / 4.971
+    PK[10] Row Change        : 1.415 (init norm 1.001, final 1.001)
+    Mechanism                : cf_signal = retinal slip at target PK, raw PK output as eye velocity
+    Criterion                : Reduction > 40%
+
+Benchmark 14: Saccade Adaptation
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+
+B14 Saccade Adaptation: PASS
+    Amplitude Increase       : 19.41%
+    Criterion                : Amplitude change >= 15%
+
+Benchmark 15: Reaching Adaptation (Force Field)
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+
+B15 Reaching Adaptation: PASS
+    Initial Error            : 3.60
+    Final Error              : 0.11
+    Error Reduction          : 96.82%
+    Criterion                : Reduction >= 70%
+
+Benchmark 16: Split-belt locomotion adaptation
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+
+B16 Split Belt: PASS
+    Initial Split Asym       : 2.32
+    Final Split Asym         : 0.89
+    Reduction                : 61.63%
+    Criterion                : Reduction > 50% in ~200 strides
+
+Benchmark 17: Posture and balance adaptation
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+  Golgi reservoir: SR 14.419 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+  Golgi reservoir: SR 14.431 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+  Golgi reservoir: SR 14.427 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+
+B17 Posture & Balance: PASS
+    Initial Sway (median)    : -0.25
+    Final Sway (median)      : 0.89
+    Attenuation (median)     : 31.89%
+    Attenuation (all seeds)  : 100.00%, 31.03%, -30.98%, 100.00%, 31.89%
+    Seeds with atten >= 30%  : 4/5
+    Criterion                : At least 2 of 5 seeds with attenuation >= 30%, no severe hypermetria
+
+Benchmark 18: Forward Internal Model (Kinematic Prediction)
+  Golgi reservoir: SR 14.425 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+
 B18 Forward Model: PASS
-    Avg MSE (t+5)            : 17.1149
+    Avg MSE (t+5)            : 21.8820
     Lead (steps)             : 5
     Status                   : Untrained Baseline Check
     Criterion                : MSE < 5.0 (Stability)
 
 Benchmark 19: Inverse Internal Models (Kawato Feedback Error Learning)
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
 Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
   delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
   Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
@@ -349,12 +408,12 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B19 Inverse Model: PASS
-    Initial Tracking Err     : 1.2216
-    Final Tracking Err       : 0.0889
+    Initial Tracking Err     : 1.2128
+    Final Tracking Err       : 0.0540
     Criterion                : Tracking error <= 0.10 for 1Hz sinusoid
 
 Benchmark 20: Cancellation of self-generated sensory reafference
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
 Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
   delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
   Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
@@ -363,13 +422,14 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B20 Reafference: PASS
-    Init Reafference         : 3.8259
-    Final Reafference        : 0.7615
-    Reduction                : 80.10%
+    Init Reafference         : 5.9066
+    Final Reafference        : 0.4164
+    Reduction                : 92.95%
+    Plasticity path          : cf_signal (sparse, MLI-frozen)
     Criterion                : Cancel >= 70% predictable reafference
 
 Benchmark 21: Reward-based learning via climbing fibers
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
 Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
   delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
   Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
@@ -378,16 +438,16 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B21 Reward Learning (CF): PASS
-    Initial Reward           : 0.3897
-    Final Reward (median, last 50): 0.9453
-    Final Reward (mean, last 50): 0.9420
-    Final Action (last 20 mean): 2.38 vs 3.0
+    Initial Reward           : 0.3898
+    Final Reward (median, last 50): 0.9708
+    Final Reward (mean, last 50): 0.9672
+    Final Action (last 20 mean): 2.60 vs 3.0
     delta_lr (init/final)    : 0.0025 / 0.0006
     sigma (init/final)       : 0.5 / 0.1
     Criterion                : Median final reward >= 0.80
 
 Benchmark 22: Sequence learning and violation detection
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
 Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
   delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
   Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
@@ -396,15 +456,15 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B22 Sequence Learning: PASS
-    Prob Expected            : 0.0350
-    Prob Violation           : 0.0042
-    Elevation (absolute)     : 0.0308
-    Ratio Expected/Violation : 8.34x
-    Expected / Chance        : 8.97x uniform
+    Prob Expected            : 0.0210
+    Prob Violation           : 0.0033
+    Elevation (absolute)     : 0.0177
+    Ratio Expected/Violation : 6.28x
+    Expected / Chance        : 5.38x uniform
     Criterion                : Expected >= 3x chance AND expected/violation >= 3x
 
 Benchmark 23: Zebrin banding and microzone specialization
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
 Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
   delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
   Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
@@ -415,11 +475,18 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
 B23 Zebrin Zones: PASS
     Has Zebrin Spec          : True
     Z+ DCN Logit Diff        : 5.98 (Z+ > Z- means Z+ PK SS rate lower)
-    Z+ LTD vs Z-             : 3.78e-04 vs 7.85e-08
+    Z+ LTD vs Z-             : 6.53e-05 vs 2.30e-08
     Criterion                : Z+ lower PK firing (higher DCN), higher LTD sensitivity
 
 Benchmark 24: Temporal interval timing (Weber's law)
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
+  delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
+  Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
+  Global pontine pool: 512 neurons (Level 3)
+  Fix 1: Positional encoding: 32 dims (pontine input: 288)
+  Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
 Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
   delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
   Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
@@ -428,12 +495,14 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B24 Interval Timing: FAIL
-    Weber 400ms              : 0.824 (mu=254, sig=210)
-    Weber 1000ms             : 0.529 (mu=684, sig=362)
+    Weber 400ms              : 0.414 (mu=358, sig=149)
+    Weber 1000ms             : 0.465 (mu=677, sig=315)
+    target_pk (microzone)    : 32 (in [32, 64))
+    CF kernel (LTD/LTP)      : 1.0 / 0.5 at T / T±1
     Criterion                : Weber fraction <= 0.20 and invariant to interval
 
 Benchmark 25: Cognitive and working memory support
-  Golgi reservoir: SR 14.426 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
+  Golgi reservoir: SR 14.429 -> 0.95 (scale=0.066 if tuned, 327 inputs/GC)
 Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neurons, 256 Purkinje outputs
   delta_lr=0.02, gc_sparsity=0.15, golgi_alpha=0.005
   Compression ratio: 256:512 = 0.5:1 (x2 with sign-inversion)
@@ -442,8 +511,8 @@ Cerebellum: 16384 GCs (K=4 mossy: 2 local + 2 global), 512x2 dual pontine neuron
   Fix 2: Temporal reservoir: 16384 GCs, tau=[1-100ms], Golgi density=2%, SR=0.95
 
 B25 Working Memory: PASS
-    GC Act Load 1            : 0.0535
-    GC Act Load 3            : 0.0825
+    GC Act Load 1            : 0.0533
+    GC Act Load 3            : 0.0803
     GC Act Load 5            : 0.1034
     Criterion                : Monotonic increase in cerebellar activity with memory load
 
