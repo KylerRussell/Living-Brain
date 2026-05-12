@@ -1,8 +1,40 @@
+import torch
+import numpy as np
+from graph import DynamicGraph
+from engine_torch import PredictiveCodingEngine
+from geometric_constraint import get_geometric_target_weights, thermodynamic_sleep_phase
+
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+num_nodes = 2048 # Reduced for faster initialization in test
+num_modules = 10
+num_levels = 2
+
+print(f"Building DynamicGraph with {num_nodes} nodes on {device}...")
+graph = DynamicGraph(
+    num_nodes,
+    num_modules=num_modules,
+    num_levels=num_levels,
+)
+
+indices, values = graph.export_sparse_components()
+edge_index = torch.tensor(indices, dtype=torch.long)
+edge_weight = torch.tensor(values, dtype=torch.float32)
+
+actual_nodes = graph.num_nodes
+biases = torch.zeros(actual_nodes, dtype=torch.float32)
+taus = torch.ones(actual_nodes, dtype=torch.float32) * 20.0
+
+is_inhibitory = graph.is_inhibitory
+is_pv = graph.is_pv
+is_sst = graph.is_sst
+is_vip = graph.is_vip
+is_lts = getattr(graph, 'is_lts', None)
+
 mod_levels = np.array([m["level"] for m in graph.modules])
 
 print("Initializing Engine...")
 engine = PredictiveCodingEngine(
-    num_nodes=num_nodes,
+    num_nodes=actual_nodes,
     indices=edge_index.numpy(),
     values=edge_weight.numpy(),
     biases=biases.numpy(),

@@ -1,0 +1,22 @@
+Building DynamicGraph with 2048 nodes on cuda...
+CLS: 0 hippocampal modules, 10 neocortical modules
+Lateralization: 1 Broca (seq), 1 Wernicke (sem)
+Hierarchical graph: 19968 nodes, 5505813 edges, 10 modules across 2 levels
+  Level 0: 2 modules, avg size 154 nodes
+  Level 1: 8 modules, avg size 154 nodes
+Free-edge spectral radius tuned: 1.5563 -> 1.15
+Input boost: 0.77x (calibrated to 3.0x lateral RMS=0.0076)
+Edges: 1024 input-proj (2x, outside SR), 5504789 free (SR-tuned to 1.15)
+Scale-invariant E/I balancing (1/sqrt(K)) applied to 5504789 free edges.
+Weight magnitudes: input=0.0356, free=0.0049
+Applied hierarchical recurrent excitatory gradient (eta=0.68) to 65792 edges.
+Level 0 lateral edges: 250 made positive, fan-in normalized (avg fan-in=2)
+Bottom-up edges: 643 fan-in normalized (bounded, min_mag=0.01)
+PFA: 10240 independent feedback edges enabling Product Feedback Alignment.
+Initializing Engine...
+Initializing Geometric Constraint Field (600 nodes)...
+Prior shape: torch.Size([600, 600])
+Indices shape: torch.Size([600])
+Testing thermodynamic sleep phase...
+Geometric Error Correction applied. Tension: 0.324591
+Success!

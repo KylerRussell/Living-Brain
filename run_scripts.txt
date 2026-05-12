@@ -7,3 +7,5 @@ pkill -f micro_scale_diagnostics.py; PYTHONPATH=. /home/kyler/.miniconda3/envs/n
 test_pc_engine_simple.py Script:
 pkill -f test_pc_engine_simple.py; PYTHONPATH=. /home/kyler/.miniconda3/envs/ndcd_env/bin/python -u ndcd/test_pc_engine_simple.py > ndcd/logs/test_pc_engine_simple_log.txt 2>&1 & echo $!
 
+test_geometric_init.py Script:
+pkill -f test_geometric_init.py; PYTHONPATH=. /home/kyler/.miniconda3/envs/ndcd_env/bin/python -u ndcd/test_geometric_init.py > ndcd/logs/test_geometric_init_log.txt 2>&1 & echo $!
