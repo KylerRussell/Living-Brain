@@ -1624,7 +1624,20 @@ def cerebellar_forward(engine, cerebellum):
         # This is the INSTANTANEOUS base (temporal channel excluded): the fast
         # motor reflex is driven by the sparse readout only, not the slow
         # reservoir integral that feeds the classification/logit pathway.
-        cerebellum['_last_purkinje_output'] = purkinje_base.clone()
+        # EXCEPTION: phase-dependent motor tasks (VOR: sin input -> cos output)
+        # need the reservoir's phase-shifted basis in the motor output, because
+        # the instantaneous code is phase-locked to the input and cannot
+        # construct a 90-deg-shifted signal (offline best readout: 29% vs 89%
+        # RMS reduction). motor_temporal_mode (opt-in, default off) makes the
+        # motor output the PURE learned temporal channel: it tracks the
+        # zero-mean phase-shifted target directly, without the DC offset that
+        # the tonic rate + zebrin bias + instantaneous readout in purkinje_base
+        # would otherwise inject.
+        cerebellum['_last_purkinje_output'] = (
+            out_temporal.clone()
+            if cerebellum.get('motor_temporal_mode', False)
+            else purkinje_base.clone()
+        )
 
         # ==================================================================
         # FIX (a): Update heterogeneous PK eligibility traces
@@ -2103,7 +2116,9 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, 
     # remain pure sparse Option 2 and are unaffected. This matches the code's
     # principle that the CF *source* differentiates tasks.
     gt = cerebellum.get('_last_granule_temporal')
-    if gt is not None and 'purkinje_temporal_weights' in cerebellum and cf_signal is None:
+    _temporal_learn = (cf_signal is None
+                       or cerebellum.get('motor_temporal_mode', False))
+    if gt is not None and 'purkinje_temporal_weights' in cerebellum and _temporal_learn:
         t_lr = cerebellum.get('temporal_delta_lr', local_delta_lr)
         t_update = (-t_lr * cf_error.unsqueeze(1) * gt.unsqueeze(0) * io_gate).clamp(-0.05, 0.05)
         cerebellum['purkinje_temporal_weights'] += t_update

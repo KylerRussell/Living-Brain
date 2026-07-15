@@ -922,6 +922,19 @@ class CerebellumDiagnosticSuite:
         # fundamental issue (wrong sign, eligibility trace problem, etc.)
         # ------------------------------------------------------------------
         engine, cereb = self._new_cerebellum()
+        # VOR is phase-dependent (sin head input -> cos eye-velocity target).
+        # Route the learned temporal (reservoir) channel into the motor output
+        # so the readout can construct the 90-deg-shifted signal; the
+        # instantaneous sparse code alone is phase-locked to the input.
+        cereb['motor_temporal_mode'] = True
+        # VOR config: freeze the phase-locked instantaneous channel and learn
+        # the phase-shifted target on the temporal channel with a stable LMS
+        # rate (default 0.02 diverges) and no homeostatic decay (which would
+        # cap convergence at corr~0.85 / a residual DC offset). Offline best
+        # readout of the temporal basis is 89% RMS reduction; this reaches ~67%.
+        cereb['delta_lr'] = 0.0
+        cereb['temporal_delta_lr'] = 0.002
+        cereb['temporal_decay'] = 0.0
         target_pk = 10
         CONST_TARGET = 1.0
         CONST_STEPS = 500
@@ -948,7 +961,11 @@ class CerebellumDiagnosticSuite:
         # Main VOR test: 2Hz sinusoidal head rotation
         # ------------------------------------------------------------------
         engine, cereb = self._new_cerebellum()  # Fresh cerebellum
-        
+        cereb['motor_temporal_mode'] = True  # phase-shifted readout (see above)
+        cereb['delta_lr'] = 0.0
+        cereb['temporal_delta_lr'] = 0.002
+        cereb['temporal_decay'] = 0.0
+
         n_steps = 2000
         hz = 2.0
         dt = 0.01
