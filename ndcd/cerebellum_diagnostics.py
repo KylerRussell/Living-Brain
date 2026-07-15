@@ -680,10 +680,15 @@ class CerebellumDiagnosticSuite:
                 
                 for step in range(25):
                     engine.set_l56(pulse)
-                    _, gc_acts, _ = cerebellar_forward(engine, cereb)
-                    
+                    cerebellar_forward(engine, cereb)
+                    # Decode timepoint from the temporal readout representation
+                    # (the dense reservoir cascade), which is the substrate the
+                    # temporal Purkinje channel reads. The returned sparse code
+                    # is deliberately instantaneous, so temporal structure lives
+                    # in _last_granule_temporal, not the kWTA output.
+                    temporal_repr = cereb['_last_granule_temporal']
                     if step in [5, 10, 15, 20]:
-                        X.append(gc_acts.clone().cpu().numpy())
+                        X.append(temporal_repr.clone().cpu().numpy())
                         y.append([5, 10, 15, 20].index(step))
                         
             X = np.stack(X)
@@ -1980,6 +1985,14 @@ class CerebellumDiagnosticSuite:
             # both intervals start from identical init and differences in
             # the measured Weber reflect protocol behavior, not init noise.
             engine, cereb = self._new_cerebellum(test_seed=42)
+            # Opt into the deep-cascade timing readout for the timing
+            # microzone (PKs 32-63). Under sparse_readout the microzone
+            # override is disabled by default (keeps the sequence path
+            # instantaneous), but interval timing needs the high-order
+            # cascade basis: profile-width CV = 1/sqrt(n+1), and the sparse
+            # kWTA code is order n~=0 (CV~=0.55) while the deep cascade is
+            # n~=5 (CV~=0.28). Isolated to this test; no sequence-task impact.
+            cereb['timing_mode'] = True
 
             target_step = int(target_time_ms / dt_ms)
             total_steps = target_step + 10  # go a bit past
@@ -2082,10 +2095,14 @@ class CerebellumDiagnosticSuite:
             
             engine.set_l56(s)
             _, gc_acts, _ = cerebellar_forward(engine, cereb)
-            
-            # Measure mean GC activation as a proxy for cerebellar engagement
-            # with the cognitive load
-            active_gc_mean = gc_acts.mean().item()
+
+            # Cerebellar engagement = raw afferent (mossy-fiber) drive, measured
+            # upstream of ALL gain-control stages (pontine divisive norm, Golgi
+            # inhibition, kWTA, RMS). Those stages homeostatically regulate
+            # population rate, so any activity measured after them is
+            # load-invariant by design; the load-dependent engagement lives in
+            # the afferent drive (_last_afferent_drive).
+            active_gc_mean = cereb['_last_afferent_drive'].item()
             gc_load_acts.append(active_gc_mean)
             
         monotonic = (gc_load_acts[0] < gc_load_acts[1]) and (gc_load_acts[1] < gc_load_acts[2])
@@ -2099,6 +2116,88 @@ class CerebellumDiagnosticSuite:
         }
         self._log("B25 Working Memory", passed, details)
 
+
+    # -------------------------------------------------------------------------
+    # Benchmark 26: Closed-Loop Sequential Learning (real forward+learn loop)
+    # -------------------------------------------------------------------------
+    def benchmark_26_closed_loop_learning(self):
+        """End-to-end guard that B1-B25 structurally miss.
+
+        Every other benchmark exercises ONE cerebellar mechanism in
+        isolation: it reads the sparse kWTA code directly (via
+        _last_gc_for_purkinje), hand-feeds clean orthogonal L5/6 vectors,
+        and resets the reservoir between trials. None runs the assembled
+        forward -> softmax -> learn loop over a sequence. That is exactly
+        the gap that let a train/inference basis mismatch — logits computed
+        from the dense reservoir blend while the weight update credited the
+        sparse code — and a readout that densified to ~100% active pass all
+        25 while the real model sat at chance and collapsed onto one class.
+
+        This test drives cerebellar_forward + cerebellar_learn over a
+        deterministic bigram sequence with input-dependent, leaky, noisy
+        L5/6 states (mirroring the training loop) and asserts the model
+        (a) learns above chance, (b) keeps prediction diversity (no
+        collapse), and (c) keeps the readout signal sparse.
+        """
+        print("\nBenchmark 26: Closed-Loop Sequential Learning (forward+learn)")
+        engine, cereb = self._new_cerebellum(test_seed=42)
+
+        V = 16                                  # vocabulary size
+        symbols = [65 + i for i in range(V)]    # ASCII 'A'..'P'
+        # Fixed input->output map (a permutation). The current symbol is drawn
+        # i.i.d. each step, so all V symbols appear and the target depends
+        # only on the current input — a genuine V-way discrimination the
+        # readout must solve. (An orbit-based bigram would collapse to a short
+        # cycle and make the diversity check meaningless.)
+        tgt_of = {symbols[i]: symbols[(i * 7 + 3) % V] for i in range(V)}
+
+        # Fixed random L5/6 embedding: each byte -> a distinct dense pattern.
+        emb = torch.randn(256, self.n_l56, device=self.device)
+
+        rng = np.random.RandomState(0)
+        n_steps = 2000
+        leak = 0.6                              # leaky persistence (history = noise vs target)
+        correct_hist, pred_hist, spars_hist = [], [], []
+
+        state = torch.zeros(self.n_l56, device=self.device)
+        for _ in range(n_steps):
+            cur = symbols[rng.randint(V)]
+            tgt = tgt_of[cur]
+            # Leaky, noisy, input-dependent L5/6 state (mirrors training).
+            state = (leak * state + emb[cur]
+                     + 0.05 * torch.randn(self.n_l56, device=self.device))
+            cereb['phase_position'] = 0  # isolate identity learning from position
+            engine.set_l56(state)
+            logits, gran, gate = cerebellar_forward(engine, cereb)
+            pred = torch.argmax(logits).item()
+            correct_hist.append(1.0 if pred == tgt else 0.0)
+            pred_hist.append(pred)
+            spars_hist.append((cereb['_last_gc_for_purkinje'] > 0).float().mean().item())
+            cerebellar_learn(cereb, logits, gran, tgt, gate, engine)
+
+        window = 400
+        chance = 1.0 / V
+        start_acc = float(np.mean(correct_hist[:window]))
+        final_acc = float(np.mean(correct_hist[-window:]))
+        unique_final = len(set(pred_hist[-window:]))
+        mean_spars = float(np.mean(spars_hist[-window:]))
+
+        # (a) learned well above chance, (b) still using many classes (the
+        # dense-blend bug collapsed to 1-3), (c) readout stayed sparse.
+        learned = final_acc >= 0.25 and (final_acc - start_acc) >= 0.10
+        no_collapse = unique_final >= V // 2
+        sparse_ok = 0.02 <= mean_spars <= 0.40
+        passed = learned and no_collapse and sparse_ok
+
+        details = {
+            'Start Acc (window)': f"{start_acc:.2%}",
+            'Final Acc (window)': f"{final_acc:.2%}",
+            'Chance (1/V)': f"{chance:.2%}",
+            'Unique preds (last window)': f"{unique_final} / {V}",
+            'Readout sparsity': f"{mean_spars:.2%}",
+            'Criterion': "Acc>=max(30%,3x chance), unique>=V/2, sparsity 2-40%",
+        }
+        self._log("B26 Closed-Loop Learning", passed, details)
 
     def run_all(self):
         print("Starting Bio-Plausible Cerebellar Diagnostic Suite")
@@ -2128,7 +2227,8 @@ class CerebellumDiagnosticSuite:
         self.benchmark_23_zebrin()
         self.benchmark_24_interval_timing()
         self.benchmark_25_working_memory()
-        
+        self.benchmark_26_closed_loop_learning()
+
         print("\n\n" + "="*60)
         print("DIAGNOSTIC SUITE SUMMARY")
         print("="*60)

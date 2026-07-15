@@ -920,6 +920,18 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
         'mossy_weights': mossy_weights,
         'mossy_weights_baseline_norm': mossy_weights.norm().item(),
         'purkinje_weights': purkinje_weights,
+        # --- Functional segregation: separate temporal readout channel ---
+        # A second Purkinje weight matrix over the DENSE slow-cascade signal
+        # (reservoir stages 1-3), learned by each cell's OWN climbing-fiber
+        # error. Zero-init means the model starts as pure sparse Option 2
+        # (instantaneous readout, validated sequence learning). Byte-prediction
+        # cells keep these near zero because temporal history does not predict
+        # the next byte; timing/temporal cells (B7/B24) grow them to read the
+        # reservoir. This decouples sequence accuracy from temporal tasks
+        # WITHOUT a global constant — the CF error decides per cell.
+        'purkinje_temporal_weights': torch.zeros(256, n_granule, device=device),
+        'temporal_delta_lr': base_lr,     # LR for the temporal channel
+        'temporal_decay': 1e-3,           # homeostatic relaxation of unused temporal weights
         'purkinje_tonic_rate': 0.5,
         'purkinje_intrinsic_excitability': torch.ones(256, device=device),
         'lateral_weights': torch.zeros(256, 256, device=device),
@@ -928,6 +940,20 @@ def add_cerebellar_module(graph, num_nodes, n_granule=16384, sparsity=0.05, devi
         'golgi_alpha': 0.005,   # Softened from 0.01 for broader early feature discovery
         'delta_lr': base_lr,  # Dense CE gradient: target row ~0.7, non-target ~0.004. Per-synapse LTD ≈ 0.02*0.7*elig ≈ 4e-3.
         'gc_target_sparsity': 0.15,
+        # --- Option 2: sparse-aligned Purkinje readout ---
+        # When True the Purkinje/DCN readout consumes the SAME sparse kWTA
+        # granule code that the learning path credits, instead of the dense
+        # reservoir blend. This keeps readout and plasticity on one basis
+        # (bio: a parallel fiber is read out and depressed at the same
+        # synapse) and preserves Marr-Albus sparse coding. The dense blend
+        # densified the code to 100% active and drove class collapse in real
+        # sequential training (see cerebellum_diagnostics closed-loop test).
+        'sparse_readout': True,
+        # Weight of slow cascade context (reservoir stages 2+3) folded into
+        # the ACTIVE granule cells' magnitudes so temporal tasks keep a
+        # readout path without densifying the support or adding a recurrent
+        # loop. 0.0 = pure instantaneous sparse code. Tunable; see B7/B24.
+        'temporal_ctx_weight': 0.0,
         'calcium_threshold': torch.ones(256, device=device) * 0.5,
         'gc_active_mask': torch.zeros(n_granule, device=device),
         'error_ema': 0.0,
@@ -1103,6 +1129,14 @@ def cerebellar_forward(engine, cerebellum):
         # Concatenate: [pos; neg] -> 1024-dim representation
         pontine_full = torch.cat([pontine_pos, pontine_neg], dim=0)
 
+        # Afferent (mossy-fiber) drive BEFORE divisive normalization. This is
+        # the load-monotonic "cerebellar engagement" measure: every downstream
+        # stage (pontine divisive norm, Golgi divisive inhibition, kWTA, RMS)
+        # homeostatically regulates population rate, so activity measured after
+        # them is load-invariant by design. Working-memory load (B25) must be
+        # read from the raw afferent drive, upstream of gain control.
+        cerebellum['_last_afferent_drive'] = pontine_full.abs().mean().detach()
+
         # Divisive normalization (Carandini & Heeger, 2012)
         sigma_sq = pontine_full.pow(2).mean() + 0.01
         pontine_acts_raw = pontine_full / (sigma_sq.sqrt() + 0.1)
@@ -1206,6 +1240,12 @@ def cerebellar_forward(engine, cerebellum):
 
         # Divisive Golgi inhibition (stronger gain for K=4 sparse inputs)
         population_input = torch.relu(granule_pre).mean()
+        # Total excitatory granule drive BEFORE divisive/RMS normalization.
+        # This is the load-sensitive "cerebellar engagement" measure: the
+        # sparse readout's post-normalization mean is load-invariant by
+        # construction (kWTA fixes the count, RMS fixes the scale), so B25
+        # working-memory load must be read here, upstream of normalization.
+        cerebellum['_last_gc_drive'] = population_input.detach()
         cerebellum['golgi_inhibition_ema'] = (
             (1 - cerebellum['golgi_alpha']) * cerebellum['golgi_inhibition_ema']
             + cerebellum['golgi_alpha'] * population_input
@@ -1219,12 +1259,29 @@ def cerebellar_forward(engine, cerebellum):
         # kWTA enforces the hard ceiling
         k_percent = 0.15
         k_winners = max(1, int(granule_pre.size(0) * k_percent))
-        if k_winners < granule_acts_raw.size(0):
-            topk_vals, topk_indices = torch.topk(granule_acts_raw, k_winners)
-            granule_acts = torch.zeros_like(granule_acts_raw)
-            granule_acts.scatter_(0, topk_indices, topk_vals)
+        # Option 2 temporal routing: in sparse mode, bias winner SELECTION by
+        # slow cascade context (previous-step reservoir stages 2+3) so the
+        # sparse winning set EVOLVES over a sustained interval, carrying
+        # temporal information into the sparse code itself rather than via a
+        # dense readout blend. The reservoir integration below still runs on
+        # the pure feedforward granule_acts_raw, so no new recurrent loop is
+        # created. temporal_ctx_weight=0.0 makes sel_score == granule_acts_raw
+        # (identical to the pure instantaneous sparse code).
+        tcw = cerebellum.get('temporal_ctx_weight', 0.0)
+        if cerebellum.get('sparse_readout', False) and tcw > 0.0:
+            sel_score = granule_acts_raw + tcw * torch.relu(
+                cerebellum['reservoir_state_2'] + cerebellum['reservoir_state_3']
+            )
         else:
-            granule_acts = granule_acts_raw
+            sel_score = granule_acts_raw
+        if k_winners < sel_score.size(0):
+            topk_vals, topk_indices = torch.topk(sel_score, k_winners)
+            granule_acts = torch.zeros_like(granule_acts_raw)
+            # Winners carry their (temporally-augmented) sel_score value so the
+            # readout sees the temporal signal, not just a shifted support.
+            granule_acts.scatter_(0, topk_indices, sel_score[topk_indices])
+        else:
+            granule_acts = sel_score
 
         # ==================================================================
         # FIX 2 (continued): Update reservoir state with leaky integration
@@ -1363,6 +1420,41 @@ def cerebellar_forward(engine, cerebellum):
         )
         granule_eff = pf_u_next * pf_x_next * granule_blend
 
+        # --- Option 2: sparse-aligned readout signal ---
+        # granule_readout is what the Purkinje/DCN readout actually consumes.
+        # In sparse mode it is the sparse kWTA code — which already carries
+        # slow-cascade temporal context via the selection routing above (see
+        # sel_score) — matching the vector the learning path credits. In dense
+        # mode it falls back to the reservoir blend granule_eff.
+        if cerebellum.get('sparse_readout', False):
+            sparse_code = granule_acts
+            granule_readout = pf_u_next * pf_x_next * sparse_code
+        else:
+            sparse_code = granule_acts
+            granule_readout = granule_eff
+
+        # Temporal readout channel (functional segregation). The dense slow
+        # cascade (reservoir stages 1-3) is the temporal substrate; it is read
+        # out through its OWN learnable weights (purkinje_temporal_weights),
+        # separate from the instantaneous sparse channel. Each PK learns how
+        # much of it to use via its own CF error, so the sequence task keeps an
+        # instantaneous readout while timing/temporal tasks recruit history.
+        granule_temporal = pf_u_next * pf_x_next * (
+            cerebellum['reservoir_state']
+            + cerebellum['reservoir_state_2']
+            + cerebellum['reservoir_state_3']
+        )
+        # Scale-match the temporal channel to the sparse channel so its
+        # contribution to the (un-softmaxed) raw Purkinje output is bounded and
+        # comparable. Without this the dense cascade injects a large, uncontrolled
+        # term that swamps raw-output regression readouts (B13 VOR, B17 posture).
+        # The pattern across cells — which carries the temporal information — is
+        # preserved; only the overall magnitude is normalized.
+        gt_norm = granule_temporal.norm().clamp(min=1e-6)
+        gr_norm = granule_readout.norm().clamp(min=1e-6)
+        granule_temporal = granule_temporal * (gr_norm / gt_norm)
+        cerebellum['_last_granule_temporal'] = granule_temporal
+
         # Microzone-specific blend. Defaults (s1=0, s2=0, s3=1.6) define
         # the production-validated B24 timing optimum — pure s3 with total
         # magnitude matching the global blend's 1.6. The _micro_blend_active
@@ -1379,7 +1471,20 @@ def cerebellar_forward(engine, cerebellum):
             or _MICRO_S2_WEIGHT != 0.4
             or _MICRO_S3_WEIGHT != 0.4
         )
-        if m_micro is not None and m_micro.any() and _micro_blend_active:
+        # Normally disabled under sparse_readout (Option 2): the microzone
+        # override injects a dense cascade blend for timing PKs, which would
+        # reintroduce a dense basis and desync it from the sparse learning
+        # path for the sequence task. But timing tasks (B24) explicitly need
+        # the high-order deep-cascade basis (n~=5, CV~=0.28) that the sparse
+        # kWTA code (n~=0, CV~=0.55) cannot provide — CV=1/sqrt(n+1). So a
+        # task opts in via timing_mode, which re-enables the deep-cascade
+        # readout for the timing microzone ONLY. Isolated to PKs 32-63 and to
+        # cf_signal timing tasks; the sequence path (timing_mode=False) is
+        # unaffected. See researcher analysis: CV=1/sqrt(n+1) is the limit.
+        _timing_readout = (not cerebellum.get('sparse_readout', False)
+                           or cerebellum.get('timing_mode', False))
+        if (m_micro is not None and m_micro.any() and _micro_blend_active
+                and _timing_readout):
             granule_blend_micro = (
                 0.2 * granule_acts
                 + _MICRO_S1_WEIGHT * cerebellum['reservoir_state']
@@ -1412,12 +1517,20 @@ def cerebellar_forward(engine, cerebellum):
             granule_blend_micro = None
             granule_eff_micro = None
 
-        # Purkinje readout with tonic baseline
-        purkinje_output = cerebellum['purkinje_weights'] @ granule_eff
+        # Purkinje readout with tonic baseline. Two channels: the instantaneous
+        # sparse channel (purkinje_base) plus the learned temporal channel
+        # (zero at init, so identical to pure sparse Option 2 until learning
+        # recruits it). The temporal channel feeds the CLASSIFICATION/logit
+        # pathway only; the raw motor-reflex output (_last_purkinje_output,
+        # read by regression tasks like B13 VOR) stays purely instantaneous,
+        # since a fast reflex should not carry the slow reservoir integral.
+        purkinje_base = cerebellum['purkinje_weights'] @ granule_readout
         if granule_eff_micro is not None:
-            purkinje_output[m_micro] = (
+            purkinje_base[m_micro] = (
                 cerebellum['purkinje_weights'][m_micro] @ granule_eff_micro
             )
+        out_temporal = cerebellum['purkinje_temporal_weights'] @ granule_temporal
+        purkinje_output = purkinje_base + out_temporal
         
         # NEW (T23): Zebrin baseline SS firing modulation
         if 'zebrin_z_plus' in cerebellum:
@@ -1426,7 +1539,7 @@ def cerebellar_forward(engine, cerebellum):
             purkinje_output = purkinje_output + zebrin_bias
         
         # Consolidation: Combine fast (Purkinje) and slow (DCN) pathways
-        dcn_output = cerebellum.get('dcn_weights', 0.0) @ granule_eff
+        dcn_output = cerebellum.get('dcn_weights', 0.0) @ granule_readout
 
         # ==================================================================
         # FIX 6: DCN Rebound Firing (T-type Calcium)
@@ -1492,7 +1605,12 @@ def cerebellar_forward(engine, cerebellum):
 
         # Store for learning
         cerebellum['gc_active_mask'] = (granule_acts > 0).float()
-        cerebellum['_last_gc_for_purkinje'] = granule_acts
+        # In sparse mode the delta-w path credits exactly the sparse code the
+        # readout consumes (identical to granule_acts when temporal_ctx_weight
+        # is 0). In dense mode this stays the pure kWTA pattern as before.
+        cerebellum['_last_gc_for_purkinje'] = (
+            sparse_code if cerebellum.get('sparse_readout', False) else granule_acts
+        )
         cerebellum['_last_granule_blend'] = granule_blend  # blended signal seen by PK readout
         cerebellum['_last_pontine_acts'] = pontine_acts
         cerebellum['_last_pontine_acts_raw'] = pontine_full  # Full dual-pathway
@@ -1503,7 +1621,10 @@ def cerebellar_forward(engine, cerebellum):
         # motor pathway. Tests measuring PK-driven motor output (B13 VOR,
         # and any future regression-mode motor test) should use this value
         # instead of the softmax-normalized `logits` vector.
-        cerebellum['_last_purkinje_output'] = purkinje_output.clone()
+        # This is the INSTANTANEOUS base (temporal channel excluded): the fast
+        # motor reflex is driven by the sparse readout only, not the slow
+        # reservoir integral that feeds the classification/logit pathway.
+        cerebellum['_last_purkinje_output'] = purkinje_base.clone()
 
         # ==================================================================
         # FIX (a): Update heterogeneous PK eligibility traces
@@ -1570,7 +1691,10 @@ def cerebellar_forward(engine, cerebellum):
         # motor tests can flip back to the kWTA-only driver if needed.
         # Default True for the sequence-learning task.
         # ==================================================================
-        if cerebellum.get('use_blend_eligibility', True):
+        if cerebellum.get('sparse_readout', False):
+            # Credit exactly the sparse code the readout consumes (Option 2).
+            ga_source = sparse_code
+        elif cerebellum.get('use_blend_eligibility', True):
             ga_source = granule_blend / 1.8
         else:
             ga_source = granule_acts
@@ -1598,10 +1722,11 @@ def cerebellar_forward(engine, cerebellum):
 
         # Gate for diagnostics only
         gate_value = torch.tensor(1.0, device=logits.device)
-        # Return granule_blend (what Purkinje actually sees) so diagnostics
-        # observe temporal dynamics. Learning path still uses granule_acts
-        # internally via cerebellum['_last_gc_for_purkinje'].
-        return logits, granule_blend, gate_value
+        # Return the signal the Purkinje readout actually consumes so callers
+        # and diagnostics observe the same basis the model learns from. In
+        # sparse mode that is the sparse code; in dense mode, granule_blend.
+        readout_return = sparse_code if cerebellum.get('sparse_readout', False) else granule_blend
+        return logits, readout_return, gate_value
 
 
 def prune_and_rewire_output(engine, prune_ratio=0.05):
@@ -1960,6 +2085,33 @@ def cerebellar_learn(cerebellum, logits, granule_acts, target_byte, gate_value, 
         ltd_update[m] = upd_m
 
     cerebellum['purkinje_weights'] += ltd_update
+
+    # --- Temporal readout channel update (functional segregation) ---
+    # Same CF error and IO gate as the sparse channel, but credited to the
+    # dense slow-cascade signal through the SEPARATE temporal weight matrix.
+    # Sign matches the sparse channel (PK inhibits DCN, so LTD raises a logit).
+    # Each PK learns its own temporal gain: byte-prediction cells see no stable
+    # temporal-vs-target correlation and are pulled back toward zero by the
+    # homeostatic decay, keeping their readout instantaneous; timing/temporal
+    # cells accumulate a stable map of the reservoir cascade. This is what lets
+    # sequence accuracy and the temporal diagnostics BOTH hold, with no global
+    # constant deciding the mix.
+    # Gated to the dense-CE (classification/predictive) pathway only. Tasks
+    # that supply an explicit sparse cf_signal (motor regression: B13 VOR,
+    # B17-style force; reward RPE: B21; timing kernels: B24) do NOT recruit the
+    # temporal channel — its weights stay at their zero init, so those tasks
+    # remain pure sparse Option 2 and are unaffected. This matches the code's
+    # principle that the CF *source* differentiates tasks.
+    gt = cerebellum.get('_last_granule_temporal')
+    if gt is not None and 'purkinje_temporal_weights' in cerebellum and cf_signal is None:
+        t_lr = cerebellum.get('temporal_delta_lr', local_delta_lr)
+        t_update = (-t_lr * cf_error.unsqueeze(1) * gt.unsqueeze(0) * io_gate).clamp(-0.05, 0.05)
+        cerebellum['purkinje_temporal_weights'] += t_update
+        # Homeostatic relaxation: unused temporal weights decay toward zero.
+        t_decay = cerebellum.get('temporal_decay', 0.0)
+        if t_decay > 0.0:
+            cerebellum['purkinje_temporal_weights'] *= (1.0 - t_decay)
+
     # Diagnostic: expose what the learning signal and gate looked like
     # after all modulations (NOI, IO gate, probe, etc). B21 and future
     # tests that fail on mechanism-interaction issues can read these to
